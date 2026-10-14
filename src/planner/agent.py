@@ -308,11 +308,14 @@ async def transcribe(audio_path: str) -> str:
     settings = get_settings()
     if not settings.stt_base_url:
         raise RuntimeError("STT_BASE_URL is not configured")
+    headers = {}
+    if settings.stt_api_key:
+        headers["Authorization"] = f"Bearer {settings.stt_api_key}"
     async with httpx.AsyncClient(timeout=120) as client:
         with open(audio_path, "rb") as audio:
             response = await client.post(
                 f"{settings.stt_base_url.rstrip('/')}/audio/transcriptions",
-                headers={"Authorization": f"Bearer {settings.stt_api_key}"},
+                headers=headers,
                 files={"file": audio},
                 data={"model": settings.stt_model},
             )

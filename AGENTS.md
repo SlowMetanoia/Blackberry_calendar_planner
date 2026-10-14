@@ -24,6 +24,12 @@ Use Python 4-space indentation, type hints, and small functions. Prefer `snake_c
 
 Follow the project’s stated TDD workflow: write a failing test first, implement the simplest behavior, then refactor. Use pytest; name files `test_*.py`, functions `test_<behavior>`, and fixtures for shared setup. Cover CRUD behavior, ambiguous voice requests, and tool/integration boundaries. Keep external services (speech recognition, calendars, maps, PostgreSQL) behind interfaces and mock them in unit tests.
 
+## Todo Plans
+
+Store implementation plans in `todo/` as self-contained Markdown files. Each plan must include the user request, the relevant repository and conversation context available before the plan was written, implementation steps, acceptance criteria, verification commands, and the expected final report with test results.
+
+Execute plans from `todo/` one at a time. Do not begin another todo plan until the current plan has been implemented and verified. After a plan is fully completed, delete its file from `todo/`. If work is blocked or incomplete, keep the plan in place and record the remaining work in it rather than deleting it. The general `BACKLOG.md` is for deferred ideas and is not an executable todo queue.
+
 ## Commit & Pull Request Guidelines
 
 There is no Git history yet, so no existing commit convention can be inferred. Use short, imperative subjects (for example, `Add task CRUD endpoint`) and make commits represent meaningful progress; do not add the agent as an author. Pull requests should explain the behavior changed, link a relevant issue or plan item, list tests run, and include API examples or screenshots when the interface changes.

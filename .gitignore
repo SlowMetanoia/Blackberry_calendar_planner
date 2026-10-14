@@ -12,6 +12,8 @@ __pycache__/
 build/
 dist/
 .venv/
+.venv-gigaam/
+.gigaam-cache/
 venv/
 
 # Python tooling and test output

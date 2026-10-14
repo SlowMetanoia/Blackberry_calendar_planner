@@ -1,4 +1,5 @@
 from datetime import datetime
+from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -22,6 +23,42 @@ async def test_agent_reports_missing_llm_configuration(monkeypatch) -> None:
     result = await run_agent("создай задачу")
     assert result.state == "needs_clarification"
     assert "LLM" in result.result
+
+
+@pytest.mark.asyncio
+async def test_transcribe_omits_authorization_for_empty_api_key(monkeypatch, tmp_path) -> None:
+    captured: dict = {}
+
+    class FakeResponse:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict[str, str]:
+            return {"text": "распознано"}
+
+    class FakeClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def post(self, _url, **kwargs):
+            captured.update(kwargs)
+            return FakeResponse()
+
+    settings = SimpleNamespace(
+        stt_base_url="http://stt.test/v1",
+        stt_api_key="",
+        stt_model="gigaam-v3-e2e-rnnt",
+    )
+    audio_path = tmp_path / "message.webm"
+    audio_path.write_bytes(b"audio")
+    monkeypatch.setattr(agent, "get_settings", lambda: settings)
+    monkeypatch.setattr(agent.httpx, "AsyncClient", lambda **_kwargs: FakeClient())
+
+    assert await agent.transcribe(str(audio_path)) == "распознано"
+    assert "Authorization" not in captured["headers"]
 
 
 def test_decision_envelope_rejects_free_text() -> None:

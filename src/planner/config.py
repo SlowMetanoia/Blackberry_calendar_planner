@@ -19,7 +19,7 @@ class Settings(BaseSettings):
     llm_max_tokens: int = 2048
     stt_base_url: str | None = None
     stt_api_key: str | None = None
-    stt_model: str = "whisper-1"
+    stt_model: str = "gigaam-v3-e2e-rnnt"
     create_auto_confirm_seconds: float = 15
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")

@@ -32,6 +32,7 @@ npm --prefix web run build
 Compose — `http://host.docker.internal:1234`. API проверяет `/v1/models` при старте и
 не запускается, если `LLM_MODEL=qwen/qwen3.8-27b` недоступна. Reasoning для
 command interpreter отключается через `LLM_REASONING_EFFORT=none`.
+Локальный speech-to-text на GigaAM настраивается по инструкции [GIGAAM.md](GIGAAM.md).
 Секреты хранятся только в `.env`; файл не должен попадать в Git.
 
 Чтения агента выполняются сразу. Изменения возвращаются как план через `/agent/plans/{plan_id}`;
