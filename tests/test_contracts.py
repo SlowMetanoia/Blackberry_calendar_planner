@@ -27,3 +27,8 @@ def test_plan_endpoints_exist() -> None:
 def test_timezone_endpoint_exists() -> None:
     routes = {(route.path, method) for route in app.routes for method in (route.methods or ())}
     assert ("/users/me/timezone", "PUT") in routes
+
+
+def test_conversation_list_endpoint_exists() -> None:
+    routes = {(route.path, method) for route in app.routes for method in (route.methods or ())}
+    assert ("/agent/conversations", "GET") in routes

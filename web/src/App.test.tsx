@@ -1,20 +1,23 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import App, { PlanCard } from "./App";
+import App, { MessageExchange, PlanCard, ReadCard } from "./App";
 import * as api from "./api";
-import type { AgentMessage, Plan } from "./types";
+import type { AgentMessage, ConversationSummary, Plan } from "./types";
 
 vi.mock("./api", async () => {
   const actual = await vi.importActual<typeof import("./api")>("./api");
-  return { ...actual, request: vi.fn(), getMessage: vi.fn(), getPlan: vi.fn(), getHistory: vi.fn() };
+  return { ...actual, request: vi.fn(), getMessage: vi.fn(), getPlan: vi.fn(), getHistory: vi.fn(), getConversations: vi.fn() };
 });
 
 describe("planner chat", () => {
   afterEach(cleanup);
   beforeEach(() => {
     sessionStorage.clear(); vi.clearAllMocks();
-    vi.mocked(api.getHistory).mockResolvedValue({items:[], total:0, limit:50, offset:0});
+    vi.mocked(api.getHistory).mockResolvedValue({items:[], total:0, limit:100, offset:0});
+    vi.mocked(api.getConversations).mockResolvedValue({items:[], total:0, limit:100, offset:0});
+    Element.prototype.scrollIntoView = vi.fn();
+    Element.prototype.scrollTo = vi.fn();
   });
 
   it("logs in and opens the chat", async () => {
@@ -31,7 +34,7 @@ describe("planner chat", () => {
     }));
   });
 
-  it("synchronizes timezone for a restored session", async () => {
+  it("synchronizes timezone for an authenticated session", async () => {
     sessionStorage.setItem("planner-token", "token");
     vi.mocked(api.request).mockResolvedValue({timezone:"UTC"});
     render(<App />);
@@ -51,6 +54,8 @@ describe("planner chat", () => {
     await userEvent.type(screen.getByLabelText("Сообщение"), "Мои задачи");
     await userEvent.click(screen.getByLabelText("Отправить"));
     expect(await screen.findByText("Задач нет")).toBeInTheDocument();
+    await waitFor(()=>expect(Element.prototype.scrollTo).toHaveBeenCalled());
+    expect(Element.prototype.scrollIntoView).not.toHaveBeenCalled();
   });
 
   it("starts and stops push-to-talk recording", async () => {
@@ -71,30 +76,80 @@ describe("planner chat", () => {
 
   it("starts a new conversation after context overflow", async () => {
     sessionStorage.setItem("planner-token", "token");
-    sessionStorage.setItem("planner-conversation", "full-conversation");
     vi.mocked(api.request).mockResolvedValue({timezone:"Europe/Moscow"});
+    vi.mocked(api.getConversations).mockResolvedValue({
+      items:[{id:"full-conversation",preview:"Продолжим",created_at:"2026-10-14T09:00:00Z",last_activity_at:"2026-10-14T09:00:00Z"}],
+      total:1,limit:100,offset:0,
+    });
     vi.mocked(api.getHistory).mockResolvedValue({
       items:[{id:"m1",conversation_id:"full-conversation",sequence:1,input_text:"Продолжим",status:"needs_clarification",reply:"Начните новый диалог",reads:[],plan_id:null,error:null,requires_new_conversation:true,created_at:"2026"}],
-      total:1,limit:50,offset:0,
+      total:1,limit:100,offset:0,
     });
     render(<App />);
+    await userEvent.click(await screen.findByRole("button", {name:/Продолжим/}));
     const button = await screen.findByRole("button", {name:"Начать новый диалог"});
     await userEvent.click(button);
-    expect(sessionStorage.getItem("planner-conversation")).toBeNull();
     expect(screen.getByText("Начните с простой просьбы")).toBeInTheDocument();
   });
 
-  it("renders a timestamp for both sides of an exchange", async () => {
-    sessionStorage.setItem("planner-token", "token");
+  it("keeps assistant time inside the bubble at its lower-left hook", () => {
     const createdAt = new Date();
     createdAt.setMinutes(7, 0, 0);
-    vi.mocked(api.getHistory).mockResolvedValue({
-      items:[{id:"m1",conversation_id:"c1",sequence:1,input_text:"Привет",status:"completed",reply:"Здравствуйте",reads:[],plan_id:null,error:null,created_at:createdAt.toISOString()}],
-      total:1,limit:50,offset:0,
-    });
-    sessionStorage.setItem("planner-conversation", "c1");
+    const message:AgentMessage = {id:"m1",conversation_id:"c1",sequence:1,input_text:"Привет",status:"completed",reply:"Здравствуйте",reads:[],plan_id:null,error:null,created_at:createdAt.toISOString()};
+    render(<MessageExchange message={message} plans={{}} command={vi.fn()} startNewConversation={vi.fn()} />);
+    const times = screen.getAllByText(/:07$/);
+    expect(times).toHaveLength(2);
+    expect(times[1]).toHaveClass("bot-time");
+    expect(times[1].closest(".bot")).toBeInTheDocument();
+  });
+
+  it("starts blank and opens a saved session from the sidebar with its plans", async () => {
+    sessionStorage.setItem("planner-token", "token");
+    sessionStorage.setItem("planner-conversation", "must-not-restore");
+    const conversation:ConversationSummary = {id:"c1",preview:"Первая фраза",created_at:"2026-10-13T08:00:00Z",last_activity_at:"2026-10-14T09:00:00Z"};
+    const historical:AgentMessage = {id:"m1",conversation_id:"c1",sequence:1,input_text:"Первая фраза",status:"needs_confirmation",reply:"План готов",reads:[],plan_id:"p1",error:null,created_at:"2026-10-13T08:00:00Z"};
+    const plan:Plan = {id:"p1",status:"pending",expires_at:null,actions:[]};
+    vi.mocked(api.getConversations).mockResolvedValue({items:[conversation],total:1,limit:100,offset:0});
+    vi.mocked(api.getHistory).mockResolvedValue({items:[historical],total:1,limit:100,offset:0});
+    vi.mocked(api.getPlan).mockResolvedValue(plan);
     render(<App />);
-    expect(await screen.findAllByText(/:07$/)).toHaveLength(2);
+    expect(await screen.findByText("Начните с простой просьбы")).toBeInTheDocument();
+    expect(api.getHistory).not.toHaveBeenCalled();
+    await userEvent.click(screen.getByRole("button", {name:/Первая фраза/}));
+    expect(await screen.findByText("План готов")).toBeInTheDocument();
+    await waitFor(()=>expect(api.getPlan).toHaveBeenCalledWith("p1"));
+  });
+
+  it("does not think about audio before transcription becomes text", () => {
+    const queued:AgentMessage = {id:"m1",conversation_id:"c1",sequence:1,input_text:null,status:"transcribing",reply:null,reads:[],plan_id:null,error:null,created_at:"2026-10-14T09:00:00Z"};
+    const view = render(<MessageExchange message={queued} plans={{}} command={vi.fn()} startNewConversation={vi.fn()} />);
+    expect(screen.getByText("Распознаю…")).toBeInTheDocument();
+    expect(screen.queryByText("Думаю…")).not.toBeInTheDocument();
+    view.rerender(<MessageExchange message={{...queued,input_text:"Распознанный текст",status:"processing"}} plans={{}} command={vi.fn()} startNewConversation={vi.fn()} />);
+    expect(screen.getByText("Распознанный текст")).toBeInTheDocument();
+    expect(screen.getByText("Думаю…")).toBeInTheDocument();
+  });
+
+  it("renders a safe transcription failure without a thinking state", () => {
+    const failed:AgentMessage = {
+      id:"m1",conversation_id:"c1",sequence:1,input_text:null,status:"failed",reply:null,
+      reads:[],plan_id:null,
+      error:"Не удалось связаться с сервисом распознавания речи. Проверьте, что GigaAM запущен, и попробуйте записать сообщение ещё раз.",
+      created_at:"2026-10-14T09:00:00Z",
+    };
+    render(<MessageExchange message={failed} plans={{}} command={vi.fn()} startNewConversation={vi.fn()} />);
+    expect(screen.getByText(/Не удалось связаться с сервисом распознавания речи/)).toBeInTheDocument();
+    expect(screen.queryByText("Думаю…")).not.toBeInTheDocument();
+    expect(screen.queryByText("Распознаю…")).not.toBeInTheDocument();
+  });
+
+  it("renders every known field in a read event", () => {
+    render(<ReadCard read={{resource:"event",id:"e1",data:{title:"Лекция",starts_at:"2026-10-15T09:00:00Z",duration_minutes:90,location:"Политех",description:"Параллельное программирование"}}} timeZone="Europe/Moscow" />);
+    expect(screen.getByText("Лекция")).toBeInTheDocument();
+    expect(screen.getByText("15 октября 2026, 12:00–13:30")).toBeInTheDocument();
+    expect(screen.getByText("Длительность:").parentElement).toHaveTextContent("1 час 30 минут");
+    expect(screen.getByText("Место:").parentElement).toHaveTextContent("Политех");
+    expect(screen.getByText("Описание:").parentElement).toHaveTextContent("Параллельное программирование");
   });
 
   it("shows every known event detail with localized labels", () => {
@@ -142,5 +197,18 @@ describe("planner chat", () => {
     expect(screen.getByText("Удалить событие")).toBeInTheDocument();
     expect(screen.getByText("ID: event-2")).toBeInTheDocument();
     expect(screen.getByText("Событие не найдено")).toBeInTheDocument();
+  });
+
+  it("shows the complete resulting title in an update plan", () => {
+    const plan:Plan = {
+      id:"p3",status:"pending",expires_at:null,
+      actions:[{
+        id:"a1",ordinal:0,operation:"update",resource:"task",target_id:"task-1",
+        payload:{title:"Подготовить доклад на pythonn про tagless final"},
+        status:"pending",result:null,error:null,
+      }],
+    };
+    render(<PlanCard plan={plan} command={vi.fn()} />);
+    expect(screen.getByText("Подготовить доклад на pythonn про tagless final")).toBeInTheDocument();
   });
 });

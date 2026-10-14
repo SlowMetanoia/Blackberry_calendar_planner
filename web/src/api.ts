@@ -1,4 +1,4 @@
-import type { AgentMessage, Page, Plan } from "./types";
+import type { AgentMessage, ConversationSummary, Page, Plan } from "./types";
 
 const base = "/api";
 export async function request<T>(path:string, options:RequestInit = {}):Promise<T> {
@@ -15,4 +15,5 @@ export async function request<T>(path:string, options:RequestInit = {}):Promise<
 }
 export const getMessage = (id:string) => request<AgentMessage>(`/agent/messages/${id}`);
 export const getPlan = (id:string) => request<Plan>(`/agent/plans/${id}`);
-export const getHistory = (id:string) => request<Page<AgentMessage>>(`/agent/conversations/${id}/messages`);
+export const getHistory = (id:string, limit=100, offset=0) => request<Page<AgentMessage>>(`/agent/conversations/${id}/messages?limit=${limit}&offset=${offset}`);
+export const getConversations = (limit=100, offset=0) => request<Page<ConversationSummary>>(`/agent/conversations?limit=${limit}&offset=${offset}`);

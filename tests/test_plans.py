@@ -20,7 +20,11 @@ from planner.models import (
     User,
 )
 from planner.plans import PlanService
-from planner.schemas import DecisionTaskCreateAction, DecisionTaskDeleteAction
+from planner.schemas import (
+    DecisionTaskCreateAction,
+    DecisionTaskDeleteAction,
+    DecisionTaskUpdateAction,
+)
 from planner.services import TaskService
 
 
@@ -195,3 +199,177 @@ async def test_agent_sends_the_entire_conversation_history(session, user, monkey
     assert captured[0] == {"role": "user", "content": "user-1"}
     assert captured[-1]["role"] == "assistant"
     assert "assistant-12" in captured[-1]["content"]
+
+
+@pytest.mark.asyncio
+async def test_agent_reloads_referenced_task_into_owner_scoped_context(
+    session, user, monkeypatch
+) -> None:
+    task = Task(
+        owner_id=user.id,
+        title="Подготовить доклад на PyCon про tagless final",
+        description="Не менять",
+        status="open",
+    )
+    foreign = User(email="foreign-context@example.test", password_hash="x")
+    session.add_all([task, foreign])
+    await session.flush()
+    foreign_task = Task(owner_id=foreign.id, title="Чужая задача", status="open")
+    session.add(foreign_task)
+    conversation = Conversation(owner_id=user.id)
+    session.add(conversation)
+    await session.flush()
+    previous = AgentMessage(
+        owner_id=user.id,
+        conversation_id=conversation.id,
+        sequence=1,
+        input_text="Какие задачи мне нужно сделать за следующий месяц",
+        status=MessageStatus.completed,
+        result=json.dumps(
+            {
+                "reply": "Вот задачи",
+                "reads": [
+                    {
+                        "resource": "task",
+                        "id": str(task.id),
+                        "data": {"title": "Устаревшее название"},
+                    },
+                    {
+                        "resource": "task",
+                        "id": str(foreign_task.id),
+                        "data": {"title": "Утёкшее чужое название"},
+                    },
+                ],
+            },
+            ensure_ascii=False,
+        ),
+    )
+    current = AgentMessage(
+        owner_id=user.id,
+        conversation_id=conversation.id,
+        sequence=2,
+        input_text='Поменяй название конференции: она называется "pythonn"',
+        status=MessageStatus.processing,
+    )
+    session.add_all([previous, current])
+    await session.flush()
+    captured: list[dict] = []
+
+    async def decision(_text, **kwargs):
+        captured.extend(kwargs["resource_context"])
+        return '{"reply":"ok","reads":[],"mutations":[],"clarification":null}'
+
+    monkeypatch.setattr(agent, "_complete", decision)
+    await run_agent(
+        current.input_text,
+        AgentRunContext(session, user.id, conversation.id, current.id),
+    )
+
+    assert captured == [
+        {
+            "resource": "task",
+            "id": str(task.id),
+            "data": {
+                "id": str(task.id),
+                "title": "Подготовить доклад на PyCon про tagless final",
+                "description": "Не менять",
+                "deadline": None,
+                "estimated_minutes": None,
+                "status": "open",
+            },
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_agent_reloads_targets_referenced_by_previous_plans(
+    session, user, monkeypatch
+) -> None:
+    task = Task(owner_id=user.id, title="Доклад на PyCon", status="open")
+    conversation = Conversation(owner_id=user.id)
+    session.add_all([task, conversation])
+    await session.flush()
+    previous = AgentMessage(
+        owner_id=user.id,
+        conversation_id=conversation.id,
+        sequence=1,
+        input_text="Измени срок доклада",
+        status=MessageStatus.needs_confirmation,
+    )
+    current = AgentMessage(
+        owner_id=user.id,
+        conversation_id=conversation.id,
+        sequence=2,
+        input_text="А теперь исправь конференцию",
+        status=MessageStatus.processing,
+    )
+    session.add_all([previous, current])
+    await session.flush()
+    plan = await PlanService.create(
+        session,
+        owner_id=user.id,
+        conversation_id=conversation.id,
+        source_message_id=previous.id,
+        mutations=[
+            DecisionTaskUpdateAction(
+                operation="update",
+                resource="task",
+                target_id=task.id,
+                payload={"deadline": "2026-10-19T18:00:00+03:00"},
+            )
+        ],
+    )
+    previous.result = json.dumps({"reply": "План готов", "plan_id": str(plan.id)})
+    await session.flush()
+    captured: list[dict] = []
+
+    async def decision(_text, **kwargs):
+        captured.extend(kwargs["resource_context"])
+        return '{"reply":"ok","reads":[],"mutations":[],"clarification":null}'
+
+    monkeypatch.setattr(agent, "_complete", decision)
+    await run_agent(
+        current.input_text,
+        AgentRunContext(session, user.id, conversation.id, current.id),
+    )
+
+    assert [(item["resource"], item["id"]) for item in captured] == [
+        ("task", str(task.id))
+    ]
+    assert captured[0]["data"]["title"] == "Доклад на PyCon"
+
+
+@pytest.mark.asyncio
+async def test_task_title_update_preserves_other_fields(session, user) -> None:
+    task = Task(
+        owner_id=user.id,
+        title="Подготовить доклад на PyCon про tagless final",
+        description="Слайды и демонстрация",
+        estimated_minutes=120,
+        status="open",
+    )
+    session.add(task)
+    await session.commit()
+    original_description = task.description
+    original_estimate = task.estimated_minutes
+
+    plan = await _plan(
+        session,
+        user,
+        [
+            DecisionTaskUpdateAction(
+                operation="update",
+                resource="task",
+                target_id=task.id,
+                payload={"title": "Подготовить доклад на pythonn про tagless final"},
+            )
+        ],
+    )
+    action = (await PlanService.actions(session, plan.id))[0]
+    await PlanService.approve_action(session, plan, action.id)
+    await PlanService.execute_action(session, action.id)
+    await session.refresh(task)
+
+    assert task.title == "Подготовить доклад на pythonn про tagless final"
+    assert task.description == original_description
+    assert task.estimated_minutes == original_estimate

@@ -1,6 +1,7 @@
 import json
 import uuid
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 
 from arq import create_pool
@@ -16,10 +17,10 @@ from .db import Base, engine, get_session
 from .models import AgentMessage, Conversation, Event, MessageStatus, Task, User, ActionPlan, PlannedAction, ActionStatus
 from .llm import verify_llm_connection
 from .plans import PlanService
-from .services import TaskService, EventService
+from .services import TaskService, EventService, normalize_datetime
 from .schemas import (
     ActionCommandResponse, ActionPlanResponse, AgentInput, AgentMessageResponse, AuthRequest,
-    EventCreate, EventResponse, EventUpdate, Page, ProblemDetail, TaskCreate, TaskResponse,
+    ConversationSummary, EventCreate, EventResponse, EventUpdate, Page, ProblemDetail, TaskCreate, TaskResponse,
     TaskUpdate, TimezoneValue, TokenResponse,
 )
 from .security import create_token, current_user, hash_password, verify_password
@@ -120,8 +121,20 @@ async def create_task(data: TaskCreate, user: User = Depends(current_user), sess
 
 
 @app.get("/tasks", response_model=Page[TaskResponse])
-async def list_tasks(limit: int = Query(50, ge=1, le=100), offset: int = Query(0, ge=0), user: User = Depends(current_user), session: AsyncSession = Depends(get_session)) -> Page[TaskResponse]:
-    items, total = await TaskService.page(session, user, limit=limit, offset=offset)
+async def list_tasks(
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    deadline_from: datetime | None = None,
+    deadline_to: datetime | None = None,
+    user: User = Depends(current_user),
+    session: AsyncSession = Depends(get_session),
+) -> Page[TaskResponse]:
+    if deadline_from and deadline_to and normalize_datetime(deadline_from, user) >= normalize_datetime(deadline_to, user):
+        raise HTTPException(422, "deadline_from must be earlier than deadline_to")
+    items, total = await TaskService.page(
+        session, user, limit=limit, offset=offset,
+        from_datetime=deadline_from, to_datetime=deadline_to,
+    )
     return Page(items=items, total=total, limit=limit, offset=offset)
 
 
@@ -151,8 +164,20 @@ async def create_event(data: EventCreate, user: User = Depends(current_user), se
 
 
 @app.get("/events", response_model=Page[EventResponse])
-async def list_events(limit: int = Query(50, ge=1, le=100), offset: int = Query(0, ge=0), user: User = Depends(current_user), session: AsyncSession = Depends(get_session)) -> Page[EventResponse]:
-    items, total = await EventService.page(session, user, limit=limit, offset=offset)
+async def list_events(
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    starts_at_from: datetime | None = None,
+    starts_at_to: datetime | None = None,
+    user: User = Depends(current_user),
+    session: AsyncSession = Depends(get_session),
+) -> Page[EventResponse]:
+    if starts_at_from and starts_at_to and normalize_datetime(starts_at_from, user) >= normalize_datetime(starts_at_to, user):
+        raise HTTPException(422, "starts_at_from must be earlier than starts_at_to")
+    items, total = await EventService.page(
+        session, user, limit=limit, offset=offset,
+        from_datetime=starts_at_from, to_datetime=starts_at_to,
+    )
     return Page(items=items, total=total, limit=limit, offset=offset)
 
 
@@ -265,6 +290,7 @@ async def _new_message(user: User, session: AsyncSession, *, text: str | None, a
         await session.flush()
     elif conversation.owner_id != user.id:
         raise HTTPException(404, "Conversation not found")
+    conversation.last_activity_at = datetime.now(timezone.utc)
     last = await session.scalar(select(AgentMessage.sequence).where(AgentMessage.conversation_id == conversation_id).order_by(AgentMessage.sequence.desc()).limit(1))
     message = AgentMessage(owner_id=user.id, conversation_id=conversation_id, sequence=(last or 0) + 1, input_text=text, audio_path=audio_path, idempotency_key=idempotency_key, status=MessageStatus.queued)
     session.add(message)
@@ -272,6 +298,47 @@ async def _new_message(user: User, session: AsyncSession, *, text: str | None, a
     await session.refresh(message)
     await enqueue(message.id)
     return message
+
+
+@app.get("/agent/conversations", response_model=Page[ConversationSummary])
+async def list_conversations(
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    user: User = Depends(current_user),
+    session: AsyncSession = Depends(get_session),
+) -> Page[ConversationSummary]:
+    first_text = (
+        select(AgentMessage.input_text)
+        .where(
+            AgentMessage.conversation_id == Conversation.id,
+            AgentMessage.owner_id == user.id,
+            AgentMessage.input_text.is_not(None),
+            AgentMessage.input_text != "",
+        )
+        .order_by(AgentMessage.sequence)
+        .limit(1)
+        .scalar_subquery()
+    )
+    rows = (await session.execute(
+        select(Conversation, first_text.label("preview"))
+        .where(Conversation.owner_id == user.id)
+        .order_by(Conversation.last_activity_at.desc(), Conversation.id)
+        .offset(offset)
+        .limit(limit)
+    )).all()
+    total = int(await session.scalar(
+        select(func.count()).select_from(Conversation).where(Conversation.owner_id == user.id)
+    ) or 0)
+    items = [
+        ConversationSummary(
+            id=conversation.id,
+            preview=((preview or "Голосовое сообщение").strip()[:80] or "Новый диалог"),
+            created_at=conversation.created_at,
+            last_activity_at=conversation.last_activity_at,
+        )
+        for conversation, preview in rows
+    ]
+    return Page(items=items, total=total, limit=limit, offset=offset)
 
 
 async def _message_response(message: AgentMessage, session: AsyncSession) -> AgentMessageResponse:

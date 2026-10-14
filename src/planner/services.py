@@ -39,17 +39,62 @@ class ResourceService:
         return obj
 
     @classmethod
-    async def list(cls, session: AsyncSession, user: User):
-        query = select(cls.model).where(cls.model.owner_id == user.id)
+    def _range_conditions(
+        cls,
+        user: User,
+        from_datetime: datetime | None,
+        to_datetime: datetime | None,
+    ) -> list:
+        if not cls.datetime_fields:
+            return []
+        column = getattr(cls.model, next(iter(cls.datetime_fields)))
+        conditions = []
+        if from_datetime is not None:
+            conditions.append(column >= normalize_datetime(from_datetime, user))
+        if to_datetime is not None:
+            conditions.append(column < normalize_datetime(to_datetime, user))
+        return conditions
+
+    @classmethod
+    async def list(
+        cls,
+        session: AsyncSession,
+        user: User,
+        *,
+        from_datetime: datetime | None = None,
+        to_datetime: datetime | None = None,
+    ):
+        conditions = [
+            cls.model.owner_id == user.id,
+            *cls._range_conditions(user, from_datetime, to_datetime),
+        ]
+        order_column = getattr(cls.model, next(iter(cls.datetime_fields)), cls.model.id)
+        query = select(cls.model).where(*conditions).order_by(order_column, cls.model.id)
         return list((await session.scalars(query)).all())
 
     @classmethod
-    async def page(cls, session: AsyncSession, user: User, *, limit: int, offset: int):
-        base = cls.model.owner_id == user.id
+    async def page(
+        cls,
+        session: AsyncSession,
+        user: User,
+        *,
+        limit: int,
+        offset: int,
+        from_datetime: datetime | None = None,
+        to_datetime: datetime | None = None,
+    ):
+        conditions = [
+            cls.model.owner_id == user.id,
+            *cls._range_conditions(user, from_datetime, to_datetime),
+        ]
+        order_column = getattr(cls.model, next(iter(cls.datetime_fields)), cls.model.id)
         items = list((await session.scalars(
-            select(cls.model).where(base).offset(offset).limit(limit)
+            select(cls.model).where(*conditions).order_by(order_column, cls.model.id)
+            .offset(offset).limit(limit)
         )).all())
-        total = await session.scalar(select(func.count()).select_from(cls.model).where(base))
+        total = await session.scalar(
+            select(func.count()).select_from(cls.model).where(*conditions)
+        )
         return items, int(total or 0)
 
     @classmethod

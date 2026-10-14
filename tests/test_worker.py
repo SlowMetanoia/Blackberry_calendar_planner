@@ -4,7 +4,7 @@ import pytest
 from arq import Retry
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from planner.agent import AgentResult
+from planner.agent import AgentResult, TranscriptionError
 from planner.db import Base
 from planner.models import AgentMessage, Conversation, MessageStatus, User
 from planner import worker
@@ -107,3 +107,45 @@ async def test_different_conversations_use_different_locks(worker_db, monkeypatc
     for message_id in ids:
         await worker.process_message({"redis": redis, "job_try": 1}, str(message_id))
     assert redis.values == {}
+
+
+@pytest.mark.asyncio
+async def test_transcription_failure_is_safe_and_does_not_run_agent(worker_db, monkeypatch) -> None:
+    async with worker_db() as session:
+        user = User(email="voice-error@example.test", password_hash="x")
+        session.add(user)
+        await session.flush()
+        conversation = Conversation(owner_id=user.id)
+        session.add(conversation)
+        await session.flush()
+        message = AgentMessage(
+            owner_id=user.id,
+            conversation_id=conversation.id,
+            sequence=1,
+            audio_path="/tmp/message.webm",
+            status=MessageStatus.queued,
+        )
+        session.add(message)
+        await session.commit()
+        message_id = message.id
+
+    safe_error = (
+        "Не удалось связаться с сервисом распознавания речи. "
+        "Проверьте, что GigaAM запущен, и попробуйте записать сообщение ещё раз."
+    )
+
+    async def failed_transcription(_path):
+        raise TranscriptionError(safe_error)
+
+    monkeypatch.setattr(worker, "transcribe", failed_transcription)
+
+    async def unexpected_agent(*_args, **_kwargs):
+        pytest.fail("LLM must not run after a transcription failure")
+
+    monkeypatch.setattr(worker, "run_agent", unexpected_agent)
+    await worker.process_message({"redis": FakeRedis(), "job_try": 1}, str(message_id))
+
+    async with worker_db() as session:
+        stored = await session.get(AgentMessage, message_id)
+        assert stored.status == MessageStatus.failed
+        assert stored.error == safe_error

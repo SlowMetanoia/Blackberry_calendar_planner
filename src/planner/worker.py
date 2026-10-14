@@ -1,4 +1,5 @@
 import json
+import logging
 import uuid
 from datetime import datetime, timezone
 
@@ -6,7 +7,7 @@ from arq import Retry
 from arq.connections import RedisSettings
 from sqlalchemy import select
 
-from .agent import AgentRunContext, run_agent, transcribe
+from .agent import AgentRunContext, TranscriptionError, run_agent, transcribe
 from .config import get_settings
 from .db import SessionLocal
 from .models import ActionPlan, AgentMessage, Conversation, MessageStatus
@@ -18,6 +19,7 @@ TERMINAL_MESSAGE_STATUSES = {
     MessageStatus.completed,
     MessageStatus.failed,
 }
+logger = logging.getLogger(__name__)
 RELEASE_LOCK_SCRIPT = """
 if redis.call('get', KEYS[1]) == ARGV[1] then
   return redis.call('del', KEYS[1])
@@ -115,6 +117,14 @@ async def process_message(ctx: dict, message_id: str) -> None:
             await session.commit()
         except Retry:
             raise
+        except TranscriptionError as exc:
+            logger.exception("Speech transcription failed for message %s", message_id)
+            await session.rollback()
+            message = await session.get(AgentMessage, ident)
+            if message is not None:
+                message.status = MessageStatus.failed
+                message.error = str(exc)
+                await session.commit()
         except Exception as exc:
             await session.rollback()
             message = await session.get(AgentMessage, ident)

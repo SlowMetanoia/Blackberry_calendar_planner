@@ -31,7 +31,10 @@ class Handler(BaseHTTPRequestHandler):
             for message in request.get("messages", [])[:-1]
             if message["role"] == "user"
         ]
-        if "по поводу релиза" in lowered and any(
+        if "что у меня на завтра" in lowered:
+            time_range = {"from": "2026-10-15T00:00:00+03:00", "to": "2026-10-16T00:00:00+03:00"}
+            envelope = {"reply": "Вот ваши задачи и события на завтра", "reads": [{"operation": "list", "resource": "task", "time_range": time_range}, {"operation": "list", "resource": "event", "time_range": time_range}], "mutations": [], "clarification": None}
+        elif "по поводу релиза" in lowered and any(
             "добавь встречу" in item for item in earlier_user_messages
         ):
             envelope = {"reply": "Подготовил встречу по поводу релиза", "reads": [], "mutations": [{"operation": "create", "resource": "event", "payload": {"title": "Встреча по поводу релиза", "starts_at": "2026-10-15T11:00:00+03:00"}}], "clarification": None}

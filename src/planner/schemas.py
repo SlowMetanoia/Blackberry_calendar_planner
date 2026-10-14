@@ -112,6 +112,13 @@ class AgentInput(BaseModel):
     conversation_id: uuid.UUID | None = None
 
 
+class ConversationSummary(BaseModel):
+    id: uuid.UUID
+    preview: str
+    created_at: datetime
+    last_activity_at: datetime
+
+
 class PlannedActionResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: uuid.UUID
@@ -162,11 +169,26 @@ class ProblemDetail(BaseModel):
     detail: str
     code: str
 
+class DecisionTimeRange(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+    from_datetime: datetime = Field(alias="from")
+    to_datetime: datetime = Field(alias="to")
+
+    @model_validator(mode="after")
+    def valid_half_open_range(self):
+        if self.from_datetime.tzinfo is None or self.to_datetime.tzinfo is None:
+            raise ValueError("time range datetimes must include UTC offsets")
+        if self.from_datetime >= self.to_datetime:
+            raise ValueError("time range must satisfy from < to")
+        return self
+
+
 class DecisionListRead(BaseModel):
     model_config = ConfigDict(extra="forbid")
     operation: Literal["list"]
     resource: Literal["task", "event"]
     target_id: None = None
+    time_range: DecisionTimeRange | None = None
 
 
 class DecisionGetRead(BaseModel):

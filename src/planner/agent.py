@@ -12,7 +12,7 @@ from sqlalchemy import select
 
 from .config import get_settings
 from .llm import auth_headers, completion_payload, normalize_base_url
-from .models import AgentMessage, User
+from .models import ActionPlan, AgentMessage, PlannedAction, User
 from .plans import PlanService
 from .schemas import DecisionEnvelope
 from .services import EventService, TaskService
@@ -52,14 +52,22 @@ class ContextWindowExceeded(RuntimeError):
     pass
 
 
+class TranscriptionError(RuntimeError):
+    """A safe, user-facing speech recognition failure."""
+
+
 def build_system_prompt(local_now: datetime, timezone_name: str) -> str:
     return f"""You are the command interpreter inside a planner application. Return JSON only and follow the supplied JSON schema exactly.
 Current local datetime: {local_now.isoformat()}
 User IANA timezone: {timezone_name}
 Resolve relative dates such as today and tomorrow against this local datetime. Return all deadline and starts_at values as absolute ISO-8601 datetimes with an explicit UTC offset.
 The application has access to the user's tasks and events. For requests to show, list, find, or get them, populate reads; the application will execute those reads immediately.
+For time-bounded list requests, include a time_range with timezone-aware `from` (inclusive) and `to` (exclusive). Apply it to event starts_at or task deadline. For broad requests such as "what do I have tomorrow", request both tasks and events with the same local-day range.
 For create, update, and delete requests, populate mutations; the application will show them as a confirmation plan. Never say that a mutation has already been executed. Say that a plan was prepared.
 Treat the timezone above as authoritative and never ask the user to confirm it. Infer a useful title from the request: for example, "встреча с Ильёй" is already a sufficient event title. Ask for clarification only when a required fact such as an event date or time is truly absent.
+Resolve pronouns and short references such as "она", "эта конференция", or "эта встреча" against the entire conversation and the current referenced records supplied after the history. Those records contain fresh database values and are authoritative.
+When the user asks to change only a person, organization, conference, place, or another fragment inside a compound title, return the complete resulting title in payload.title and preserve every unrequested part exactly. For example, changing "Acme" to "Contoso" in "Подготовить отчёт для Acme за квартал" must produce "Подготовить отчёт для Contoso за квартал", not merely "Contoso". Replace the entire title only when the user explicitly requests a complete rename.
+If more than one referenced record could satisfy an update or the intended record is unclear, return a clarification and no mutation.
 Use only payload fields declared by the schema. For event time use starts_at, never start. For a new task omit status unless the user explicitly requested one."""
 
 
@@ -96,6 +104,7 @@ async def _complete(
     *,
     system_prompt: str,
     history: list[dict[str, str]] | None = None,
+    resource_context: list[dict] | None = None,
 ) -> str:
     settings = get_settings()
     if not settings.llm_base_url:
@@ -103,6 +112,14 @@ async def _complete(
     messages = [
         {"role": "system", "content": system_prompt},
         *(history or []),
+        *([{
+            "role": "system",
+            "content": (
+                "Current referenced records, freshly loaded from the database. "
+                "Use their complete fields and IDs when resolving the current request:\n"
+                + json.dumps({"referenced_resources": resource_context}, ensure_ascii=False)
+            ),
+        }] if resource_context else []),
         {"role": "user", "content": text},
     ]
     payload = completion_payload(settings, messages)
@@ -128,7 +145,7 @@ def _assistant_history_content(result: str | None) -> str | None:
     return json.dumps(value, ensure_ascii=False)
 
 
-async def _conversation_history(context: AgentRunContext) -> list[dict[str, str]]:
+async def _conversation_messages(context: AgentRunContext) -> list[AgentMessage]:
     current = await context.session.get(AgentMessage, context.source_message_id)
     if current is None:
         raise RuntimeError("Current agent message not found")
@@ -141,7 +158,10 @@ async def _conversation_history(context: AgentRunContext) -> list[dict[str, str]
         )
         .order_by(AgentMessage.sequence)
     )
-    messages = list((await context.session.scalars(query)).all())
+    return list((await context.session.scalars(query)).all())
+
+
+def _history_from_messages(messages: list[AgentMessage]) -> list[dict[str, str]]:
     history: list[dict[str, str]] = []
     for message in messages:
         if message.input_text:
@@ -152,10 +172,102 @@ async def _conversation_history(context: AgentRunContext) -> list[dict[str, str]
     return history
 
 
+async def _conversation_history(context: AgentRunContext) -> list[dict[str, str]]:
+    return _history_from_messages(await _conversation_messages(context))
+
+
+def _result_payload(result: str | None) -> dict:
+    if not result:
+        return {}
+    try:
+        value = json.loads(result)
+    except (json.JSONDecodeError, TypeError):
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def _resource_reference(resource: object, ident: object) -> tuple[str, uuid.UUID] | None:
+    if resource not in {"task", "event"} or not ident:
+        return None
+    try:
+        return str(resource), uuid.UUID(str(ident))
+    except (TypeError, ValueError, AttributeError):
+        return None
+
+
+async def _referenced_resource_context(
+    context: AgentRunContext,
+    messages: list[AgentMessage],
+) -> list[dict]:
+    references: dict[tuple[str, uuid.UUID], None] = {}
+    plan_ids: list[uuid.UUID] = []
+    for message in messages:
+        payload = _result_payload(message.result)
+        reads = payload.get("reads", [])
+        if isinstance(reads, list):
+            for read in reads:
+                if not isinstance(read, dict):
+                    continue
+                reference = _resource_reference(read.get("resource"), read.get("id"))
+                if reference:
+                    references.pop(reference, None)
+                    references[reference] = None
+        try:
+            if payload.get("plan_id"):
+                plan_ids.append(uuid.UUID(str(payload["plan_id"])))
+        except (TypeError, ValueError, AttributeError):
+            pass
+
+    if plan_ids:
+        plans = list((await context.session.scalars(
+            select(ActionPlan).where(
+                ActionPlan.id.in_(plan_ids),
+                ActionPlan.owner_id == context.owner_id,
+                ActionPlan.conversation_id == context.conversation_id,
+            )
+        )).all())
+        owned_plan_ids = [plan.id for plan in plans]
+        if owned_plan_ids:
+            actions = list((await context.session.scalars(
+                select(PlannedAction)
+                .where(PlannedAction.plan_id.in_(owned_plan_ids))
+                .order_by(PlannedAction.ordinal)
+            )).all())
+            for action in actions:
+                result_id = action.result.get("id") if isinstance(action.result, dict) else None
+                reference = _resource_reference(
+                    action.resource,
+                    action.target_id or result_id,
+                )
+                if reference:
+                    references.pop(reference, None)
+                    references[reference] = None
+
+    user = await context.session.get(User, context.owner_id)
+    if user is None:
+        return []
+    resources: list[dict] = []
+    for (resource, ident) in references:
+        service = TaskService if resource == "task" else EventService
+        row = await service.get(context.session, user, ident)
+        if row is None:
+            continue
+        data = {
+            column.name: getattr(row, column.name)
+            for column in row.__table__.columns
+            if column.name != "owner_id"
+        }
+        resources.append(json.loads(json.dumps(
+            {"resource": resource, "id": str(row.id), "data": data}, default=str
+        )))
+    return resources
+
+
 async def _interpret(state: AgentState) -> AgentState:
     timezone_name = "UTC"
     observed_at_utc = datetime.now(timezone.utc)
     history: list[dict[str, str]] = []
+    resource_context: list[dict] = []
     context = state.get("context")
     if context is not None:
         user = await context.session.get(User, context.owner_id)
@@ -163,7 +275,9 @@ async def _interpret(state: AgentState) -> AgentState:
             return {"state": "failed", "result": "Agent owner not found"}
         timezone_name = user.timezone
         observed_at_utc = context.observed_at_utc
-        history = await _conversation_history(context)
+        messages = await _conversation_messages(context)
+        history = _history_from_messages(messages)
+        resource_context = await _referenced_resource_context(context, messages)
     local_now = observed_at_utc.astimezone(ZoneInfo(timezone_name))
     try:
         return {
@@ -171,6 +285,7 @@ async def _interpret(state: AgentState) -> AgentState:
                 state["text"],
                 system_prompt=build_system_prompt(local_now, timezone_name),
                 history=history,
+                resource_context=resource_context,
             )
         }
     except ContextWindowExceeded:
@@ -227,8 +342,14 @@ async def _execute_reads(state: AgentState) -> AgentState:
     results = []
     for read in decision.reads:
         service = TaskService if read.resource == "task" else EventService
+        time_range = getattr(read, "time_range", None)
         rows = ([await service.get(context.session, user, read.target_id)]
-                if read.operation == "get" else await service.list(context.session, user))
+                if read.operation == "get" else await service.list(
+                    context.session,
+                    user,
+                    from_datetime=time_range.from_datetime if time_range else None,
+                    to_datetime=time_range.to_datetime if time_range else None,
+                ))
         for row in filter(None, rows):
             data = {
                 column.name: getattr(row, column.name)
@@ -311,16 +432,38 @@ async def transcribe(audio_path: str) -> str:
     headers = {}
     if settings.stt_api_key:
         headers["Authorization"] = f"Bearer {settings.stt_api_key}"
-    async with httpx.AsyncClient(timeout=120) as client:
-        with open(audio_path, "rb") as audio:
-            response = await client.post(
-                f"{settings.stt_base_url.rstrip('/')}/audio/transcriptions",
-                headers=headers,
-                files={"file": audio},
-                data={"model": settings.stt_model},
-            )
-        response.raise_for_status()
-        return response.json()["text"]
+    try:
+        async with httpx.AsyncClient(timeout=120) as client:
+            with open(audio_path, "rb") as audio:
+                response = await client.post(
+                    f"{settings.stt_base_url.rstrip('/')}/audio/transcriptions",
+                    headers=headers,
+                    files={"file": audio},
+                    data={"model": settings.stt_model},
+                )
+            response.raise_for_status()
+    except httpx.RequestError as exc:
+        raise TranscriptionError(
+            "Не удалось связаться с сервисом распознавания речи. "
+            "Проверьте, что GigaAM запущен, и попробуйте записать сообщение ещё раз."
+        ) from exc
+    except httpx.HTTPStatusError as exc:
+        raise TranscriptionError(
+            "Сервис распознавания речи не смог обработать запись. "
+            "Попробуйте записать сообщение ещё раз."
+        ) from exc
+
+    try:
+        text = response.json()["text"]
+    except (KeyError, TypeError, ValueError) as exc:
+        raise TranscriptionError(
+            "Сервис распознавания речи вернул некорректный ответ. Попробуйте ещё раз."
+        ) from exc
+    if not isinstance(text, str) or not text.strip():
+        raise TranscriptionError(
+            "Сервис распознавания речи вернул некорректный ответ. Попробуйте ещё раз."
+        )
+    return text.strip()
 
 
 async def run_agent(text: str, context: AgentRunContext | None = None) -> AgentResult:

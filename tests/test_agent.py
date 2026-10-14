@@ -9,6 +9,7 @@ from planner import agent
 from planner.agent import (
     ContextWindowExceeded,
     LLMProtocolError,
+    TranscriptionError,
     _context_window_exceeded,
     _response_content,
     build_system_prompt,
@@ -61,6 +62,82 @@ async def test_transcribe_omits_authorization_for_empty_api_key(monkeypatch, tmp
     assert "Authorization" not in captured["headers"]
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("failure", "message"),
+    [
+        (
+            httpx.ConnectError("internal detail"),
+            "Не удалось связаться с сервисом распознавания речи. Проверьте, что GigaAM запущен, и попробуйте записать сообщение ещё раз.",
+        ),
+        (
+            httpx.ReadTimeout("internal detail"),
+            "Не удалось связаться с сервисом распознавания речи. Проверьте, что GigaAM запущен, и попробуйте записать сообщение ещё раз.",
+        ),
+    ],
+)
+async def test_transcribe_maps_connection_failures_to_safe_message(
+    monkeypatch, tmp_path, failure, message
+) -> None:
+    class FakeClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def post(self, _url, **_kwargs):
+            raise failure
+
+    audio_path = tmp_path / "message.webm"
+    audio_path.write_bytes(b"audio")
+    monkeypatch.setattr(
+        agent,
+        "get_settings",
+        lambda: SimpleNamespace(
+            stt_base_url="http://stt.test/v1", stt_api_key="", stt_model="gigaam"
+        ),
+    )
+    monkeypatch.setattr(agent.httpx, "AsyncClient", lambda **_kwargs: FakeClient())
+
+    with pytest.raises(TranscriptionError, match="^" + message.replace(".", r"\.") + "$"):
+        await agent.transcribe(str(audio_path))
+
+
+@pytest.mark.asyncio
+async def test_transcribe_maps_invalid_response_to_safe_message(monkeypatch, tmp_path) -> None:
+    class FakeResponse:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict:
+            return {"unexpected": "shape"}
+
+    class FakeClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def post(self, _url, **_kwargs):
+            return FakeResponse()
+
+    audio_path = tmp_path / "message.webm"
+    audio_path.write_bytes(b"audio")
+    monkeypatch.setattr(
+        agent,
+        "get_settings",
+        lambda: SimpleNamespace(
+            stt_base_url="http://stt.test/v1", stt_api_key="", stt_model="gigaam"
+        ),
+    )
+    monkeypatch.setattr(agent.httpx, "AsyncClient", lambda **_kwargs: FakeClient())
+
+    with pytest.raises(TranscriptionError, match="некорректный ответ"):
+        await agent.transcribe(str(audio_path))
+
+
 def test_decision_envelope_rejects_free_text() -> None:
     with pytest.raises(ValueError, match="invalid JSON"):
         parse_decision("создам задачу")
@@ -103,6 +180,10 @@ def test_system_prompt_contains_local_clock_and_timezone() -> None:
     assert "2026-10-14T19:30:00+03:00" in prompt
     assert "Europe/Moscow" in prompt
     assert "absolute ISO-8601" in prompt
+    assert "both tasks and events" in prompt
+    assert "time_range" in prompt
+    assert "complete resulting title" in prompt
+    assert "preserve every unrequested part" in prompt
 
 
 def test_empty_content_does_not_fall_back_to_reasoning() -> None:

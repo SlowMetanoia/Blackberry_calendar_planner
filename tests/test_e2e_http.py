@@ -104,3 +104,26 @@ def test_text_voice_plan_and_owner_isolation():
         ).json()
         assert contextual_plan["actions"][0]["resource"] == "event"
         assert contextual_plan["actions"][0]["payload"]["title"] == "Встреча по поводу релиза"
+        assert client.post(
+            f"/agent/plans/{contextual['plan_id']}/confirm", headers=owner
+        ).status_code == 202
+        assert wait_plan(client, owner, contextual["plan_id"])["status"] == "completed"
+
+        tomorrow = client.post(
+            "/agent/messages",
+            headers=owner,
+            json={"text": "Что у меня на завтра?", "conversation_id": message["conversation_id"]},
+        ).json()
+        tomorrow_message = wait_message(client, owner, tomorrow["id"])
+        assert [item["resource"] for item in tomorrow_message["reads"]] == ["event"]
+        assert tomorrow_message["reads"][0]["data"]["title"] == "Встреча по поводу релиза"
+        assert tomorrow_message["reads"][0]["data"]["starts_at"].startswith("2026-10-15")
+
+        conversations = client.get(
+            "/agent/conversations?limit=100&offset=0", headers=owner
+        ).json()
+        assert conversations["total"] >= 2
+        assert any(item["preview"] == "создай задачу Купить молоко" for item in conversations["items"])
+        assert client.get(
+            "/agent/conversations?limit=100&offset=0", headers=other
+        ).json()["total"] == 0
