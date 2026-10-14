@@ -1,4 +1,4 @@
-import type { AgentMessage, ConversationSummary, Page, Plan } from "./types";
+import type { AgentMessage, CalendarOperation, ConversationSummary, Page } from "./types";
 
 const base = "/api";
 export async function request<T>(path:string, options:RequestInit = {}):Promise<T> {
@@ -14,6 +14,7 @@ export async function request<T>(path:string, options:RequestInit = {}):Promise<
   return response.status === 204 ? undefined as T : response.json();
 }
 export const getMessage = (id:string) => request<AgentMessage>(`/agent/messages/${id}`);
-export const getPlan = (id:string) => request<Plan>(`/agent/plans/${id}`);
-export const getHistory = (id:string, limit=100, offset=0) => request<Page<AgentMessage>>(`/agent/conversations/${id}/messages?limit=${limit}&offset=${offset}`);
+export const getConversationHistory = (id:string, limit=100, offset=0) => request<Page<AgentMessage>>(`/agent/conversations/${id}/messages?limit=${limit}&offset=${offset}`);
 export const getConversations = (limit=100, offset=0) => request<Page<ConversationSummary>>(`/agent/conversations?limit=${limit}&offset=${offset}`);
+export const getCalendarHistory = (limit=100, offset=0) => request<Page<CalendarOperation>>(`/calendar/history?limit=${limit}&offset=${offset}`);
+export const undoOperation = (id:string) => request<CalendarOperation>(`/calendar/history/${id}/undo`, {method:"POST"});

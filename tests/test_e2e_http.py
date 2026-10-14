@@ -13,19 +13,10 @@ def wait_message(client, token, message_id):
         response = client.get(f"/agent/messages/{message_id}", headers=token)
         response.raise_for_status()
         body = response.json()
-        if body["status"] in {"completed", "needs_confirmation", "needs_clarification", "failed"}:
+        if body["status"] in {"completed", "needs_clarification", "failed"}:
             return body
         time.sleep(.2)
     raise AssertionError("message did not complete")
-
-
-def wait_plan(client, token, plan_id):
-    for _ in range(60):
-        body = client.get(f"/agent/plans/{plan_id}", headers=token).json()
-        if body["status"] in {"completed", "failed", "cancelled"}:
-            return body
-        time.sleep(.2)
-    raise AssertionError("plan did not complete")
 
 
 def register(client, email):
@@ -34,7 +25,7 @@ def register(client, email):
     return {"Authorization": f"Bearer {response.json()['access_token']}"}
 
 
-def test_text_voice_plan_and_owner_isolation():
+def test_text_voice_history_undo_and_owner_isolation():
     with httpx.Client(base_url=BASE_URL, timeout=10) as client:
         owner = register(client, "owner-e2e@example.com")
         other = register(client, "other-e2e@example.com")
@@ -50,14 +41,8 @@ def test_text_voice_plan_and_owner_isolation():
         submitted = client.post("/agent/messages", headers=owner, json={"text": "создай задачу Купить молоко"}).json()
         message = wait_message(client, owner, submitted["id"])
         assert message["input_text"] == "создай задачу Купить молоко"
-        assert message["plan_id"]
-        forbidden = client.get(f"/agent/plans/{message['plan_id']}", headers=other)
-        assert forbidden.status_code == 404
-        assert forbidden.headers["content-type"].startswith("application/problem+json")
-        assert forbidden.json()["code"] == "http_404"
-        confirmed = client.post(f"/agent/plans/{message['plan_id']}/confirm", headers=owner)
-        assert confirmed.status_code == 202
-        assert wait_plan(client, owner, message["plan_id"])["status"] == "completed"
+        assert message["status"] == "completed", message.get("error")
+        assert message["operations"][0]["operation"] == "create"
         tasks = client.get("/tasks?limit=10&offset=0", headers=owner).json()
         assert tasks["total"] == 1
         assert tasks["items"][0]["title"] == "Купить молоко"
@@ -78,8 +63,10 @@ def test_text_voice_plan_and_owner_isolation():
         read = client.post("/agent/messages", headers=owner,
                            json={"text": "покажи задачи", "conversation_id": message["conversation_id"]}).json()
         read_message = wait_message(client, owner, read["id"])
-        assert read_message["plan_id"] is None
-        assert read_message["reads"][0]["data"]["title"] == "Купить молоко"
+        assert read_message["operations"] == []
+        assert {item["data"]["title"] for item in read_message["reads"]} == {
+            "Купить молоко", "Голосовая задача"
+        }
 
         first_turn = client.post(
             "/agent/messages",
@@ -98,16 +85,9 @@ def test_text_voice_plan_and_owner_isolation():
             json={"text": "По поводу релиза", "conversation_id": message["conversation_id"]},
         ).json()
         contextual = wait_message(client, owner, follow_up["id"])
-        assert contextual["status"] == "needs_confirmation"
-        contextual_plan = client.get(
-            f"/agent/plans/{contextual['plan_id']}", headers=owner
-        ).json()
-        assert contextual_plan["actions"][0]["resource"] == "event"
-        assert contextual_plan["actions"][0]["payload"]["title"] == "Встреча по поводу релиза"
-        assert client.post(
-            f"/agent/plans/{contextual['plan_id']}/confirm", headers=owner
-        ).status_code == 202
-        assert wait_plan(client, owner, contextual["plan_id"])["status"] == "completed"
+        assert contextual["status"] == "completed"
+        assert contextual["operations"][0]["resource"] == "event"
+        assert contextual["operations"][0]["after"]["title"] == "Встреча по поводу релиза"
 
         tomorrow = client.post(
             "/agent/messages",
@@ -118,6 +98,16 @@ def test_text_voice_plan_and_owner_isolation():
         assert [item["resource"] for item in tomorrow_message["reads"]] == ["event"]
         assert tomorrow_message["reads"][0]["data"]["title"] == "Встреча по поводу релиза"
         assert tomorrow_message["reads"][0]["data"]["starts_at"].startswith("2026-10-15")
+
+        history = client.get("/calendar/history?limit=100&offset=0", headers=owner).json()
+        assert history["total"] >= 4
+        assert history["items"][0]["sequence"] > history["items"][-1]["sequence"]
+        assert client.get("/calendar/history", headers=other).json()["total"] == 0
+        operation_id = history["items"][0]["id"]
+        assert client.post(f"/calendar/history/{operation_id}/undo", headers=other).status_code == 404
+        undone = client.post(f"/calendar/history/{operation_id}/undo", headers=owner)
+        assert undone.status_code == 201
+        assert undone.json()["origin"] == "undo"
 
         conversations = client.get(
             "/agent/conversations?limit=100&offset=0", headers=owner

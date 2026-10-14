@@ -26,9 +26,7 @@ Follow the project’s stated TDD workflow: write a failing test first, implemen
 
 ## Todo Plans
 
-Store implementation plans in `todo/` as self-contained Markdown files. Each plan must include the user request, the relevant repository and conversation context available before the plan was written, implementation steps, acceptance criteria, verification commands, and the expected final report with test results.
-
-Execute plans from `todo/` one at a time. Do not begin another todo plan until the current plan has been implemented and verified. After a plan is fully completed, delete its file from `todo/`. If work is blocked or incomplete, keep the plan in place and record the remaining work in it rather than deleting it. The general `BACKLOG.md` is for deferred ideas and is not an executable todo queue.
+The `todo/` directory may contain implementation plans waiting to be executed. When asked to work on one of them, read the plan into context, carry it out, and delete its file after it has been fully completed. The general `BACKLOG.md` is for deferred ideas and is not an executable todo queue.
 
 ## Commit & Pull Request Guidelines
 
@@ -38,8 +36,6 @@ There is no Git history yet, so no existing commit convention can be inferred. U
 
 Keep database URLs, API keys, and model credentials in environment variables or an untracked `.env` file. Never commit secrets, recordings, or personal calendar data. Validate and authorize every agent tool call, and use isolated test databases for PostgreSQL-backed tests.
 
-Agent workflow uses LangGraph behind `run_agent`: strict JSON envelope validation, immediate reads, persisted action plans for mutations, and owner-scoped plan confirmation endpoints under `/agent/plans`. Run `.venv/bin/python -m pytest -q` for the full suite; plan migrations are applied with the release Compose migrate command.
-
-Plan confirmations return `202` and enqueue idempotent ARQ jobs; create-only plans enqueue a 15-second auto-confirm job. Message jobs are serialized per conversation with a Redis lock. Focused checks: `.venv/bin/python -m pytest tests/test_plans.py -q` and `.venv/bin/python -m pytest tests/test_worker.py -q`.
+Agent workflow uses LangGraph behind `run_agent`: strict JSON envelope validation, immediate reads, and atomic immediate C/U/D commands. Every mutation appends an immutable, owner-scoped `CalendarOperation`; task and event tables are replayable projections. History is available under `/calendar/history`, and undo appends a compensating operation. Message jobs remain serialized per conversation with a Redis lock. Run `.venv/bin/python -m pytest -q` for the full suite; focused checks: `.venv/bin/python -m pytest tests/test_calendar_history.py -q` and `.venv/bin/python -m pytest tests/test_worker.py -q`.
 
 The React/Vite client lives in `web/`; run `npm --prefix web test` and `npm --prefix web run build`. Full API/worker coverage uses the isolated fake LLM/STT environment through `./dev/test-e2e`.

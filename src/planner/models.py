@@ -2,7 +2,7 @@ import enum
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, Enum, ForeignKey, String, Text, UniqueConstraint, func, JSON
+from sqlalchemy import BigInteger, DateTime, Enum, ForeignKey, Index, String, Text, UniqueConstraint, func, JSON
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -13,7 +13,6 @@ class MessageStatus(str, enum.Enum):
     queued = "queued"
     transcribing = "transcribing"
     processing = "processing"
-    needs_confirmation = "needs_confirmation"
     needs_clarification = "needs_clarification"
     completed = "completed"
     failed = "failed"
@@ -78,33 +77,31 @@ class Conversation(Base):
     last_activity_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
 
-class PlanStatus(str, enum.Enum):
-    pending="pending"; partially_confirmed="partially_confirmed"; executing="executing"; completed="completed"; cancelled="cancelled"; failed="failed"
-class ActionStatus(str, enum.Enum):
-    pending="pending"; approved="approved"; rejected="rejected"; executing="executing"; completed="completed"; failed="failed"; cancelled="cancelled"
-
-class ActionPlan(Base):
-    __tablename__ = "action_plans"
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    owner_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
-    conversation_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("conversations.id", ondelete="CASCADE"), index=True
+class CalendarOperation(Base):
+    __tablename__ = "calendar_operations"
+    __table_args__ = (
+        UniqueConstraint("owner_id", "sequence"),
+        UniqueConstraint("owner_id", "command_id", "ordinal"),
+        Index("ix_calendar_operations_owner_sequence", "owner_id", "sequence"),
+        Index("ix_calendar_operations_owner_target", "owner_id", "resource", "target_id"),
     )
-    source_message_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("agent_messages.id", ondelete="SET NULL"))
-    status: Mapped[PlanStatus] = mapped_column(Enum(PlanStatus), default=PlanStatus.pending)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
 
-class PlannedAction(Base):
-    __tablename__ = "planned_actions"
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    plan_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("action_plans.id", ondelete="CASCADE"), index=True)
+    owner_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    sequence: Mapped[int] = mapped_column(BigInteger)
+    command_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
     ordinal: Mapped[int] = mapped_column()
     operation: Mapped[str] = mapped_column(String(16))
-    resource: Mapped[str] = mapped_column(String(32))
-    target_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
-    payload: Mapped[dict] = mapped_column(JSON)
-    status: Mapped[ActionStatus] = mapped_column(Enum(ActionStatus), default=ActionStatus.pending)
-    result: Mapped[dict | None] = mapped_column(JSON)
-    error: Mapped[str | None] = mapped_column(Text())
-    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    resource: Mapped[str] = mapped_column(String(16))
+    target_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
+    before_state: Mapped[dict | None] = mapped_column(JSON)
+    after_state: Mapped[dict | None] = mapped_column(JSON)
+    changes: Mapped[dict] = mapped_column(JSON, default=dict)
+    origin: Mapped[str] = mapped_column(String(16))
+    source_message_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("agent_messages.id", ondelete="SET NULL"), index=True
+    )
+    reverts_operation_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("calendar_operations.id", ondelete="SET NULL"), index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

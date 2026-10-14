@@ -13,15 +13,13 @@ def test_crud_endpoints_exist() -> None:
     assert {"/tasks", "/tasks/{task_id}", "/events", "/events/{event_id}"} <= paths
 
 
-def test_plan_endpoints_exist() -> None:
+def test_calendar_history_endpoints_replace_plans() -> None:
     routes = {(route.path, method) for route in app.routes for method in (route.methods or ())}
     assert {
-        ("/agent/plans/{plan_id}", "GET"),
-        ("/agent/plans/{plan_id}/confirm", "POST"),
-        ("/agent/plans/{plan_id}/cancel", "POST"),
-        ("/agent/plans/{plan_id}/actions/{action_id}/confirm", "POST"),
-        ("/agent/plans/{plan_id}/actions/{action_id}", "DELETE"),
+        ("/calendar/history", "GET"),
+        ("/calendar/history/{operation_id}/undo", "POST"),
     } <= routes
+    assert not any(path.startswith("/agent/plans") for path, _method in routes)
 
 
 def test_timezone_endpoint_exists() -> None:

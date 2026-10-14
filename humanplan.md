@@ -46,15 +46,17 @@
 Статус документа.
 Это документ целиком написанный человеком. В части утверждений он считается истиной. Изменять его без ведома пользователя запрещается. Все прочие источники истины не должны ему противоречить. Это следует проверять при их формировании.
 
-### Логическое. Логика исполнения действий после того, как пользователь сделал запрос.
-Read operations execute immediately.
-Every create/update/delete is first shown as an action plan; 
-actions may be confirmed individually or as a whole, and pending actions may be removed. 
-Creates have a 15-second cancellation timeout by default. 
-Updates and deletes always require explicit confirmation; 
-a mixed plan therefore waits for an explicit decision. 
-Plan timeout is the sum of action timeouts, and is effectively unbounded when update/delete actions are present.
-Pending cancellation is supported now; undo of completed actions is future work. Session history is stored in PostgreSQL with TTL fields for later cleanup.
+### Логическое. История изменений календаря.
+
+Все операции над календарём делаем обратимыми.
+Календарь — это начальное состояние плюс применение всех операций из истории.
+
+Все операции create/update/delete выполняем сразу и сразу дописываем в историю.
+Пользователь видит глобальный список выполненных действий и может отменить действие,
+если его не устраивает результат.
+
+При будущей интеграции с внешними календарями или другими системами потребуется отдельно
+проработать синтетические действия для изменений, пришедших извне.
 
 ### Бэклог. Режим рассуждений модели.
 

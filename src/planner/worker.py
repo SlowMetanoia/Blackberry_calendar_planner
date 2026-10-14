@@ -1,4 +1,3 @@
-import json
 import logging
 import uuid
 from datetime import datetime, timezone
@@ -10,11 +9,9 @@ from sqlalchemy import select
 from .agent import AgentRunContext, TranscriptionError, run_agent, transcribe
 from .config import get_settings
 from .db import SessionLocal
-from .models import ActionPlan, AgentMessage, Conversation, MessageStatus
-from .plans import PlanService
+from .models import AgentMessage, Conversation, MessageStatus
 
 TERMINAL_MESSAGE_STATUSES = {
-    MessageStatus.needs_confirmation,
     MessageStatus.needs_clarification,
     MessageStatus.completed,
     MessageStatus.failed,
@@ -93,23 +90,8 @@ async def process_message(ctx: dict, message_id: str) -> None:
                 await session.commit()
                 return
 
-            response = json.loads(result.result)
-            plan_id = response.get("plan_id")
-            if plan_id:
-                plan = await session.get(ActionPlan, uuid.UUID(plan_id))
-                message.status = MessageStatus.needs_confirmation
-                message.result = result.result
-                await session.commit()
-                if plan.expires_at is not None:
-                    await redis.enqueue_job(
-                        "auto_execute_plan",
-                        str(plan.id),
-                        _defer_by=get_settings().create_auto_confirm_seconds,
-                        _job_id=f"auto-plan:{plan.id}",
-                    )
-            else:
-                message.status = MessageStatus.completed
-                message.result = result.result
+            message.status = MessageStatus.completed
+            message.result = result.result
             conversation = await session.get(Conversation, message.conversation_id)
             if conversation is not None:
                 from sqlalchemy import func
@@ -137,27 +119,8 @@ async def process_message(ctx: dict, message_id: str) -> None:
             await redis.eval(RELEASE_LOCK_SCRIPT, 1, lock_key, token)
 
 
-async def execute_plan_action(ctx: dict, action_id: str) -> None:
-    async with SessionLocal() as session:
-        await PlanService.execute_action(session, uuid.UUID(action_id))
-
-
-async def auto_execute_plan(ctx: dict, plan_id: str) -> None:
-    async with SessionLocal() as session:
-        plan = await session.get(ActionPlan, uuid.UUID(plan_id))
-        if plan is None or plan.expires_at is None:
-            return
-        approved = await PlanService.approve_all(session, plan)
-    for action_id in approved:
-        await ctx["redis"].enqueue_job(
-            "execute_plan_action",
-            str(action_id),
-            _job_id=f"action:{action_id}",
-        )
-
-
 class WorkerSettings:
-    functions = [process_message, execute_plan_action, auto_execute_plan]
+    functions = [process_message]
     redis_settings = RedisSettings.from_dsn(get_settings().redis_url)
     max_jobs = 10
     max_tries = 8

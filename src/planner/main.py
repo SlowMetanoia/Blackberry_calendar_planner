@@ -14,12 +14,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from .config import get_settings
 from .db import Base, engine, get_session
-from .models import AgentMessage, Conversation, Event, MessageStatus, Task, User, ActionPlan, PlannedAction, ActionStatus
+from .calendar import CalendarCommandService, CalendarMutation, CalendarTargetNotFound, UndoConflict
+from .models import AgentMessage, CalendarOperation, Conversation, Event, MessageStatus, Task, User
 from .llm import verify_llm_connection
-from .plans import PlanService
 from .services import TaskService, EventService, normalize_datetime
 from .schemas import (
-    ActionCommandResponse, ActionPlanResponse, AgentInput, AgentMessageResponse, AuthRequest,
+    AgentInput, AgentMessageResponse, AuthRequest, CalendarOperationResponse,
     ConversationSummary, EventCreate, EventResponse, EventUpdate, Page, ProblemDetail, TaskCreate, TaskResponse,
     TaskUpdate, TimezoneValue, TokenResponse,
 )
@@ -74,17 +74,6 @@ async def enqueue(message_id: uuid.UUID) -> None:
         await pool.close()
 
 
-async def enqueue_actions(action_ids: list[uuid.UUID]) -> None:
-    pool = await create_pool(RedisSettings.from_dsn(get_settings().redis_url))
-    try:
-        for action_id in action_ids:
-            await pool.enqueue_job(
-                "execute_plan_action", str(action_id), _job_id=f"action:{action_id}"
-            )
-    finally:
-        await pool.close()
-
-
 @app.post("/auth/register", response_model=TokenResponse, status_code=201)
 async def register(data: AuthRequest, session: AsyncSession = Depends(get_session)) -> TokenResponse:
     if await session.scalar(select(User).where(User.email == data.email)):
@@ -117,7 +106,9 @@ async def set_user_timezone(
 
 @app.post("/tasks", response_model=TaskResponse, status_code=201)
 async def create_task(data: TaskCreate, user: User = Depends(current_user), session: AsyncSession = Depends(get_session)) -> Task:
-    return await TaskService.create(session, user, data.model_dump())
+    operation = (await CalendarCommandService.execute(session, user, [CalendarMutation("create", "task", data.model_dump())], origin="rest"))[0]
+    await session.commit()
+    return await TaskService.get(session, user, operation.target_id)
 
 
 @app.get("/tasks", response_model=Page[TaskResponse])
@@ -148,19 +139,26 @@ async def get_task(task_id: uuid.UUID, user: User = Depends(current_user), sessi
 
 @app.patch("/tasks/{task_id}", response_model=TaskResponse)
 async def update_task(task_id: uuid.UUID, data: TaskUpdate, user: User = Depends(current_user), session: AsyncSession = Depends(get_session)) -> Task:
-    task = await TaskService.update(session, user, task_id, data.model_dump(exclude_unset=True))
-    if task is None: raise HTTPException(404, "Task not found")
-    return task
+    try:
+        await CalendarCommandService.execute(session, user, [CalendarMutation("update", "task", data.model_dump(exclude_unset=True), task_id)], origin="rest")
+    except CalendarTargetNotFound: raise HTTPException(404, "Task not found")
+    await session.commit()
+    return await TaskService.get(session, user, task_id)
 
 
 @app.delete("/tasks/{task_id}", status_code=204)
 async def delete_task(task_id: uuid.UUID, user: User = Depends(current_user), session: AsyncSession = Depends(get_session)) -> None:
-    if not await TaskService.delete(session, user, task_id): raise HTTPException(404, "Task not found")
+    try:
+        await CalendarCommandService.execute(session, user, [CalendarMutation("delete", "task", {}, task_id)], origin="rest")
+    except CalendarTargetNotFound: raise HTTPException(404, "Task not found")
+    await session.commit()
 
 
 @app.post("/events", response_model=EventResponse, status_code=201)
 async def create_event(data: EventCreate, user: User = Depends(current_user), session: AsyncSession = Depends(get_session)) -> Event:
-    return await EventService.create(session, user, data.model_dump())
+    operation = (await CalendarCommandService.execute(session, user, [CalendarMutation("create", "event", data.model_dump())], origin="rest"))[0]
+    await session.commit()
+    return await EventService.get(session, user, operation.target_id)
 
 
 @app.get("/events", response_model=Page[EventResponse])
@@ -191,86 +189,49 @@ async def get_event(event_id: uuid.UUID, user: User = Depends(current_user), ses
 
 @app.patch("/events/{event_id}", response_model=EventResponse)
 async def update_event(event_id: uuid.UUID, data: EventUpdate, user: User = Depends(current_user), session: AsyncSession = Depends(get_session)) -> Event:
-    event = await EventService.update(session, user, event_id, data.model_dump(exclude_unset=True))
-    if event is None: raise HTTPException(404, "Event not found")
-    return event
+    try:
+        await CalendarCommandService.execute(session, user, [CalendarMutation("update", "event", data.model_dump(exclude_unset=True), event_id)], origin="rest")
+    except CalendarTargetNotFound: raise HTTPException(404, "Event not found")
+    await session.commit()
+    return await EventService.get(session, user, event_id)
 
 
 @app.delete("/events/{event_id}", status_code=204)
 async def delete_event(event_id: uuid.UUID, user: User = Depends(current_user), session: AsyncSession = Depends(get_session)) -> None:
-    if not await EventService.delete(session, user, event_id): raise HTTPException(404, "Event not found")
-
-async def _owned_plan(plan_id: uuid.UUID, user: User, session: AsyncSession) -> ActionPlan:
-    plan = await PlanService.get_owned(session, plan_id, user.id)
-    if plan is None:
-        raise HTTPException(404, "Plan not found")
-    return plan
-
-
-async def _plan_response(plan: ActionPlan, session: AsyncSession) -> ActionPlanResponse:
-    return ActionPlanResponse(
-        id=plan.id,
-        conversation_id=plan.conversation_id,
-        source_message_id=plan.source_message_id,
-        status=plan.status,
-        created_at=plan.created_at,
-        expires_at=plan.expires_at,
-        actions=await PlanService.actions(session, plan.id),
-    )
-
-
-@app.get("/agent/plans/{plan_id}", response_model=ActionPlanResponse)
-async def get_plan(plan_id: uuid.UUID, user: User = Depends(current_user), session: AsyncSession = Depends(get_session)):
-    return await _plan_response(await _owned_plan(plan_id, user, session), session)
-
-
-@app.post("/agent/plans/{plan_id}/actions/{action_id}/confirm", status_code=202, response_model=ActionCommandResponse)
-async def confirm_action(plan_id: uuid.UUID, action_id: uuid.UUID, user: User = Depends(current_user), session: AsyncSession = Depends(get_session)):
-    plan = await _owned_plan(plan_id, user, session)
-    action, newly_approved = await PlanService.approve_action(session, plan, action_id)
-    if action is None:
-        raise HTTPException(404, "Action not found")
-    if newly_approved or action.status == ActionStatus.approved:
-        await enqueue_actions([action.id])
-    return ActionCommandResponse(
-        plan_id=plan.id, plan_status=plan.status, action_id=action.id,
-        action_status=action.status, queued=action.status == ActionStatus.approved,
-    )
-
-
-@app.delete("/agent/plans/{plan_id}/actions/{action_id}", response_model=ActionCommandResponse)
-async def remove_action(plan_id: uuid.UUID, action_id: uuid.UUID, user: User = Depends(current_user), session: AsyncSession = Depends(get_session)):
-    plan = await _owned_plan(plan_id, user, session)
-    action = await session.scalar(select(PlannedAction).where(PlannedAction.id == action_id, PlannedAction.plan_id == plan.id))
-    if action is None:
-        raise HTTPException(404, "Action not found")
-    if action.status != ActionStatus.pending:
-        raise HTTPException(409, "Action is not pending")
-    action.status = ActionStatus.cancelled
-    await PlanService.recompute(session, plan)
+    try:
+        await CalendarCommandService.execute(session, user, [CalendarMutation("delete", "event", {}, event_id)], origin="rest")
+    except CalendarTargetNotFound: raise HTTPException(404, "Event not found")
     await session.commit()
-    return ActionCommandResponse(
-        plan_id=plan.id, plan_status=plan.status, action_id=action.id,
-        action_status=action.status,
-    )
 
 
-@app.post("/agent/plans/{plan_id}/cancel", response_model=ActionCommandResponse)
-async def cancel_plan(plan_id: uuid.UUID, user: User = Depends(current_user), session: AsyncSession = Depends(get_session)):
-    plan = await _owned_plan(plan_id, user, session)
-    await PlanService.cancel_pending(session, plan)
-    return ActionCommandResponse(plan_id=plan.id, plan_status=plan.status)
+@app.get("/calendar/history", response_model=Page[CalendarOperationResponse])
+async def calendar_history(
+    limit: int = Query(50, ge=1, le=100), offset: int = Query(0, ge=0),
+    user: User = Depends(current_user), session: AsyncSession = Depends(get_session),
+) -> Page[CalendarOperationResponse]:
+    condition = CalendarOperation.owner_id == user.id
+    operations = list((await session.scalars(
+        select(CalendarOperation).where(condition)
+        .order_by(CalendarOperation.sequence.desc()).offset(offset).limit(limit)
+    )).all())
+    total = int(await session.scalar(select(func.count()).select_from(CalendarOperation).where(condition)) or 0)
+    return Page(items=[CalendarOperationResponse.from_operation(item) for item in operations], total=total, limit=limit, offset=offset)
 
 
-@app.post("/agent/plans/{plan_id}/confirm", status_code=202, response_model=ActionCommandResponse)
-async def confirm_plan(plan_id: uuid.UUID, user: User = Depends(current_user), session: AsyncSession = Depends(get_session)):
-    plan = await _owned_plan(plan_id, user, session)
-    approved = await PlanService.approve_all(session, plan)
-    await enqueue_actions(approved)
-    return ActionCommandResponse(
-        plan_id=plan.id, plan_status=plan.status, queued=bool(approved),
-        queued_action_ids=approved,
-    )
+@app.post("/calendar/history/{operation_id}/undo", response_model=CalendarOperationResponse, status_code=201)
+async def undo_calendar_operation(
+    operation_id: uuid.UUID, user: User = Depends(current_user),
+    session: AsyncSession = Depends(get_session),
+) -> CalendarOperationResponse | JSONResponse:
+    try:
+        operation = await CalendarCommandService.undo(session, user, operation_id)
+    except CalendarTargetNotFound:
+        return _problem(404, "Операция не найдена", "operation_not_found")
+    except UndoConflict as exc:
+        return _problem(409, str(exc), "undo_conflict")
+    await session.commit()
+    await session.refresh(operation)
+    return CalendarOperationResponse.from_operation(operation)
 
 
 async def _new_message(user: User, session: AsyncSession, *, text: str | None, audio_path: str | None, conversation_id: uuid.UUID | None, idempotency_key: str | None) -> AgentMessage:
@@ -348,15 +309,13 @@ async def _message_response(message: AgentMessage, session: AsyncSession) -> Age
             payload = json.loads(message.result)
         except json.JSONDecodeError:
             payload = {"reply": message.result}
-    plan = await session.scalar(select(ActionPlan).where(ActionPlan.source_message_id == message.id))
     return AgentMessageResponse(
         id=message.id, conversation_id=message.conversation_id, sequence=message.sequence,
         input_text=message.input_text, status=message.status,
-        error=message.error, plan_id=plan.id if plan else None,
-        plan_status=plan.status.value if plan else None, reply=payload.get("reply"),
+        error=message.error, reply=payload.get("reply"),
         reads=payload.get("reads", []),
+        operations=payload.get("operations", []),
         requires_new_conversation=payload.get("requires_new_conversation", False),
-        plan_url=f"/agent/plans/{plan.id}" if plan else None,
         created_at=message.created_at,
     )
 

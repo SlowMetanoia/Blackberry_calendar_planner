@@ -1,6 +1,5 @@
-export type Status = "queued" | "transcribing" | "processing" | "needs_confirmation" | "needs_clarification" | "completed" | "failed";
-export type Action = { id:string; ordinal:number; operation:string; resource:string; target_id:string|null; payload:Record<string,unknown>; status:string; result:Record<string,unknown>|null; error:string|null };
-export type Plan = { id:string; status:string; actions:Action[]; expires_at:string|null };
-export type AgentMessage = { id:string; conversation_id:string; sequence:number; input_text:string|null; status:Status; reply:string|null; reads:Array<{resource:string; id:string; data:Record<string,unknown>}>; plan_id:string|null; error:string|null; requires_new_conversation?:boolean; created_at:string };
+export type Status = "queued" | "transcribing" | "processing" | "needs_clarification" | "completed" | "failed";
+export type CalendarOperation = { id:string; sequence:number; command_id:string; ordinal:number; operation:"create"|"update"|"delete"; resource:"task"|"event"; target_id:string; before:Record<string,unknown>|null; after:Record<string,unknown>|null; changes:Record<string,{before:unknown;after:unknown}>; origin:"agent"|"rest"|"undo"; source_message_id:string|null; reverts_operation_id:string|null; created_at:string };
+export type AgentMessage = { id:string; conversation_id:string; sequence:number; input_text:string|null; status:Status; reply:string|null; reads:Array<{resource:string; id:string; data:Record<string,unknown>}>; operations:CalendarOperation[]; error:string|null; requires_new_conversation?:boolean; created_at:string };
 export type ConversationSummary = { id:string; preview:string; created_at:string; last_activity_at:string };
 export type Page<T> = { items:T[]; total:number; limit:number; offset:number };

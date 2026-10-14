@@ -31,14 +31,6 @@ class ResourceService:
     datetime_fields: set[str] = set()
 
     @classmethod
-    async def create(cls, session: AsyncSession, user: User, data: dict):
-        obj = cls.model(owner_id=user.id, **_normalize_payload(data, user, cls.datetime_fields))
-        session.add(obj)
-        await session.commit()
-        await session.refresh(obj)
-        return obj
-
-    @classmethod
     def _range_conditions(
         cls,
         user: User,
@@ -101,27 +93,6 @@ class ResourceService:
     async def get(cls, session: AsyncSession, user: User, ident: uuid.UUID):
         query = select(cls.model).where(cls.model.id == ident, cls.model.owner_id == user.id)
         return await session.scalar(query)
-
-    @classmethod
-    async def update(cls, session: AsyncSession, user: User, ident: uuid.UUID, data: dict):
-        obj = await cls.get(session, user, ident)
-        if obj is None:
-            return None
-        for key, value in _normalize_payload(data, user, cls.datetime_fields).items():
-            setattr(obj, key, value)
-        await session.commit()
-        await session.refresh(obj)
-        return obj
-
-    @classmethod
-    async def delete(cls, session: AsyncSession, user: User, ident: uuid.UUID):
-        obj = await cls.get(session, user, ident)
-        if obj is None:
-            return False
-        await session.delete(obj)
-        await session.commit()
-        return True
-
 
 class TaskService(ResourceService):
     model = Task

@@ -5,7 +5,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator, model_validator
 
-from .models import ActionStatus, MessageStatus, PlanStatus
+from .models import MessageStatus
 
 
 class AuthRequest(BaseModel):
@@ -96,12 +96,10 @@ class AgentMessageResponse(BaseModel):
     sequence: int
     input_text: str | None = None
     error: str | None = None
-    plan_id: uuid.UUID | None = None
-    plan_status: str | None = None
     reply: str | None = None
     reads: list[dict] = Field(default_factory=list)
+    operations: list[dict] = Field(default_factory=list)
     requires_new_conversation: bool = False
-    plan_url: str | None = None
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
@@ -119,28 +117,32 @@ class ConversationSummary(BaseModel):
     last_activity_at: datetime
 
 
-class PlannedActionResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
+class CalendarOperationResponse(BaseModel):
     id: uuid.UUID
+    sequence: int
+    command_id: uuid.UUID
     ordinal: int
-    operation: str
-    resource: str
-    target_id: uuid.UUID | None
-    payload: dict
-    status: ActionStatus
-    result: dict | None
-    error: str | None
-    expires_at: datetime | None
-
-
-class ActionPlanResponse(BaseModel):
-    id: uuid.UUID
-    conversation_id: uuid.UUID
+    operation: Literal["create", "update", "delete"]
+    resource: Literal["task", "event"]
+    target_id: uuid.UUID
+    before: dict | None
+    after: dict | None
+    changes: dict
+    origin: Literal["agent", "rest", "undo"]
     source_message_id: uuid.UUID | None
-    status: PlanStatus
+    reverts_operation_id: uuid.UUID | None
     created_at: datetime
-    expires_at: datetime | None
-    actions: list[PlannedActionResponse]
+
+    @classmethod
+    def from_operation(cls, operation):
+        return cls(
+            id=operation.id, sequence=operation.sequence, command_id=operation.command_id,
+            ordinal=operation.ordinal, operation=operation.operation, resource=operation.resource,
+            target_id=operation.target_id, before=operation.before_state,
+            after=operation.after_state, changes=operation.changes, origin=operation.origin,
+            source_message_id=operation.source_message_id,
+            reverts_operation_id=operation.reverts_operation_id, created_at=operation.created_at,
+        )
 
 
 T = TypeVar("T")
@@ -151,15 +153,6 @@ class Page(BaseModel, Generic[T]):
     total: int
     limit: int
     offset: int
-
-
-class ActionCommandResponse(BaseModel):
-    plan_id: uuid.UUID
-    plan_status: PlanStatus
-    action_id: uuid.UUID | None = None
-    action_status: ActionStatus | None = None
-    queued: bool = False
-    queued_action_ids: list[uuid.UUID] = Field(default_factory=list)
 
 
 class ProblemDetail(BaseModel):

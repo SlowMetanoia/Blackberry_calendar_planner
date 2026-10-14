@@ -12,8 +12,8 @@ from sqlalchemy import select
 
 from .config import get_settings
 from .llm import auth_headers, completion_payload, normalize_base_url
-from .models import ActionPlan, AgentMessage, PlannedAction, User
-from .plans import PlanService
+from .calendar import CalendarCommandService, operation_dict
+from .models import AgentMessage, CalendarOperation, User
 from .schemas import DecisionEnvelope
 from .services import EventService, TaskService
 
@@ -41,7 +41,7 @@ class AgentState(TypedDict, total=False):
     decision: dict
     context: AgentRunContext
     reads: list[dict]
-    plan_id: str
+    operations: list[dict]
 
 
 class LLMProtocolError(RuntimeError):
@@ -63,7 +63,7 @@ User IANA timezone: {timezone_name}
 Resolve relative dates such as today and tomorrow against this local datetime. Return all deadline and starts_at values as absolute ISO-8601 datetimes with an explicit UTC offset.
 The application has access to the user's tasks and events. For requests to show, list, find, or get them, populate reads; the application will execute those reads immediately.
 For time-bounded list requests, include a time_range with timezone-aware `from` (inclusive) and `to` (exclusive). Apply it to event starts_at or task deadline. For broad requests such as "what do I have tomorrow", request both tasks and events with the same local-day range.
-For create, update, and delete requests, populate mutations; the application will show them as a confirmation plan. Never say that a mutation has already been executed. Say that a plan was prepared.
+For create, update, and delete requests, populate mutations; the application executes all mutations immediately and atomically. Describe them as completed actions, never as a plan awaiting confirmation.
 Treat the timezone above as authoritative and never ask the user to confirm it. Infer a useful title from the request: for example, "встреча с Ильёй" is already a sufficient event title. Ask for clarification only when a required fact such as an event date or time is truly absent.
 Resolve pronouns and short references such as "она", "эта конференция", or "эта встреча" against the entire conversation and the current referenced records supplied after the history. Those records contain fresh database values and are authoritative.
 When the user asks to change only a person, organization, conference, place, or another fragment inside a compound title, return the complete resulting title in payload.title and preserve every unrequested part exactly. For example, changing "Acme" to "Contoso" in "Подготовить отчёт для Acme за квартал" must produce "Подготовить отчёт для Contoso за квартал", not merely "Contoso". Replace the entire title only when the user explicitly requests a complete rename.
@@ -200,7 +200,7 @@ async def _referenced_resource_context(
     messages: list[AgentMessage],
 ) -> list[dict]:
     references: dict[tuple[str, uuid.UUID], None] = {}
-    plan_ids: list[uuid.UUID] = []
+    message_ids: list[uuid.UUID] = []
     for message in messages:
         payload = _result_payload(message.result)
         reads = payload.get("reads", [])
@@ -212,36 +212,20 @@ async def _referenced_resource_context(
                 if reference:
                     references.pop(reference, None)
                     references[reference] = None
-        try:
-            if payload.get("plan_id"):
-                plan_ids.append(uuid.UUID(str(payload["plan_id"])))
-        except (TypeError, ValueError, AttributeError):
-            pass
+        message_ids.append(message.id)
 
-    if plan_ids:
-        plans = list((await context.session.scalars(
-            select(ActionPlan).where(
-                ActionPlan.id.in_(plan_ids),
-                ActionPlan.owner_id == context.owner_id,
-                ActionPlan.conversation_id == context.conversation_id,
-            )
+    if message_ids:
+        operations = list((await context.session.scalars(
+            select(CalendarOperation).where(
+                CalendarOperation.source_message_id.in_(message_ids),
+                CalendarOperation.owner_id == context.owner_id,
+            ).order_by(CalendarOperation.sequence)
         )).all())
-        owned_plan_ids = [plan.id for plan in plans]
-        if owned_plan_ids:
-            actions = list((await context.session.scalars(
-                select(PlannedAction)
-                .where(PlannedAction.plan_id.in_(owned_plan_ids))
-                .order_by(PlannedAction.ordinal)
-            )).all())
-            for action in actions:
-                result_id = action.result.get("id") if isinstance(action.result, dict) else None
-                reference = _resource_reference(
-                    action.resource,
-                    action.target_id or result_id,
-                )
-                if reference:
-                    references.pop(reference, None)
-                    references[reference] = None
+        for operation in operations:
+            reference = _resource_reference(operation.resource, operation.target_id)
+            if reference:
+                references.pop(reference, None)
+                references[reference] = None
 
     user = await context.session.get(User, context.owner_id)
     if user is None:
@@ -362,25 +346,21 @@ async def _execute_reads(state: AgentState) -> AgentState:
     return {"reads": results}
 
 
-async def _build_plan(state: AgentState) -> AgentState:
-    return {"decision": state["decision"]}
-
-
-async def _persist_plan(state: AgentState) -> AgentState:
+async def _execute_mutations(state: AgentState) -> AgentState:
     decision = DecisionEnvelope.model_validate(state["decision"])
     if not decision.mutations:
         return {}
     context = state.get("context")
     if context is None:
         raise RuntimeError("Agent runtime context is required for mutations")
-    plan = await PlanService.create(
-        context.session,
-        owner_id=context.owner_id,
-        conversation_id=context.conversation_id,
-        source_message_id=context.source_message_id,
-        mutations=decision.mutations,
+    user = await context.session.get(User, context.owner_id)
+    if user is None:
+        raise RuntimeError("Agent owner not found")
+    operations = await CalendarCommandService.execute(
+        context.session, user, decision.mutations, origin="agent",
+        command_id=context.source_message_id, source_message_id=context.source_message_id,
     )
-    return {"plan_id": str(plan.id)}
+    return {"operations": [operation_dict(item) for item in operations]}
 
 
 async def _failed(state: AgentState) -> AgentState:
@@ -394,8 +374,7 @@ async def _clarify(state: AgentState) -> AgentState:
 async def _finish(state: AgentState) -> AgentState:
     decision = DecisionEnvelope.model_validate(state["decision"])
     result = {"reply": decision.reply, "reads": state.get("reads", [])}
-    if state.get("plan_id"):
-        result["plan_id"] = state["plan_id"]
+    result["operations"] = state.get("operations", [])
     return {
         "state": "completed",
         "result": json.dumps(result, ensure_ascii=False),
@@ -408,17 +387,15 @@ def _compiled_graph():
     graph.add_node("interpret", _interpret)
     graph.add_node("validate_decision", _validate_decision)
     graph.add_node("execute_reads", _execute_reads)
-    graph.add_node("build_plan", _build_plan)
-    graph.add_node("persist_plan", _persist_plan)
+    graph.add_node("execute_mutations", _execute_mutations)
     graph.add_node("clarify", _clarify)
     graph.add_node("failed", _failed)
     graph.add_node("finish", _finish)
     graph.add_edge(START, "interpret")
     graph.add_conditional_edges("interpret", _route_after_interpret)
     graph.add_conditional_edges("validate_decision", _route_after_validation)
-    graph.add_edge("execute_reads", "build_plan")
-    graph.add_edge("build_plan", "persist_plan")
-    graph.add_edge("persist_plan", "finish")
+    graph.add_edge("execute_reads", "execute_mutations")
+    graph.add_edge("execute_mutations", "finish")
     graph.add_edge("clarify", END)
     graph.add_edge("failed", END)
     graph.add_edge("finish", END)
