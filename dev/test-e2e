@@ -1,0 +1,13 @@
+#!/bin/sh
+set -eu
+project="planner_e2e"
+API_PORT=$(.venv/bin/python -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()')
+export API_PORT
+export WEB_PORT=13000
+compose="docker compose -p $project -f docker-compose.yml -f docker-compose.e2e.yml"
+cleanup() { $compose down -v --remove-orphans; }
+trap cleanup EXIT INT TERM
+$compose up -d --build postgres redis fake-openai
+$compose --profile release run --rm migrate
+$compose up -d --build --wait --wait-timeout 60 api worker
+E2E_BASE_URL="http://127.0.0.1:$API_PORT" .venv/bin/python -m pytest tests/test_e2e_http.py -q

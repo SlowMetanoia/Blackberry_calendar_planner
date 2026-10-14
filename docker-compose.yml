@@ -1,0 +1,56 @@
+services:
+  web:
+    build: ./web
+    ports: ["${WEB_PORT:-3000}:80"]
+    depends_on:
+      api: { condition: service_healthy }
+  api:
+    build: .
+    command: uvicorn planner.main:app --host 0.0.0.0 --port 8000
+    env_file: ${ENV_FILE:-.env.example}
+    ports: ["${API_PORT:-8000}:8000"]
+    volumes: ["audio_data:/tmp/planner-audio"]
+    extra_hosts: ["host.docker.internal:host-gateway"]
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_started }
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+  worker:
+    build: .
+    command: arq planner.worker.WorkerSettings
+    env_file: ${ENV_FILE:-.env.example}
+    volumes: ["audio_data:/tmp/planner-audio"]
+    extra_hosts: ["host.docker.internal:host-gateway"]
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_started }
+  migrate:
+    build: .
+    command: alembic upgrade head
+    env_file: ${ENV_FILE:-.env.example}
+    profiles: ["release"]
+    depends_on:
+      postgres: { condition: service_healthy }
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: planner
+      POSTGRES_USER: planner
+      POSTGRES_PASSWORD: planner
+    volumes: ["postgres_data:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U planner -d planner"]
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+volumes:
+  postgres_data:
+  audio_data:

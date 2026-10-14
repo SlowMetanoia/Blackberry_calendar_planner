@@ -1,0 +1,36 @@
+services:
+  api:
+    environment: &test-env
+      DATABASE_URL: postgresql+asyncpg://planner:planner@postgres:5432/planner
+      REDIS_URL: redis://redis:6379/0
+      JWT_SECRET: e2e-secret-long-enough-for-tests
+      LLM_BASE_URL: http://fake-openai:8080/v1
+      LLM_API_KEY: test
+      LLM_MODEL: fake-planner
+      LLM_REQUIRED: "true"
+      STT_BASE_URL: http://fake-openai:8080/v1
+      STT_API_KEY: test
+      CREATE_AUTO_CONFIRM_SECONDS: 1
+    depends_on:
+      fake-openai: { condition: service_healthy }
+  worker:
+    environment: *test-env
+    depends_on:
+      fake-openai: { condition: service_healthy }
+  migrate:
+    environment:
+      <<: *test-env
+      LLM_REQUIRED: "false"
+  web:
+    environment:
+      E2E: "1"
+  postgres:
+    volumes: []
+    tmpfs: [/var/lib/postgresql/data]
+  fake-openai:
+    build: ./e2e
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"]
+      interval: 2s
+      timeout: 2s
+      retries: 10

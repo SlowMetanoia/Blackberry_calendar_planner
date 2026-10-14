@@ -1,0 +1,47 @@
+# Environment and local secrets
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*.so
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+
+# Python tooling and test output
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+.tox/
+.nox/
+
+# Local databases, logs, and runtime files
+*.db
+*.sqlite
+*.sqlite3
+*.log
+*.pid
+
+# React / Vite / TypeScript
+web/node_modules/
+web/dist/
+web/coverage/
+web/test-results/
+web/playwright-report/
+*.tsbuildinfo
+
+# Editors and operating systems
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
