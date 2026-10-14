@@ -1,4 +1,5 @@
 import json
+import logging
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -16,6 +17,17 @@ from .calendar import CalendarCommandService, operation_dict
 from .models import AgentMessage, CalendarOperation, User
 from .schemas import DecisionEnvelope
 from .services import EventService, TaskService
+
+logger = logging.getLogger(__name__)
+INVALID_DECISION_RESULT = json.dumps(
+    {
+        "reply": (
+            "Не удалось корректно разобрать запрос. "
+            "Переформулируйте его и попробуйте ещё раз."
+        )
+    },
+    ensure_ascii=False,
+)
 
 
 @dataclass
@@ -65,6 +77,7 @@ The application has access to the user's tasks and events. For requests to show,
 For time-bounded list requests, include a time_range with timezone-aware `from` (inclusive) and `to` (exclusive). Apply it to event starts_at or task deadline. For broad requests such as "what do I have tomorrow", request both tasks and events with the same local-day range.
 For create, update, and delete requests, populate mutations; the application executes all mutations immediately and atomically. Describe them as completed actions, never as a plan awaiting confirmation.
 Treat the timezone above as authoritative and never ask the user to confirm it. Infer a useful title from the request: for example, "встреча с Ильёй" is already a sufficient event title. Ask for clarification only when a required fact such as an event date or time is truly absent.
+Always return a non-empty reply. When clarification is needed, put the question in both reply and clarification, and leave reads and mutations empty.
 Resolve pronouns and short references such as "она", "эта конференция", or "эта встреча" against the entire conversation and the current referenced records supplied after the history. Those records contain fresh database values and are authoritative.
 When the user asks to change only a person, organization, conference, place, or another fragment inside a compound title, return the complete resulting title in payload.title and preserve every unrequested part exactly. For example, changing "Acme" to "Contoso" in "Подготовить отчёт для Acme за квартал" must produce "Подготовить отчёт для Contoso за квартал", not merely "Contoso". Replace the entire title only when the user explicitly requests a complete rename.
 If more than one referenced record could satisfy an update or the intended record is unclear, return a clarification and no mutation.
@@ -284,7 +297,8 @@ async def _interpret(state: AgentState) -> AgentState:
             ),
         }
     except LLMProtocolError as exc:
-        return {"state": "failed", "result": str(exc)}
+        logger.warning("LLM protocol validation failed: %s", exc)
+        return {"state": "failed", "result": INVALID_DECISION_RESULT}
     except RuntimeError as exc:
         return {"state": "needs_clarification", "result": str(exc)}
 
@@ -301,7 +315,8 @@ async def _validate_decision(state: AgentState) -> AgentState:
     try:
         decision = parse_decision(state.get("llm_output", ""))
     except (ValueError, TypeError) as exc:
-        return {"state": "failed", "result": str(exc)}
+        logger.warning("LLM decision validation failed: %s", exc)
+        return {"state": "failed", "result": INVALID_DECISION_RESULT}
     if decision.clarification:
         return {"state": "needs_clarification", "result": decision.clarification}
     return {"decision": decision.model_dump(mode="json")}

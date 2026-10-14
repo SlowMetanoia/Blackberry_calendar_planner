@@ -14,14 +14,20 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from .config import get_settings
 from .db import Base, engine, get_session
-from .calendar import CalendarCommandService, CalendarMutation, CalendarTargetNotFound, UndoConflict
+from .calendar import (
+    CalendarCommandService,
+    CalendarMutation,
+    CalendarTargetNotFound,
+    CalendarValidationError,
+    UndoConflict,
+)
 from .models import AgentMessage, CalendarOperation, Conversation, Event, MessageStatus, Task, User
 from .llm import verify_llm_connection
 from .services import TaskService, EventService, normalize_datetime
 from .schemas import (
     AgentInput, AgentMessageResponse, AuthRequest, CalendarOperationResponse,
     ConversationSummary, EventCreate, EventResponse, EventUpdate, Page, ProblemDetail, TaskCreate, TaskResponse,
-    TaskUpdate, TimezoneValue, TokenResponse,
+    ProblemFieldError, TaskUpdate, TimezoneValue, TokenResponse,
 )
 from .security import create_token, current_user, hash_password, verify_password
 
@@ -41,13 +47,21 @@ async def lifespan(_app: FastAPI):
 app = FastAPI(title="Smart Planner API", version="0.1.0", lifespan=lifespan)
 
 
-def _problem(status_code: int, detail: str, code: str) -> JSONResponse:
-    titles = {401: "Unauthorized", 404: "Not Found", 409: "Conflict", 422: "Validation Error"}
+def _problem(
+    status_code: int,
+    detail: str,
+    code: str,
+    errors: list[ProblemFieldError] | None = None,
+) -> JSONResponse:
+    titles = {
+        401: "Unauthorized", 404: "Not Found", 409: "Conflict",
+        413: "Content Too Large", 415: "Unsupported Media Type", 422: "Validation Error",
+    }
     body = ProblemDetail(
         title=titles.get(status_code, "Request Error"), status=status_code,
-        detail=detail, code=code,
+        detail=detail, code=code, errors=errors,
     )
-    return JSONResponse(body.model_dump(), status_code=status_code,
+    return JSONResponse(body.model_dump(exclude_none=True), status_code=status_code,
                         media_type="application/problem+json")
 
 
@@ -58,7 +72,22 @@ async def http_problem(_request: Request, exc: HTTPException) -> JSONResponse:
 
 @app.exception_handler(RequestValidationError)
 async def validation_problem(_request: Request, exc: RequestValidationError) -> JSONResponse:
-    return _problem(422, str(exc.errors()), "validation_error")
+    errors = [
+        ProblemFieldError(
+            location=".".join(str(part) for part in item.get("loc", ())),
+            message=item.get("msg", "Invalid value"),
+            error_type=item.get("type", "validation_error"),
+        )
+        for item in exc.errors()
+    ]
+    return _problem(422, "Request validation failed", "validation_error", errors)
+
+
+@app.exception_handler(CalendarValidationError)
+async def calendar_validation_problem(
+    _request: Request, exc: CalendarValidationError
+) -> JSONResponse:
+    return _problem(422, str(exc), "calendar_validation_error")
 
 
 @app.get("/health", include_in_schema=False)
@@ -72,6 +101,36 @@ async def enqueue(message_id: uuid.UUID) -> None:
         await pool.enqueue_job("process_message", str(message_id), _job_id=f"message:{message_id}")
     finally:
         await pool.close()
+
+
+async def _save_audio_upload(
+    audio: UploadFile,
+    *,
+    directory: Path = AUDIO_DIR,
+    max_bytes: int,
+) -> Path:
+    content_type = (audio.content_type or "").lower()
+    if not (content_type.startswith("audio/") or content_type == "application/octet-stream"):
+        raise HTTPException(415, "Поддерживаются только аудиофайлы")
+    suffix = Path(audio.filename or "").suffix.lower()
+    if not suffix or len(suffix) > 16 or not suffix[1:].isalnum():
+        suffix = ".audio"
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / f"{uuid.uuid4()}{suffix}"
+    total = 0
+    try:
+        with path.open("wb") as destination:
+            while chunk := await audio.read(1024 * 1024):
+                total += len(chunk)
+                if total > max_bytes:
+                    raise HTTPException(413, "Аудиофайл слишком большой")
+                destination.write(chunk)
+        if total == 0:
+            raise HTTPException(422, "Аудиофайл пуст")
+        return path
+    except BaseException:
+        path.unlink(missing_ok=True)
+        raise
 
 
 @app.post("/auth/register", response_model=TokenResponse, status_code=201)
@@ -321,16 +380,17 @@ async def _message_response(message: AgentMessage, session: AsyncSession) -> Age
 
 
 @app.post("/agent/messages", response_model=AgentMessageResponse, status_code=202)
-async def submit_text_message(data: AgentInput, user: User = Depends(current_user), session: AsyncSession = Depends(get_session), idempotency_key: str | None = Header(default=None)) -> AgentMessageResponse:
+async def submit_text_message(data: AgentInput, user: User = Depends(current_user), session: AsyncSession = Depends(get_session), idempotency_key: str | None = Header(default=None, min_length=1, max_length=255)) -> AgentMessageResponse:
     message = await _new_message(user, session, text=data.text, audio_path=None, conversation_id=data.conversation_id, idempotency_key=idempotency_key)
     return await _message_response(message, session)
 
 
 @app.post("/agent/messages/audio", response_model=AgentMessageResponse, status_code=202)
-async def submit_audio_message(audio: UploadFile = File(...), conversation_id: uuid.UUID | None = None, user: User = Depends(current_user), session: AsyncSession = Depends(get_session), idempotency_key: str | None = Header(default=None)) -> AgentMessageResponse:
-    AUDIO_DIR.mkdir(parents=True, exist_ok=True)
-    audio_path = AUDIO_DIR / f"{uuid.uuid4()}-{audio.filename or 'message.audio'}"
-    audio_path.write_bytes(await audio.read())
+async def submit_audio_message(audio: UploadFile = File(...), conversation_id: uuid.UUID | None = None, user: User = Depends(current_user), session: AsyncSession = Depends(get_session), idempotency_key: str | None = Header(default=None, min_length=1, max_length=255)) -> AgentMessageResponse:
+    audio_path = await _save_audio_upload(
+        audio,
+        max_bytes=get_settings().audio_max_upload_bytes,
+    )
     message = await _new_message(user, session, text=None, audio_path=str(audio_path), conversation_id=conversation_id, idempotency_key=idempotency_key)
     return await _message_response(message, session)
 

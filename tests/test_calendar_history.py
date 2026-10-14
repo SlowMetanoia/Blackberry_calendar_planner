@@ -6,7 +6,12 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from planner import agent
 from planner.agent import AgentRunContext, run_agent
-from planner.calendar import CalendarCommandService, CalendarMutation, UndoConflict
+from planner.calendar import (
+    CalendarCommandService,
+    CalendarHistoryCorrupt,
+    CalendarMutation,
+    UndoConflict,
+)
 from planner.db import Base
 from planner.models import AgentMessage, CalendarOperation, Conversation, MessageStatus, Task, User
 from planner.services import TaskService
@@ -144,6 +149,20 @@ async def test_replay_rebuilds_projection(session, user):
     await session.execute(Task.__table__.delete())
     await CalendarCommandService.replay(session, user)
     assert (await TaskService.get(session, user, created.target_id)).title == "After"
+
+
+@pytest.mark.asyncio
+async def test_replay_validates_history_before_deleting_projection(session, user):
+    created = (await CalendarCommandService.execute(session, user, [
+        CalendarMutation("create", "task", {"title": "Still present"})
+    ], origin="rest"))[0]
+    await session.flush()
+    created.after_state = {**created.after_state, "title": None}
+
+    with pytest.raises(CalendarHistoryCorrupt):
+        await CalendarCommandService.replay(session, user)
+
+    assert (await TaskService.get(session, user, created.target_id)).title == "Still present"
 
 
 @pytest.mark.asyncio

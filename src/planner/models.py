@@ -2,7 +2,19 @@ import enum
 import uuid
 from datetime import datetime
 
-from sqlalchemy import BigInteger, DateTime, Enum, ForeignKey, Index, String, Text, UniqueConstraint, func, JSON
+from sqlalchemy import (
+    JSON,
+    BigInteger,
+    CheckConstraint,
+    DateTime,
+    Enum,
+    ForeignKey,
+    Index,
+    String,
+    Text,
+    UniqueConstraint,
+    func,
+)
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -29,6 +41,19 @@ class User(Base):
 
 class Task(Base):
     __tablename__ = "tasks"
+    __table_args__ = (
+        CheckConstraint("length(trim(title)) > 0", name="ck_tasks_title_not_blank"),
+        CheckConstraint("length(title) <= 500", name="ck_tasks_title_length"),
+        CheckConstraint(
+            "description IS NULL OR length(description) <= 10000",
+            name="ck_tasks_description_length",
+        ),
+        CheckConstraint(
+            "estimated_minutes IS NULL OR estimated_minutes > 0",
+            name="ck_tasks_estimated_minutes_positive",
+        ),
+        CheckConstraint("status IN ('open', 'completed')", name="ck_tasks_status"),
+    )
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     owner_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
     title: Mapped[str] = mapped_column(String(500))
@@ -40,6 +65,22 @@ class Task(Base):
 
 class Event(Base):
     __tablename__ = "events"
+    __table_args__ = (
+        CheckConstraint("length(trim(title)) > 0", name="ck_events_title_not_blank"),
+        CheckConstraint("length(title) <= 500", name="ck_events_title_length"),
+        CheckConstraint(
+            "description IS NULL OR length(description) <= 10000",
+            name="ck_events_description_length",
+        ),
+        CheckConstraint(
+            "location IS NULL OR length(location) <= 500",
+            name="ck_events_location_length",
+        ),
+        CheckConstraint(
+            "duration_minutes IS NULL OR duration_minutes > 0",
+            name="ck_events_duration_minutes_positive",
+        ),
+    )
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     owner_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
     title: Mapped[str] = mapped_column(String(500))
@@ -54,6 +95,11 @@ class AgentMessage(Base):
     __table_args__ = (
         UniqueConstraint("owner_id", "idempotency_key"),
         UniqueConstraint("conversation_id", "sequence"),
+        CheckConstraint("sequence > 0", name="ck_agent_messages_sequence_positive"),
+        CheckConstraint(
+            "input_text IS NULL OR length(input_text) <= 10000",
+            name="ck_agent_messages_input_text_length",
+        ),
     )
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     owner_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
@@ -84,6 +130,28 @@ class CalendarOperation(Base):
         UniqueConstraint("owner_id", "command_id", "ordinal"),
         Index("ix_calendar_operations_owner_sequence", "owner_id", "sequence"),
         Index("ix_calendar_operations_owner_target", "owner_id", "resource", "target_id"),
+        CheckConstraint("sequence > 0", name="ck_calendar_operations_sequence_positive"),
+        CheckConstraint("ordinal >= 0", name="ck_calendar_operations_ordinal_nonnegative"),
+        CheckConstraint(
+            "operation IN ('create', 'update', 'delete')",
+            name="ck_calendar_operations_operation",
+        ),
+        CheckConstraint(
+            "resource IN ('task', 'event')", name="ck_calendar_operations_resource"
+        ),
+        CheckConstraint(
+            "origin IN ('agent', 'rest', 'undo')", name="ck_calendar_operations_origin"
+        ),
+        CheckConstraint(
+            "(operation = 'create' AND before_state IS NULL AND after_state IS NOT NULL) OR "
+            "(operation = 'update' AND before_state IS NOT NULL AND after_state IS NOT NULL) OR "
+            "(operation = 'delete' AND before_state IS NOT NULL AND after_state IS NULL)",
+            name="ck_calendar_operations_snapshots",
+        ),
+        CheckConstraint(
+            "reverts_operation_id IS NULL OR reverts_operation_id <> id",
+            name="ck_calendar_operations_not_self_reverting",
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -94,8 +162,8 @@ class CalendarOperation(Base):
     operation: Mapped[str] = mapped_column(String(16))
     resource: Mapped[str] = mapped_column(String(16))
     target_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
-    before_state: Mapped[dict | None] = mapped_column(JSON)
-    after_state: Mapped[dict | None] = mapped_column(JSON)
+    before_state: Mapped[dict | None] = mapped_column(JSON(none_as_null=True))
+    after_state: Mapped[dict | None] = mapped_column(JSON(none_as_null=True))
     changes: Mapped[dict] = mapped_column(JSON, default=dict)
     origin: Mapped[str] = mapped_column(String(16))
     source_message_id: Mapped[uuid.UUID | None] = mapped_column(

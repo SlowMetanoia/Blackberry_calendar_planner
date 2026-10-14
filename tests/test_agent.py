@@ -143,6 +143,20 @@ def test_decision_envelope_rejects_free_text() -> None:
         parse_decision("создам задачу")
 
 
+@pytest.mark.asyncio
+async def test_agent_hides_invalid_model_envelope_details(monkeypatch) -> None:
+    async def invalid(*_args, **_kwargs):
+        return '{"reply":"ok","reads":[],"mutations":[{"operation":"create",' \
+            '"resource":"task","payload":{"title":null}}],"clarification":null}'
+
+    monkeypatch.setattr(agent, "_complete", invalid)
+    result = await run_agent("создай задачу")
+    assert result.state == "failed"
+    assert "Переформулируйте" in result.result
+    assert "title" not in result.result
+    assert "ValidationError" not in result.result
+
+
 def test_decision_envelope_requires_target_for_update() -> None:
     raw = '{"reply":"ok","reads":[],"mutations":[{"operation":"update","resource":"task","payload":{"title":"x"}}],"clarification":null}'
     with pytest.raises(ValueError):
@@ -184,6 +198,7 @@ def test_system_prompt_contains_local_clock_and_timezone() -> None:
     assert "time_range" in prompt
     assert "complete resulting title" in prompt
     assert "preserve every unrequested part" in prompt
+    assert "non-empty reply" in prompt
 
 
 def test_empty_content_does_not_fall_back_to_reasoning() -> None:

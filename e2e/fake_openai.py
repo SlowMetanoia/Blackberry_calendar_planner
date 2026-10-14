@@ -39,11 +39,11 @@ class Handler(BaseHTTPRequestHandler):
         ):
             envelope = {"reply": "Подготовил встречу по поводу релиза", "reads": [], "mutations": [{"operation": "create", "resource": "event", "payload": {"title": "Встреча по поводу релиза", "starts_at": "2026-10-15T11:00:00+03:00"}}], "clarification": None}
         elif "добавь встречу" in lowered:
-            envelope = {"reply": "", "reads": [], "mutations": [], "clarification": "Уточните повод встречи"}
+            envelope = {"reply": "Уточните повод встречи", "reads": [], "mutations": [], "clarification": "Уточните повод встречи"}
         elif "покажи" in lowered:
             envelope = {"reply": "Вот ваши задачи", "reads": [{"operation": "list", "resource": "task"}], "mutations": [], "clarification": None}
         elif "непонятно" in lowered:
-            envelope = {"reply": "", "reads": [], "mutations": [], "clarification": "Уточните, пожалуйста"}
+            envelope = {"reply": "Уточните, пожалуйста", "reads": [], "mutations": [], "clarification": "Уточните, пожалуйста"}
         else:
             title = text.split("задачу", 1)[-1].strip() or "Новая задача"
             envelope = {"reply": "Подготовил план", "reads": [], "mutations": [{"operation": "create", "resource": "task", "target_id": None, "payload": {"title": title}}], "clarification": None}

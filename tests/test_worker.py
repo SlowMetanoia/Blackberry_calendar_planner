@@ -149,3 +149,37 @@ async def test_transcription_failure_is_safe_and_does_not_run_agent(worker_db, m
         stored = await session.get(AgentMessage, message_id)
         assert stored.status == MessageStatus.failed
         assert stored.error == safe_error
+
+
+@pytest.mark.asyncio
+async def test_unexpected_worker_error_does_not_leak_internal_details(worker_db, monkeypatch) -> None:
+    async with worker_db() as session:
+        user = User(email="safe-worker@example.test", password_hash="x")
+        session.add(user)
+        await session.flush()
+        conversation = Conversation(owner_id=user.id)
+        session.add(conversation)
+        await session.flush()
+        message = AgentMessage(
+            owner_id=user.id,
+            conversation_id=conversation.id,
+            sequence=1,
+            input_text="сломайся",
+            status=MessageStatus.queued,
+        )
+        session.add(message)
+        await session.commit()
+        message_id = message.id
+
+    async def explode(*_args, **_kwargs):
+        raise RuntimeError("INSERT INTO tasks secret_database_password")
+
+    monkeypatch.setattr(worker, "run_agent", explode)
+    with pytest.raises(RuntimeError):
+        await worker.process_message({"redis": FakeRedis(), "job_try": 1}, str(message_id))
+
+    async with worker_db() as session:
+        stored = await session.get(AgentMessage, message_id)
+        assert stored.status == MessageStatus.failed
+        assert stored.error == "Не удалось обработать сообщение. Попробуйте ещё раз."
+        assert "INSERT" not in stored.error

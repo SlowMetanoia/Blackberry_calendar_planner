@@ -3,10 +3,12 @@ import uuid
 from dataclasses import dataclass
 from typing import Any, Iterable
 
+from pydantic import ValidationError
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .models import CalendarOperation, Event, Task, User
+from .schemas import EventCreate, EventUpdate, TaskCreate, TaskUpdate
 from .services import _normalize_payload
 
 
@@ -15,6 +17,14 @@ class CalendarTargetNotFound(LookupError):
 
 
 class UndoConflict(RuntimeError):
+    pass
+
+
+class CalendarValidationError(ValueError):
+    pass
+
+
+class CalendarHistoryCorrupt(RuntimeError):
     pass
 
 
@@ -28,6 +38,10 @@ class CalendarMutation:
 
 MODELS = {"task": Task, "event": Event}
 DATETIME_FIELDS = {"task": {"deadline"}, "event": {"starts_at"}}
+CREATE_SCHEMAS = {"task": TaskCreate, "event": EventCreate}
+UPDATE_SCHEMAS = {"task": TaskUpdate, "event": EventUpdate}
+OPERATIONS = {"create", "update", "delete"}
+ORIGINS = {"agent", "rest", "undo"}
 
 
 def _json_value(value: Any) -> Any:
@@ -70,6 +84,49 @@ def _mutation(value: Any) -> CalendarMutation:
     return CalendarMutation(value.operation, value.resource, payload, value.target_id)
 
 
+def _validated_mutation(value: Any, user: User) -> CalendarMutation:
+    try:
+        mutation = _mutation(value)
+    except (TypeError, AttributeError) as exc:
+        raise CalendarValidationError("Некорректный формат календарного действия") from exc
+    if mutation.operation not in OPERATIONS:
+        raise CalendarValidationError(f"Unsupported operation: {mutation.operation}")
+    if mutation.resource not in MODELS:
+        raise CalendarValidationError(f"Unsupported resource: {mutation.resource}")
+    if not isinstance(mutation.payload, dict):
+        raise CalendarValidationError("Mutation payload must be an object")
+    if mutation.operation in {"update", "delete"} and mutation.target_id is None:
+        raise CalendarValidationError("target_id is required")
+    target_id = mutation.target_id
+    if target_id is not None:
+        try:
+            target_id = uuid.UUID(str(target_id))
+        except (TypeError, ValueError, AttributeError) as exc:
+            raise CalendarValidationError("target_id must be a UUID") from exc
+    try:
+        if mutation.operation == "create":
+            payload = CREATE_SCHEMAS[mutation.resource].model_validate(
+                mutation.payload
+            ).model_dump(mode="python")
+        elif mutation.operation == "update":
+            payload = UPDATE_SCHEMAS[mutation.resource].model_validate(
+                mutation.payload
+            ).model_dump(exclude_unset=True, mode="python")
+        else:
+            if mutation.payload:
+                raise CalendarValidationError("delete payload must be empty")
+            payload = {}
+    except ValidationError as exc:
+        raise CalendarValidationError("Некорректные данные календарного действия") from exc
+    try:
+        normalized = _normalize_payload(payload, user, DATETIME_FIELDS[mutation.resource])
+    except (TypeError, ValueError) as exc:
+        raise CalendarValidationError("Некорректная дата календарного действия") from exc
+    return CalendarMutation(
+        mutation.operation, mutation.resource, normalized, target_id
+    )
+
+
 class CalendarCommandService:
     @staticmethod
     async def _owned(session: AsyncSession, user: User, resource: str, target_id: uuid.UUID):
@@ -89,6 +146,9 @@ class CalendarCommandService:
         command_id: uuid.UUID | None = None,
         source_message_id: uuid.UUID | None = None,
     ) -> list[CalendarOperation]:
+        if origin not in ORIGINS:
+            raise CalendarValidationError(f"Unsupported origin: {origin}")
+        validated = [_validated_mutation(raw, user) for raw in mutations]
         command_id = command_id or uuid.uuid4()
         existing = list((await session.scalars(
             select(CalendarOperation)
@@ -104,16 +164,11 @@ class CalendarCommandService:
         ) or 0)
         result: list[CalendarOperation] = []
         async with session.begin_nested():
-            for ordinal, raw in enumerate(mutations):
-                mutation = _mutation(raw)
-                if mutation.resource not in MODELS:
-                    raise ValueError(f"Unsupported resource: {mutation.resource}")
+            for ordinal, mutation in enumerate(validated):
                 model = MODELS[mutation.resource]
                 before = None
                 target_id = mutation.target_id
-                payload = _normalize_payload(
-                    mutation.payload, user, DATETIME_FIELDS[mutation.resource]
-                )
+                payload = mutation.payload
                 if mutation.operation == "create":
                     target_id = target_id or uuid.uuid4()
                     obj = model(id=target_id, owner_id=user.id, **payload)
@@ -121,8 +176,6 @@ class CalendarCommandService:
                     await session.flush()
                     after = resource_snapshot(obj)
                 else:
-                    if target_id is None:
-                        raise ValueError("target_id is required")
                     obj = await cls._owned(session, user, mutation.resource, target_id)
                     if obj is None:
                         raise CalendarTargetNotFound(f"{mutation.resource} not found")
@@ -136,14 +189,14 @@ class CalendarCommandService:
                         await session.delete(obj)
                         await session.flush()
                         after = None
-                    else:
-                        raise ValueError(f"Unsupported operation: {mutation.operation}")
                 changed_keys = set((before or {})) | set((after or {}))
                 changes = {
                     key: {"before": (before or {}).get(key), "after": (after or {}).get(key)}
                     for key in changed_keys
                     if (before or {}).get(key) != (after or {}).get(key)
                 }
+                if mutation.operation == "update" and not changes:
+                    continue
                 sequence += 1
                 operation = CalendarOperation(
                     owner_id=user.id, sequence=sequence, command_id=command_id,
@@ -196,22 +249,48 @@ class CalendarCommandService:
 
     @classmethod
     async def replay(cls, session: AsyncSession, user: User) -> None:
-        await session.execute(delete(Task).where(Task.owner_id == user.id))
-        await session.execute(delete(Event).where(Event.owner_id == user.id))
         operations = list((await session.scalars(
             select(CalendarOperation).where(CalendarOperation.owner_id == user.id)
             .order_by(CalendarOperation.sequence)
         )).all())
-        for operation in operations:
+        prepared: list[tuple[CalendarOperation, dict[str, Any] | None]] = []
+        try:
+            for operation in operations:
+                if operation.operation not in OPERATIONS or operation.resource not in MODELS:
+                    raise CalendarHistoryCorrupt("Unsupported operation in calendar history")
+                expected = {
+                    "create": (False, True),
+                    "update": (True, True),
+                    "delete": (True, False),
+                }[operation.operation]
+                actual = (operation.before_state is not None, operation.after_state is not None)
+                if actual != expected:
+                    raise CalendarHistoryCorrupt("Invalid calendar history snapshots")
+                if operation.after_state is None:
+                    prepared.append((operation, None))
+                    continue
+                values = dict(operation.after_state)
+                snapshot_id = values.pop("id", None)
+                if snapshot_id is not None and uuid.UUID(str(snapshot_id)) != operation.target_id:
+                    raise CalendarHistoryCorrupt("Calendar history target does not match snapshot")
+                validated = _validated_mutation(
+                    CalendarMutation("create", operation.resource, values, operation.target_id), user
+                )
+                prepared.append((operation, validated.payload))
+        except (CalendarValidationError, TypeError, ValueError) as exc:
+            if isinstance(exc, CalendarHistoryCorrupt):
+                raise
+            raise CalendarHistoryCorrupt("Calendar history contains invalid data") from exc
+
+        await session.execute(delete(Task).where(Task.owner_id == user.id))
+        await session.execute(delete(Event).where(Event.owner_id == user.id))
+        for operation, normalized in prepared:
             model = MODELS[operation.resource]
             current = await session.get(model, operation.target_id)
             if operation.after_state is None:
                 if current is not None:
                     await session.delete(current)
                 continue
-            values = dict(operation.after_state)
-            values.pop("id", None)
-            normalized = _normalize_payload(values, user, DATETIME_FIELDS[operation.resource])
             if current is None:
                 session.add(model(id=operation.target_id, owner_id=user.id, **normalized))
             else:

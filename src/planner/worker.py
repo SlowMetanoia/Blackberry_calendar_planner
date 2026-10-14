@@ -10,6 +10,7 @@ from .agent import AgentRunContext, TranscriptionError, run_agent, transcribe
 from .config import get_settings
 from .db import SessionLocal
 from .models import AgentMessage, Conversation, MessageStatus
+from .schemas import AgentInput
 
 TERMINAL_MESSAGE_STATUSES = {
     MessageStatus.needs_clarification,
@@ -68,7 +69,9 @@ async def process_message(ctx: dict, message_id: str) -> None:
             if message.audio_path:
                 message.status = MessageStatus.transcribing
                 await session.commit()
-                message.input_text = await transcribe(message.audio_path)
+                message.input_text = AgentInput(
+                    text=await transcribe(message.audio_path)
+                ).text
             if not message.input_text:
                 raise ValueError("Message has neither text nor audio")
 
@@ -108,11 +111,12 @@ async def process_message(ctx: dict, message_id: str) -> None:
                 message.error = str(exc)
                 await session.commit()
         except Exception as exc:
+            logger.exception("Agent processing failed for message %s", message_id)
             await session.rollback()
             message = await session.get(AgentMessage, ident)
             if message is not None:
                 message.status = MessageStatus.failed
-                message.error = str(exc)[:1000]
+                message.error = "Не удалось обработать сообщение. Попробуйте ещё раз."
                 await session.commit()
             raise
         finally:

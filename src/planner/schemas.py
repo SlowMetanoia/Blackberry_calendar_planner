@@ -7,10 +7,23 @@ from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator, mo
 
 from .models import MessageStatus
 
+MAX_TEXT_LENGTH = 10_000
+MAX_INTEGER = 2_147_483_647
+MAX_DECISION_ITEMS = 50
 
-class AuthRequest(BaseModel):
+
+class StrictInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+
+class AuthRequest(StrictInput):
     email: EmailStr
     password: str = Field(min_length=8, max_length=128)
+
+    @field_validator("email")
+    @classmethod
+    def normalize_email(cls, value: EmailStr) -> str:
+        return str(value).lower()
 
 
 class TokenResponse(BaseModel):
@@ -18,7 +31,7 @@ class TokenResponse(BaseModel):
     token_type: str = "bearer"
 
 
-class TimezoneValue(BaseModel):
+class TimezoneValue(StrictInput):
     timezone: str = Field(min_length=1, max_length=64)
 
     @field_validator("timezone")
@@ -31,46 +44,50 @@ class TimezoneValue(BaseModel):
         return value
 
 
-class TaskCreate(BaseModel):
+class TaskCreate(StrictInput):
     title: str = Field(min_length=1, max_length=500)
-    description: str | None = None
+    description: str | None = Field(default=None, max_length=MAX_TEXT_LENGTH)
     deadline: datetime | None = None
-    estimated_minutes: int | None = Field(default=None, ge=1)
+    estimated_minutes: int | None = Field(default=None, strict=True, ge=1, le=MAX_INTEGER)
     status: Literal["open", "completed"] = "open"
 
 
-class TaskUpdate(BaseModel):
+class TaskUpdate(StrictInput):
     title: str | None = Field(default=None, min_length=1, max_length=500)
-    description: str | None = None
+    description: str | None = Field(default=None, max_length=MAX_TEXT_LENGTH)
     deadline: datetime | None = None
-    estimated_minutes: int | None = Field(default=None, ge=1)
+    estimated_minutes: int | None = Field(default=None, strict=True, ge=1, le=MAX_INTEGER)
     status: Literal["open", "completed"] | None = None
 
     @model_validator(mode="after")
-    def required_fields_cannot_be_null(self):
+    def valid_update(self):
+        if not self.model_fields_set:
+            raise ValueError("update payload must contain at least one field")
         for field in {"title", "status"} & self.model_fields_set:
             if getattr(self, field) is None:
                 raise ValueError(f"{field} cannot be null")
         return self
 
 
-class EventCreate(BaseModel):
+class EventCreate(StrictInput):
     title: str = Field(min_length=1, max_length=500)
-    description: str | None = None
+    description: str | None = Field(default=None, max_length=MAX_TEXT_LENGTH)
     starts_at: datetime
-    duration_minutes: int | None = Field(default=None, ge=1)
+    duration_minutes: int | None = Field(default=None, strict=True, ge=1, le=MAX_INTEGER)
     location: str | None = Field(default=None, max_length=500)
 
 
-class EventUpdate(BaseModel):
+class EventUpdate(StrictInput):
     title: str | None = Field(default=None, min_length=1, max_length=500)
-    description: str | None = None
+    description: str | None = Field(default=None, max_length=MAX_TEXT_LENGTH)
     starts_at: datetime | None = None
-    duration_minutes: int | None = Field(default=None, ge=1)
+    duration_minutes: int | None = Field(default=None, strict=True, ge=1, le=MAX_INTEGER)
     location: str | None = Field(default=None, max_length=500)
 
     @model_validator(mode="after")
-    def required_fields_cannot_be_null(self):
+    def valid_update(self):
+        if not self.model_fields_set:
+            raise ValueError("update payload must contain at least one field")
         for field in {"title", "starts_at"} & self.model_fields_set:
             if getattr(self, field) is None:
                 raise ValueError(f"{field} cannot be null")
@@ -89,24 +106,8 @@ class EventResponse(EventCreate):
     owner_id: uuid.UUID
 
 
-class AgentMessageResponse(BaseModel):
-    id: uuid.UUID
-    conversation_id: uuid.UUID
-    status: MessageStatus
-    sequence: int
-    input_text: str | None = None
-    error: str | None = None
-    reply: str | None = None
-    reads: list[dict] = Field(default_factory=list)
-    operations: list[dict] = Field(default_factory=list)
-    requires_new_conversation: bool = False
-    created_at: datetime
-
-    model_config = ConfigDict(from_attributes=True)
-
-
-class AgentInput(BaseModel):
-    text: str = Field(min_length=1)
+class AgentInput(StrictInput):
+    text: str = Field(min_length=1, max_length=MAX_TEXT_LENGTH)
     conversation_id: uuid.UUID | None = None
 
 
@@ -145,6 +146,28 @@ class CalendarOperationResponse(BaseModel):
         )
 
 
+class AgentReadResponse(BaseModel):
+    resource: Literal["task", "event"]
+    id: uuid.UUID
+    data: dict
+
+
+class AgentMessageResponse(BaseModel):
+    id: uuid.UUID
+    conversation_id: uuid.UUID
+    status: MessageStatus
+    sequence: int
+    input_text: str | None = None
+    error: str | None = None
+    reply: str | None = None
+    reads: list[AgentReadResponse] = Field(default_factory=list)
+    operations: list[CalendarOperationResponse] = Field(default_factory=list)
+    requires_new_conversation: bool = False
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 T = TypeVar("T")
 
 
@@ -155,15 +178,22 @@ class Page(BaseModel, Generic[T]):
     offset: int
 
 
+class ProblemFieldError(BaseModel):
+    location: str
+    message: str
+    error_type: str
+
+
 class ProblemDetail(BaseModel):
     type: str = "about:blank"
     title: str
     status: int
     detail: str
     code: str
+    errors: list[ProblemFieldError] | None = None
 
-class DecisionTimeRange(BaseModel):
-    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+class DecisionTimeRange(StrictInput):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True, str_strip_whitespace=True)
     from_datetime: datetime = Field(alias="from")
     to_datetime: datetime = Field(alias="to")
 
@@ -176,16 +206,14 @@ class DecisionTimeRange(BaseModel):
         return self
 
 
-class DecisionListRead(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+class DecisionListRead(StrictInput):
     operation: Literal["list"]
     resource: Literal["task", "event"]
     target_id: None = None
     time_range: DecisionTimeRange | None = None
 
 
-class DecisionGetRead(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+class DecisionGetRead(StrictInput):
     operation: Literal["get"]
     resource: Literal["task", "event"]
     target_id: uuid.UUID
@@ -194,100 +222,88 @@ class DecisionGetRead(BaseModel):
 DecisionRead = DecisionListRead | DecisionGetRead
 
 
-class DecisionTaskCreatePayload(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    title: str = Field(min_length=1, max_length=500)
-    description: str | None = None
-    deadline: datetime | None = None
-    estimated_minutes: int | None = Field(default=None, ge=1)
-    status: str = "open"
+def _require_aware(value: datetime | None) -> datetime | None:
+    if value is not None and (value.tzinfo is None or value.utcoffset() is None):
+        raise ValueError("datetime must include a UTC offset")
+    return value
 
 
-class DecisionTaskUpdatePayload(BaseModel):
-    model_config = ConfigDict(extra="forbid", json_schema_extra={"minProperties": 1})
-    title: str | None = Field(default=None, min_length=1, max_length=500)
-    description: str | None = None
-    deadline: datetime | None = None
-    estimated_minutes: int | None = Field(default=None, ge=1)
-    status: str | None = None
-
-    @model_validator(mode="after")
-    def at_least_one_field(self):
-        if not self.model_fields_set:
-            raise ValueError("update payload must contain at least one field")
-        return self
+class DecisionTaskCreatePayload(TaskCreate):
+    @field_validator("deadline")
+    @classmethod
+    def aware_deadline(cls, value: datetime | None) -> datetime | None:
+        return _require_aware(value)
 
 
-class DecisionEventCreatePayload(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    title: str = Field(min_length=1, max_length=500)
-    description: str | None = None
-    starts_at: datetime
-    duration_minutes: int | None = Field(default=None, ge=1)
-    location: str | None = Field(default=None, max_length=500)
+class DecisionTaskUpdatePayload(TaskUpdate):
+    model_config = ConfigDict(
+        extra="forbid", json_schema_extra={"minProperties": 1}, str_strip_whitespace=True
+    )
+
+    @field_validator("deadline")
+    @classmethod
+    def aware_deadline(cls, value: datetime | None) -> datetime | None:
+        return _require_aware(value)
 
 
-class DecisionEventUpdatePayload(BaseModel):
-    model_config = ConfigDict(extra="forbid", json_schema_extra={"minProperties": 1})
-    title: str | None = Field(default=None, min_length=1, max_length=500)
-    description: str | None = None
-    starts_at: datetime | None = None
-    duration_minutes: int | None = Field(default=None, ge=1)
-    location: str | None = Field(default=None, max_length=500)
-
-    @model_validator(mode="after")
-    def at_least_one_field(self):
-        if not self.model_fields_set:
-            raise ValueError("update payload must contain at least one field")
-        return self
+class DecisionEventCreatePayload(EventCreate):
+    @field_validator("starts_at")
+    @classmethod
+    def aware_starts_at(cls, value: datetime) -> datetime:
+        return _require_aware(value)
 
 
-class DecisionDeletePayload(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+class DecisionEventUpdatePayload(EventUpdate):
+    model_config = ConfigDict(
+        extra="forbid", json_schema_extra={"minProperties": 1}, str_strip_whitespace=True
+    )
+
+    @field_validator("starts_at")
+    @classmethod
+    def aware_starts_at(cls, value: datetime | None) -> datetime | None:
+        return _require_aware(value)
 
 
-class DecisionTaskCreateAction(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+class DecisionDeletePayload(StrictInput):
+    pass
+
+
+class DecisionTaskCreateAction(StrictInput):
     operation: Literal["create"]
     resource: Literal["task"]
     target_id: None = None
     payload: DecisionTaskCreatePayload
 
 
-class DecisionTaskUpdateAction(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+class DecisionTaskUpdateAction(StrictInput):
     operation: Literal["update"]
     resource: Literal["task"]
     target_id: uuid.UUID
     payload: DecisionTaskUpdatePayload
 
 
-class DecisionTaskDeleteAction(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+class DecisionTaskDeleteAction(StrictInput):
     operation: Literal["delete"]
     resource: Literal["task"]
     target_id: uuid.UUID
     payload: DecisionDeletePayload
 
 
-class DecisionEventCreateAction(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+class DecisionEventCreateAction(StrictInput):
     operation: Literal["create"]
     resource: Literal["event"]
     target_id: None = None
     payload: DecisionEventCreatePayload
 
 
-class DecisionEventUpdateAction(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+class DecisionEventUpdateAction(StrictInput):
     operation: Literal["update"]
     resource: Literal["event"]
     target_id: uuid.UUID
     payload: DecisionEventUpdatePayload
 
 
-class DecisionEventDeleteAction(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+class DecisionEventDeleteAction(StrictInput):
     operation: Literal["delete"]
     resource: Literal["event"]
     target_id: uuid.UUID
@@ -304,9 +320,14 @@ DecisionAction = (
 )
 
 
-class DecisionEnvelope(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    reply: str
-    reads: list[DecisionRead]
-    mutations: list[DecisionAction]
-    clarification: str | None
+class DecisionEnvelope(StrictInput):
+    reply: str = Field(min_length=1, max_length=MAX_TEXT_LENGTH)
+    reads: list[DecisionRead] = Field(max_length=MAX_DECISION_ITEMS)
+    mutations: list[DecisionAction] = Field(max_length=MAX_DECISION_ITEMS)
+    clarification: str | None = Field(max_length=MAX_TEXT_LENGTH)
+
+    @model_validator(mode="after")
+    def clarification_is_exclusive(self):
+        if self.clarification and (self.reads or self.mutations):
+            raise ValueError("clarification cannot be combined with reads or mutations")
+        return self
