@@ -42,6 +42,10 @@ web/test-results/
 web/playwright-report/
 *.tsbuildinfo
 
+# Local implementation plans
+todo/*
+!todo/.gitkeep
+
 # Editors and operating systems
 .idea/
 .vscode/
