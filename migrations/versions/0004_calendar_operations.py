@@ -1,7 +1,7 @@
 """replace confirmation plans with immutable calendar operations"""
 
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 from sqlalchemy.dialects import postgresql
 
 revision = "0004_calendar_operations"
@@ -41,16 +41,36 @@ def upgrade() -> None:
         sa.Column("after_state", sa.JSON()),
         sa.Column("changes", sa.JSON(), nullable=False),
         sa.Column("origin", sa.String(16), nullable=False),
-        sa.Column("source_message_id", uid, sa.ForeignKey("agent_messages.id", ondelete="SET NULL")),
-        sa.Column("reverts_operation_id", uid, sa.ForeignKey("calendar_operations.id", ondelete="SET NULL")),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+        sa.Column(
+            "source_message_id", uid, sa.ForeignKey("agent_messages.id", ondelete="SET NULL")
+        ),
+        sa.Column(
+            "reverts_operation_id",
+            uid,
+            sa.ForeignKey("calendar_operations.id", ondelete="SET NULL"),
+        ),
+        sa.Column(
+            "created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+        ),
         sa.UniqueConstraint("owner_id", "sequence"),
         sa.UniqueConstraint("owner_id", "command_id", "ordinal"),
     )
-    op.create_index("ix_calendar_operations_owner_sequence", "calendar_operations", ["owner_id", "sequence"])
-    op.create_index("ix_calendar_operations_owner_target", "calendar_operations", ["owner_id", "resource", "target_id"])
-    op.create_index("ix_calendar_operations_source_message_id", "calendar_operations", ["source_message_id"])
-    op.create_index("ix_calendar_operations_reverts_operation_id", "calendar_operations", ["reverts_operation_id"])
+    op.create_index(
+        "ix_calendar_operations_owner_sequence", "calendar_operations", ["owner_id", "sequence"]
+    )
+    op.create_index(
+        "ix_calendar_operations_owner_target",
+        "calendar_operations",
+        ["owner_id", "resource", "target_id"],
+    )
+    op.create_index(
+        "ix_calendar_operations_source_message_id", "calendar_operations", ["source_message_id"]
+    )
+    op.create_index(
+        "ix_calendar_operations_reverts_operation_id",
+        "calendar_operations",
+        ["reverts_operation_id"],
+    )
 
 
 def downgrade() -> None:

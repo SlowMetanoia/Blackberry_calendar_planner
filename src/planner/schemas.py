@@ -137,12 +137,20 @@ class CalendarOperationResponse(BaseModel):
     @classmethod
     def from_operation(cls, operation):
         return cls(
-            id=operation.id, sequence=operation.sequence, command_id=operation.command_id,
-            ordinal=operation.ordinal, operation=operation.operation, resource=operation.resource,
-            target_id=operation.target_id, before=operation.before_state,
-            after=operation.after_state, changes=operation.changes, origin=operation.origin,
+            id=operation.id,
+            sequence=operation.sequence,
+            command_id=operation.command_id,
+            ordinal=operation.ordinal,
+            operation=operation.operation,
+            resource=operation.resource,
+            target_id=operation.target_id,
+            before=operation.before_state,
+            after=operation.after_state,
+            changes=operation.changes,
+            origin=operation.origin,
             source_message_id=operation.source_message_id,
-            reverts_operation_id=operation.reverts_operation_id, created_at=operation.created_at,
+            reverts_operation_id=operation.reverts_operation_id,
+            created_at=operation.created_at,
         )
 
 
@@ -191,6 +199,7 @@ class ProblemDetail(BaseModel):
     detail: str
     code: str
     errors: list[ProblemFieldError] | None = None
+
 
 class DecisionTimeRange(StrictInput):
     model_config = ConfigDict(extra="forbid", populate_by_name=True, str_strip_whitespace=True)

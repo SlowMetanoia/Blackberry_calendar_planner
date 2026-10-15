@@ -1,6 +1,7 @@
-import { FormEvent, PointerEvent, useEffect, useRef, useState } from "react";
+import { FormEvent, Fragment, PointerEvent, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { getCalendarHistory, getConversationHistory, getConversations, getMessage, request, undoOperation } from "./api";
-import { browserTimeZone, formatDateTime, formatDuration, formatMessageTimestamp, formatSchedule, formatSessionTimestamp } from "./format";
+import { browserTimeZone, formatDateTime, formatDuration, formatHistoryDate, formatHistoryTime, formatMessageTimestamp, formatSchedule, formatSessionTimestamp, historyDateKey } from "./format";
 import type { AgentMessage, CalendarOperation, ConversationSummary } from "./types";
 
 const terminal = new Set(["needs_clarification", "completed", "failed"]);
@@ -39,7 +40,7 @@ export default function App() {
 
   return <main className="app-shell">
     <div className={`sidebar-scrim ${sidebarOpen?"visible":""}`} onClick={()=>setSidebarOpen(false)}/>
-    <aside className={`session-sidebar operation-sidebar ${sidebarOpen?"open":""}`}><div className="sidebar-head"><div><div className="eyebrow">Календарь</div><b>История изменений</b></div><button className="sidebar-close" aria-label="Закрыть историю" onClick={()=>setSidebarOpen(false)}>×</button></div><nav className="operation-list" aria-label="История изменений календаря">{history.map(item=><HistoryItem key={item.id} item={item} undo={undo}/>)}{!history.length&&<p className="sessions-empty">Изменения календаря появятся здесь.</p>}</nav></aside>
+    <aside className={`session-sidebar operation-sidebar ${sidebarOpen?"open":""}`}><div className="sidebar-head"><div><div className="eyebrow">Календарь</div><b>История изменений</b></div><button className="sidebar-close" aria-label="Закрыть историю" onClick={()=>setSidebarOpen(false)}>×</button></div><nav className="operation-list" aria-label="История изменений календаря">{history.map((item,index)=>{const showDate=index===0||historyDateKey(item.created_at)!==historyDateKey(history[index-1].created_at);return <Fragment key={item.id}>{showDate&&<div className="history-date"><span>{formatHistoryDate(item.created_at)}</span></div>}<HistoryItem item={item} undo={undo}/></Fragment>;})}{!history.length&&<p className="sessions-empty">Изменения календаря появятся здесь.</p>}</nav></aside>
     <section className="workspace"><header><button className="sessions-toggle" aria-label="Открыть историю изменений" onClick={()=>setSidebarOpen(true)}>☰</button><div><div className="eyebrow">Умный ежедневник</div><h1>Что запланируем?</h1></div><div className="header-actions"><button className="quiet" onClick={startNewConversation}>Новый диалог</button><button className="quiet" onClick={()=>setSessionsOpen(true)}>История сессий</button><button className="quiet" onClick={logout}>Выйти</button></div></header>
       <section className="chat" ref={chat} aria-live="polite">{!messages.length&&<div className="empty"><span>✦</span><h2>Начните с простой просьбы</h2><p>«Покажи задачи на сегодня» или «Напомни подготовить отчёт»</p></div>}{messages.map(message=><MessageExchange key={message.id} message={message} startNewConversation={startNewConversation}/>)}</section>
       {error&&<div className="toast">{error}<button onClick={()=>setError("")}>×</button></div>}
@@ -54,6 +55,7 @@ export function MessageExchange({message,startNewConversation}:{message:AgentMes
 
 const resourceHeadings:Record<string,string>={task:"Задача",event:"Событие"};
 const operationWords:Record<string,string>={create:"Создано",update:"Изменено",delete:"Удалено"};
+const undoWords:Record<string,string>={create:"создание",update:"изменение",delete:"удаление"};
 const taskStatusLabels:Record<string,string>={open:"Открыта",completed:"Выполнена"};
 function stringField(data:Record<string,unknown>,key:string){const value=data[key];return typeof value==="string"&&value.trim()?value:null;}
 function numberField(data:Record<string,unknown>,key:string){const value=data[key];return typeof value==="number"&&Number.isFinite(value)?value:null;}
@@ -62,4 +64,42 @@ function Metadata({items}:{items:Array<{label?:string;value:string}>}){return it
 export function ReadCard({read,timeZone=browserTimeZone()}:{read:{resource:string;id:string;data:Record<string,unknown>};timeZone?:string}){return <article className="read-card"><span className="read-kind">{resourceHeadings[read.resource]||read.resource}</span><strong>{stringField(read.data,"title")||read.id}</strong><Metadata items={resourceMetadata(read.resource,read.data,timeZone)}/></article>;}
 function OperationReceipt({item}:{item:CalendarOperation}){const data=item.after||item.before||{};return <article className="read-card operation-receipt"><span className="read-kind">{operationWords[item.operation]} · {resourceHeadings[item.resource]}</span><strong>{stringField(data,"title")||item.target_id}</strong><Metadata items={resourceMetadata(item.resource,data)}/>{item.operation==="update"&&<Changes changes={item.changes}/>}</article>;}
 function Changes({changes}:{changes:CalendarOperation["changes"]}){return <dl className="operation-changes">{Object.entries(changes).filter(([key])=>key!=="id").map(([key,value])=><div key={key}><dt>{key}</dt><dd>{String(value.before??"—")} → {String(value.after??"—")}</dd></div>)}</dl>;}
-export function HistoryItem({item,undo}:{item:CalendarOperation;undo:(id:string)=>void}){const data=item.after||item.before||{},title=stringField(data,"title")||item.target_id,schedule=stringField(data,item.resource==="event"?"starts_at":"deadline"),firstChange=Object.entries(item.changes).find(([key])=>key!=="id");return <article className="history-item" tabIndex={0}><div className="history-summary"><time>{formatSessionTimestamp(item.created_at)}</time><b className={`operation-letter ${item.operation}`}>{item.operation[0].toUpperCase()}</b><span className="history-title">{title}</span>{schedule&&<span className="history-schedule">{formatDateTime(schedule,browserTimeZone())}</span>}{item.operation==="update"&&firstChange&&<span className="history-change">{firstChange[0]}: {String(firstChange[1].before??"—")} → {String(firstChange[1].after??"—")}</span>}<button onClick={()=>undo(item.id)}>Отменить</button></div><div className="history-detail"><b>{operationWords[item.operation]}: {title}</b><Metadata items={resourceMetadata(item.resource,data)}/>{item.operation==="update"&&<Changes changes={item.changes}/>}<small>Источник: {item.origin}{item.reverts_operation_id?" · компенсирующая операция":""}</small></div></article>;}
+type PreviewAnchor={x:number;y:number};
+
+export function HistoryItem({item,undo}:{item:CalendarOperation;undo:(id:string)=>void}){
+  const data=item.after||item.before||{},title=stringField(data,"title")||item.target_id;
+  const [anchor,setAnchor]=useState<PreviewAnchor|null>(null),[position,setPosition]=useState<PreviewAnchor|null>(null);
+  const itemRef=useRef<HTMLElement|null>(null),previewRef=useRef<HTMLDivElement|null>(null),lastPointerType=useRef("");
+  const previewId=`history-preview-${item.id}`;
+  const anchorToItem=()=>{const rect=itemRef.current?.getBoundingClientRect();if(rect)setAnchor({x:rect.right,y:rect.top});};
+
+  useLayoutEffect(()=>{
+    if(!anchor||!previewRef.current)return;
+    const margin=8,offset=12,rect=previewRef.current.getBoundingClientRect();
+    let x=anchor.x+offset,y=anchor.y+offset;
+    if(x+rect.width>window.innerWidth-margin)x=anchor.x-rect.width-offset;
+    if(y+rect.height>window.innerHeight-margin)y=anchor.y-rect.height-offset;
+    setPosition({x:Math.max(margin,Math.min(x,window.innerWidth-rect.width-margin)),y:Math.max(margin,Math.min(y,window.innerHeight-rect.height-margin))});
+  },[anchor]);
+
+  useEffect(()=>{
+    if(!anchor)return;
+    const close=(event:globalThis.PointerEvent)=>{if(!itemRef.current?.contains(event.target as Node))setAnchor(null);};
+    document.addEventListener("pointerdown",close);
+    return()=>document.removeEventListener("pointerdown",close);
+  },[anchor]);
+
+  const preview=anchor&&createPortal(<div id={previewId} ref={previewRef} role="tooltip" className="history-preview" style={{left:position?.x??anchor.x+12,top:position?.y??anchor.y+12,visibility:position?"visible":"hidden"}}><b>{operationWords[item.operation]}: {title}</b><Metadata items={resourceMetadata(item.resource,data)}/>{item.operation==="update"&&<Changes changes={item.changes}/>}<small>Источник: {item.origin}{item.reverts_operation_id?" · компенсирующая операция":""}</small></div>,document.body);
+
+  return <article ref={itemRef} className={`history-item ${item.operation}`} tabIndex={0} aria-label={`${operationWords[item.operation]}: ${title}`} aria-describedby={anchor?previewId:undefined}
+    onPointerDown={event=>{lastPointerType.current=event.pointerType;if(!(event.target as HTMLElement).closest("button"))event.preventDefault();}}
+    onPointerEnter={event=>{if(event.pointerType==="mouse")setAnchor({x:event.clientX,y:event.clientY});}}
+    onPointerMove={event=>{if(event.pointerType==="mouse"&&anchor)setAnchor({x:event.clientX,y:event.clientY});}}
+    onPointerLeave={()=>{if(!itemRef.current?.contains(document.activeElement))setAnchor(null);}}
+    onPointerUp={event=>{if(event.pointerType!=="mouse"&&!(event.target as HTMLElement).closest("button"))setAnchor(current=>current?null:{x:event.clientX,y:event.clientY});}}
+    onFocus={()=>{if(lastPointerType.current!=="touch"&&lastPointerType.current!=="pen")anchorToItem();lastPointerType.current="";}}
+    onBlur={event=>{if(!itemRef.current?.contains(event.relatedTarget as Node))setAnchor(null);}}
+    onKeyDown={event=>{if(event.key==="Escape"){setAnchor(null);itemRef.current?.blur();}}}>
+    <time dateTime={item.created_at}>{formatHistoryTime(item.created_at)}</time><span className="history-title">{title}</span><button className="history-undo" aria-label={`Отменить ${undoWords[item.operation]}`} onPointerDown={event=>event.stopPropagation()} onPointerUp={event=>event.stopPropagation()} onClick={event=>{event.stopPropagation();undo(item.id);}}><span aria-hidden="true">↶</span><span className="undo-label">Отменить {undoWords[item.operation]}</span></button>{preview}
+  </article>;
+}

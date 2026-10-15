@@ -21,7 +21,12 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-test = ["pytest>=8", "pytest-asyncio>=0.24", "aiosqlite>=0.20"]
+test = [
+  "pytest>=8",
+  "pytest-asyncio>=0.24",
+  "aiosqlite>=0.20",
+  "ruff>=0.9,<1",
+]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
@@ -30,6 +35,10 @@ testpaths = ["tests"]
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+
+[tool.ruff.lint]
+# FastAPI intentionally declares dependency factories in endpoint defaults.
+ignore = ["B008"]
 
 [build-system]
 requires = ["setuptools>=68"]

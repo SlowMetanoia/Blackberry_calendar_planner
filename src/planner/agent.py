@@ -1,9 +1,11 @@
+import asyncio
 import json
 import logging
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from functools import lru_cache
+from pathlib import Path
 from typing import Literal, TypedDict
 from zoneinfo import ZoneInfo
 
@@ -11,9 +13,9 @@ import httpx
 from langgraph.graph import END, START, StateGraph
 from sqlalchemy import select
 
+from .calendar import CalendarCommandService, operation_dict
 from .config import get_settings
 from .llm import auth_headers, completion_payload, normalize_base_url
-from .calendar import CalendarCommandService, operation_dict
 from .models import AgentMessage, CalendarOperation, User
 from .schemas import DecisionEnvelope
 from .services import EventService, TaskService
@@ -22,8 +24,7 @@ logger = logging.getLogger(__name__)
 INVALID_DECISION_RESULT = json.dumps(
     {
         "reply": (
-            "Не удалось корректно разобрать запрос. "
-            "Переформулируйте его и попробуйте ещё раз."
+            "Не удалось корректно разобрать запрос. Переформулируйте его и попробуйте ещё раз."
         )
     },
     ensure_ascii=False,
@@ -42,7 +43,7 @@ class AgentRunContext:
     owner_id: uuid.UUID
     conversation_id: uuid.UUID
     source_message_id: uuid.UUID
-    observed_at_utc: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    observed_at_utc: datetime = field(default_factory=lambda: datetime.now(UTC))
 
 
 class AgentState(TypedDict, total=False):
@@ -91,7 +92,9 @@ def _response_content(body: dict) -> str:
     except (KeyError, IndexError, TypeError) as exc:
         raise LLMProtocolError("LLM returned an invalid chat completion response") from exc
     if not isinstance(content, str) or not content.strip():
-        detail = "; reasoning_content was returned instead" if message.get("reasoning_content") else ""
+        detail = (
+            "; reasoning_content was returned instead" if message.get("reasoning_content") else ""
+        )
         raise LLMProtocolError(f"LLM returned empty message content{detail}")
     return content
 
@@ -125,14 +128,20 @@ async def _complete(
     messages = [
         {"role": "system", "content": system_prompt},
         *(history or []),
-        *([{
-            "role": "system",
-            "content": (
-                "Current referenced records, freshly loaded from the database. "
-                "Use their complete fields and IDs when resolving the current request:\n"
-                + json.dumps({"referenced_resources": resource_context}, ensure_ascii=False)
-            ),
-        }] if resource_context else []),
+        *(
+            [
+                {
+                    "role": "system",
+                    "content": (
+                        "Current referenced records, freshly loaded from the database. "
+                        "Use their complete fields and IDs when resolving the current request:\n"
+                        + json.dumps({"referenced_resources": resource_context}, ensure_ascii=False)
+                    ),
+                }
+            ]
+            if resource_context
+            else []
+        ),
         {"role": "user", "content": text},
     ]
     payload = completion_payload(settings, messages)
@@ -228,12 +237,18 @@ async def _referenced_resource_context(
         message_ids.append(message.id)
 
     if message_ids:
-        operations = list((await context.session.scalars(
-            select(CalendarOperation).where(
-                CalendarOperation.source_message_id.in_(message_ids),
-                CalendarOperation.owner_id == context.owner_id,
-            ).order_by(CalendarOperation.sequence)
-        )).all())
+        operations = list(
+            (
+                await context.session.scalars(
+                    select(CalendarOperation)
+                    .where(
+                        CalendarOperation.source_message_id.in_(message_ids),
+                        CalendarOperation.owner_id == context.owner_id,
+                    )
+                    .order_by(CalendarOperation.sequence)
+                )
+            ).all()
+        )
         for operation in operations:
             reference = _resource_reference(operation.resource, operation.target_id)
             if reference:
@@ -244,7 +259,7 @@ async def _referenced_resource_context(
     if user is None:
         return []
     resources: list[dict] = []
-    for (resource, ident) in references:
+    for resource, ident in references:
         service = TaskService if resource == "task" else EventService
         row = await service.get(context.session, user, ident)
         if row is None:
@@ -254,15 +269,17 @@ async def _referenced_resource_context(
             for column in row.__table__.columns
             if column.name != "owner_id"
         }
-        resources.append(json.loads(json.dumps(
-            {"resource": resource, "id": str(row.id), "data": data}, default=str
-        )))
+        resources.append(
+            json.loads(
+                json.dumps({"resource": resource, "id": str(row.id), "data": data}, default=str)
+            )
+        )
     return resources
 
 
 async def _interpret(state: AgentState) -> AgentState:
     timezone_name = "UTC"
-    observed_at_utc = datetime.now(timezone.utc)
+    observed_at_utc = datetime.now(UTC)
     history: list[dict[str, str]] = []
     resource_context: list[dict] = []
     context = state.get("context")
@@ -342,22 +359,29 @@ async def _execute_reads(state: AgentState) -> AgentState:
     for read in decision.reads:
         service = TaskService if read.resource == "task" else EventService
         time_range = getattr(read, "time_range", None)
-        rows = ([await service.get(context.session, user, read.target_id)]
-                if read.operation == "get" else await service.list(
-                    context.session,
-                    user,
-                    from_datetime=time_range.from_datetime if time_range else None,
-                    to_datetime=time_range.to_datetime if time_range else None,
-                ))
+        rows = (
+            [await service.get(context.session, user, read.target_id)]
+            if read.operation == "get"
+            else await service.list(
+                context.session,
+                user,
+                from_datetime=time_range.from_datetime if time_range else None,
+                to_datetime=time_range.to_datetime if time_range else None,
+            )
+        )
         for row in filter(None, rows):
             data = {
                 column.name: getattr(row, column.name)
                 for column in row.__table__.columns
                 if column.name != "owner_id"
             }
-            results.append(json.loads(json.dumps(
-                {"resource": read.resource, "id": str(row.id), "data": data}, default=str
-            )))
+            results.append(
+                json.loads(
+                    json.dumps(
+                        {"resource": read.resource, "id": str(row.id), "data": data}, default=str
+                    )
+                )
+            )
     return {"reads": results}
 
 
@@ -372,8 +396,12 @@ async def _execute_mutations(state: AgentState) -> AgentState:
     if user is None:
         raise RuntimeError("Agent owner not found")
     operations = await CalendarCommandService.execute(
-        context.session, user, decision.mutations, origin="agent",
-        command_id=context.source_message_id, source_message_id=context.source_message_id,
+        context.session,
+        user,
+        decision.mutations,
+        origin="agent",
+        command_id=context.source_message_id,
+        source_message_id=context.source_message_id,
     )
     return {"operations": [operation_dict(item) for item in operations]}
 
@@ -383,7 +411,10 @@ async def _failed(state: AgentState) -> AgentState:
 
 
 async def _clarify(state: AgentState) -> AgentState:
-    return {"state": "needs_clarification", "result": state.get("result", "The request needs clarification")}
+    return {
+        "state": "needs_clarification",
+        "result": state.get("result", "The request needs clarification"),
+    }
 
 
 async def _finish(state: AgentState) -> AgentState:
@@ -425,14 +456,15 @@ async def transcribe(audio_path: str) -> str:
     if settings.stt_api_key:
         headers["Authorization"] = f"Bearer {settings.stt_api_key}"
     try:
+        audio_path_value = Path(audio_path)
+        audio_bytes = await asyncio.to_thread(audio_path_value.read_bytes)
         async with httpx.AsyncClient(timeout=120) as client:
-            with open(audio_path, "rb") as audio:
-                response = await client.post(
-                    f"{settings.stt_base_url.rstrip('/')}/audio/transcriptions",
-                    headers=headers,
-                    files={"file": audio},
-                    data={"model": settings.stt_model},
-                )
+            response = await client.post(
+                f"{settings.stt_base_url.rstrip('/')}/audio/transcriptions",
+                headers=headers,
+                files={"file": (audio_path_value.name, audio_bytes)},
+                data={"model": settings.stt_model},
+            )
             response.raise_for_status()
     except httpx.RequestError as exc:
         raise TranscriptionError(
@@ -464,6 +496,7 @@ async def run_agent(text: str, context: AgentRunContext | None = None) -> AgentR
         initial["context"] = context
     final_state = await _compiled_graph().ainvoke(initial)
     return AgentResult(final_state["state"], final_state["result"])
+
 
 def parse_decision(raw: str) -> DecisionEnvelope:
     """Strictly validate the LLM envelope; arbitrary prose can never mutate data."""

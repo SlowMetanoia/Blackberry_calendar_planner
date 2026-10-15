@@ -57,6 +57,27 @@ export function formatSessionTimestamp(value:string,timeZone:string=browserTimeZ
   return `${valueParts.day}.${valueParts.month}.${valueParts.year}, ${valueParts.hour}:${valueParts.minute}`;
 }
 
+export function historyDateKey(value: string, timeZone: string = browserTimeZone()): string {
+  const date = validDate(value);
+  if (!date) return "";
+  const valueParts = parts(date, timeZone);
+  return `${valueParts.year}-${valueParts.month}-${valueParts.day}`;
+}
+
+export function formatHistoryDate(value: string, timeZone: string = browserTimeZone()): string {
+  const date = validDate(value);
+  if (!date) return "";
+  const valueParts = parts(date, timeZone, "long");
+  return `${Number(valueParts.day)} ${valueParts.month} ${valueParts.year}`;
+}
+
+export function formatHistoryTime(value: string, timeZone: string = browserTimeZone()): string {
+  const date = validDate(value);
+  if (!date) return "";
+  const valueParts = parts(date, timeZone);
+  return `${valueParts.hour}:${valueParts.minute}`;
+}
+
 export function formatDateTime(value: string, timeZone: string = browserTimeZone()): string {
   const date = validDate(value);
   if (!date) return "";

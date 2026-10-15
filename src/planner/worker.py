@@ -1,6 +1,7 @@
 import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+from typing import ClassVar
 
 from arq import Retry
 from arq.connections import RedisSettings
@@ -52,11 +53,13 @@ async def process_message(ctx: dict, message_id: str) -> None:
 
         try:
             previous = await session.scalar(
-                select(AgentMessage.id).where(
+                select(AgentMessage.id)
+                .where(
                     AgentMessage.conversation_id == message.conversation_id,
                     AgentMessage.sequence < message.sequence,
                     AgentMessage.status.not_in(TERMINAL_MESSAGE_STATUSES),
-                ).limit(1)
+                )
+                .limit(1)
             )
             if previous is not None:
                 if ctx.get("job_try", 1) >= WorkerSettings.max_tries:
@@ -69,9 +72,7 @@ async def process_message(ctx: dict, message_id: str) -> None:
             if message.audio_path:
                 message.status = MessageStatus.transcribing
                 await session.commit()
-                message.input_text = AgentInput(
-                    text=await transcribe(message.audio_path)
-                ).text
+                message.input_text = AgentInput(text=await transcribe(message.audio_path)).text
             if not message.input_text:
                 raise ValueError("Message has neither text nor audio")
 
@@ -84,7 +85,7 @@ async def process_message(ctx: dict, message_id: str) -> None:
                     owner_id=message.owner_id,
                     conversation_id=message.conversation_id,
                     source_message_id=message.id,
-                    observed_at_utc=datetime.now(timezone.utc),
+                    observed_at_utc=datetime.now(UTC),
                 ),
             )
             if result.state != "completed":
@@ -98,6 +99,7 @@ async def process_message(ctx: dict, message_id: str) -> None:
             conversation = await session.get(Conversation, message.conversation_id)
             if conversation is not None:
                 from sqlalchemy import func
+
                 conversation.last_activity_at = func.now()
             await session.commit()
         except Retry:
@@ -110,7 +112,7 @@ async def process_message(ctx: dict, message_id: str) -> None:
                 message.status = MessageStatus.failed
                 message.error = str(exc)
                 await session.commit()
-        except Exception as exc:
+        except Exception:
             logger.exception("Agent processing failed for message %s", message_id)
             await session.rollback()
             message = await session.get(AgentMessage, ident)
@@ -124,7 +126,7 @@ async def process_message(ctx: dict, message_id: str) -> None:
 
 
 class WorkerSettings:
-    functions = [process_message]
+    functions: ClassVar[list] = [process_message]
     redis_settings = RedisSettings.from_dsn(get_settings().redis_url)
     max_jobs = 10
     max_tries = 8

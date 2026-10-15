@@ -12,7 +12,7 @@ from planner.agent import parse_decision
 from planner.calendar import CalendarCommandService, CalendarMutation, CalendarValidationError
 from planner.db import Base
 from planner.main import _save_audio_upload, validation_problem
-from planner.models import CalendarOperation, Task, User
+from planner.models import CalendarOperation, User
 from planner.schemas import AgentInput, EventUpdate, TaskCreate, TaskUpdate
 from planner.services import TaskService
 
@@ -47,17 +47,21 @@ def test_optional_fields_can_still_be_cleared() -> None:
     ],
 )
 def test_decision_task_update_rejects_invalid_required_values(payload) -> None:
-    raw = json.dumps({
-        "reply": "ok",
-        "reads": [],
-        "mutations": [{
-            "operation": "update",
-            "resource": "task",
-            "target_id": str(uuid.uuid4()),
-            "payload": payload,
-        }],
-        "clarification": None,
-    })
+    raw = json.dumps(
+        {
+            "reply": "ok",
+            "reads": [],
+            "mutations": [
+                {
+                    "operation": "update",
+                    "resource": "task",
+                    "target_id": str(uuid.uuid4()),
+                    "payload": payload,
+                }
+            ],
+            "clarification": None,
+        }
+    )
     with pytest.raises(ValidationError):
         parse_decision(raw)
 
@@ -65,49 +69,78 @@ def test_decision_task_update_rejects_invalid_required_values(payload) -> None:
 def test_decision_event_rejects_null_title_and_naive_datetime() -> None:
     target_id = str(uuid.uuid4())
     for mutation in [
-        {"operation": "update", "resource": "event", "target_id": target_id,
-         "payload": {"title": None}},
-        {"operation": "create", "resource": "event",
-         "payload": {"title": "Встреча", "starts_at": "2026-10-15T12:00:00"}},
+        {
+            "operation": "update",
+            "resource": "event",
+            "target_id": target_id,
+            "payload": {"title": None},
+        },
+        {
+            "operation": "create",
+            "resource": "event",
+            "payload": {"title": "Встреча", "starts_at": "2026-10-15T12:00:00"},
+        },
     ]:
         with pytest.raises(ValidationError):
-            parse_decision(json.dumps({
-                "reply": "ok", "reads": [], "mutations": [mutation], "clarification": None,
-            }))
+            parse_decision(
+                json.dumps(
+                    {
+                        "reply": "ok",
+                        "reads": [],
+                        "mutations": [mutation],
+                        "clarification": None,
+                    }
+                )
+            )
 
 
 def test_decision_clarification_is_exclusive() -> None:
-    raw = json.dumps({
-        "reply": "ok",
-        "reads": [],
-        "mutations": [{
-            "operation": "create", "resource": "task", "payload": {"title": "x"},
-        }],
-        "clarification": "Уточните",
-    })
+    raw = json.dumps(
+        {
+            "reply": "ok",
+            "reads": [],
+            "mutations": [
+                {
+                    "operation": "create",
+                    "resource": "task",
+                    "payload": {"title": "x"},
+                }
+            ],
+            "clarification": "Уточните",
+        }
+    )
     with pytest.raises(ValidationError):
         parse_decision(raw)
 
 
 def test_decision_limits_generated_work() -> None:
-    raw = json.dumps({
-        "reply": "ok",
-        "reads": [{"operation": "list", "resource": "task"}] * 51,
-        "mutations": [],
-        "clarification": None,
-    })
+    raw = json.dumps(
+        {
+            "reply": "ok",
+            "reads": [{"operation": "list", "resource": "task"}] * 51,
+            "mutations": [],
+            "clarification": None,
+        }
+    )
     with pytest.raises(ValidationError):
         parse_decision(raw)
 
 
 @pytest.mark.asyncio
 async def test_request_validation_problem_does_not_echo_sensitive_input() -> None:
-    response = await validation_problem(None, RequestValidationError([{
-        "type": "string_too_short",
-        "loc": ("body", "password"),
-        "msg": "String should have at least 8 characters",
-        "input": "secret-value",
-    }]))
+    response = await validation_problem(
+        None,
+        RequestValidationError(
+            [
+                {
+                    "type": "string_too_short",
+                    "loc": ("body", "password"),
+                    "msg": "String should have at least 8 characters",
+                    "input": "secret-value",
+                }
+            ]
+        ),
+    )
     body = response.body.decode()
     assert response.status_code == 422
     assert "body.password" in body
@@ -152,22 +185,39 @@ async def test_domain_revalidates_direct_mutations(session, user, mutation) -> N
 @pytest.mark.asyncio
 async def test_invalid_late_mutation_does_not_apply_earlier_mutation(session, user) -> None:
     with pytest.raises(CalendarValidationError):
-        await CalendarCommandService.execute(session, user, [
-            CalendarMutation("create", "task", {"title": "must roll back"}),
-            CalendarMutation("create", "task", {"title": None}),
-        ], origin="agent")
+        await CalendarCommandService.execute(
+            session,
+            user,
+            [
+                CalendarMutation("create", "task", {"title": "must roll back"}),
+                CalendarMutation("create", "task", {"title": None}),
+            ],
+            origin="agent",
+        )
     assert await TaskService.list(session, user) == []
     assert list((await session.scalars(CalendarOperation.__table__.select())).all()) == []
 
 
 @pytest.mark.asyncio
 async def test_noop_update_does_not_create_history_entry(session, user) -> None:
-    created = (await CalendarCommandService.execute(session, user, [
-        CalendarMutation("create", "task", {"title": "Same"}),
-    ], origin="rest"))[0]
-    result = await CalendarCommandService.execute(session, user, [
-        CalendarMutation("update", "task", {"title": "Same"}, created.target_id),
-    ], origin="rest")
+    created = (
+        await CalendarCommandService.execute(
+            session,
+            user,
+            [
+                CalendarMutation("create", "task", {"title": "Same"}),
+            ],
+            origin="rest",
+        )
+    )[0]
+    result = await CalendarCommandService.execute(
+        session,
+        user,
+        [
+            CalendarMutation("update", "task", {"title": "Same"}, created.target_id),
+        ],
+        origin="rest",
+    )
     assert result == []
     rows = list((await session.scalars(CalendarOperation.__table__.select())).all())
     assert len(rows) == 1
@@ -177,7 +227,9 @@ async def test_noop_update_does_not_create_history_entry(session, user) -> None:
 async def test_audio_upload_rejects_empty_wrong_type_and_oversize(tmp_path) -> None:
     with pytest.raises(HTTPException) as empty:
         await _save_audio_upload(
-            UploadFile(filename="empty.webm", file=BytesIO(b""), headers={"content-type": "audio/webm"}),
+            UploadFile(
+                filename="empty.webm", file=BytesIO(b""), headers={"content-type": "audio/webm"}
+            ),
             directory=tmp_path,
             max_bytes=10,
         )
@@ -185,7 +237,9 @@ async def test_audio_upload_rejects_empty_wrong_type_and_oversize(tmp_path) -> N
 
     with pytest.raises(HTTPException) as wrong_type:
         await _save_audio_upload(
-            UploadFile(filename="note.txt", file=BytesIO(b"hello"), headers={"content-type": "text/plain"}),
+            UploadFile(
+                filename="note.txt", file=BytesIO(b"hello"), headers={"content-type": "text/plain"}
+            ),
             directory=tmp_path,
             max_bytes=10,
         )
@@ -193,7 +247,11 @@ async def test_audio_upload_rejects_empty_wrong_type_and_oversize(tmp_path) -> N
 
     with pytest.raises(HTTPException) as too_large:
         await _save_audio_upload(
-            UploadFile(filename="large.webm", file=BytesIO(b"01234567890"), headers={"content-type": "audio/webm"}),
+            UploadFile(
+                filename="large.webm",
+                file=BytesIO(b"01234567890"),
+                headers={"content-type": "audio/webm"},
+            ),
             directory=tmp_path,
             max_bytes=10,
         )

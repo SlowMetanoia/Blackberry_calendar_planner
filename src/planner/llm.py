@@ -62,7 +62,9 @@ async def verify_llm_connection(settings: Settings) -> None:
     try:
         available = [str(item["id"]) for item in response.json()["data"]]
     except (KeyError, TypeError, ValueError) as exc:
-        raise RuntimeError(f"LLM server returned an invalid /models response at {base_url}") from exc
+        raise RuntimeError(
+            f"LLM server returned an invalid /models response at {base_url}"
+        ) from exc
     if settings.llm_model not in available:
         shown = ", ".join(available) if available else "<none>"
         raise RuntimeError(

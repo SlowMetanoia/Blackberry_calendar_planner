@@ -10,6 +10,7 @@ from planner.calendar import (
     CalendarCommandService,
     CalendarHistoryCorrupt,
     CalendarMutation,
+    CalendarTargetNotFound,
     UndoConflict,
 )
 from planner.db import Base
@@ -38,15 +39,30 @@ async def user(session):
 
 @pytest.mark.asyncio
 async def test_cud_records_snapshots_changes_and_sequence(session, user):
-    created = (await CalendarCommandService.execute(session, user, [
-        CalendarMutation("create", "task", {"title": "Draft", "status": "open"})
-    ], origin="rest"))[0]
-    updated = (await CalendarCommandService.execute(session, user, [
-        CalendarMutation("update", "task", {"title": "Final"}, created.target_id)
-    ], origin="rest"))[0]
-    deleted = (await CalendarCommandService.execute(session, user, [
-        CalendarMutation("delete", "task", {}, created.target_id)
-    ], origin="rest"))[0]
+    created = (
+        await CalendarCommandService.execute(
+            session,
+            user,
+            [CalendarMutation("create", "task", {"title": "Draft", "status": "open"})],
+            origin="rest",
+        )
+    )[0]
+    updated = (
+        await CalendarCommandService.execute(
+            session,
+            user,
+            [CalendarMutation("update", "task", {"title": "Final"}, created.target_id)],
+            origin="rest",
+        )
+    )[0]
+    deleted = (
+        await CalendarCommandService.execute(
+            session,
+            user,
+            [CalendarMutation("delete", "task", {}, created.target_id)],
+            origin="rest",
+        )
+    )[0]
     assert [created.sequence, updated.sequence, deleted.sequence] == [1, 2, 3]
     assert created.before_state is None and created.after_state["title"] == "Draft"
     assert updated.changes["title"] == {"before": "Draft", "after": "Final"}
@@ -55,11 +71,16 @@ async def test_cud_records_snapshots_changes_and_sequence(session, user):
 
 @pytest.mark.asyncio
 async def test_multi_action_command_is_atomic(session, user):
-    with pytest.raises(Exception):
-        await CalendarCommandService.execute(session, user, [
-            CalendarMutation("create", "task", {"title": "Must roll back"}),
-            CalendarMutation("delete", "task", {}, uuid.uuid4()),
-        ], origin="agent")
+    with pytest.raises(CalendarTargetNotFound):
+        await CalendarCommandService.execute(
+            session,
+            user,
+            [
+                CalendarMutation("create", "task", {"title": "Must roll back"}),
+                CalendarMutation("delete", "task", {}, uuid.uuid4()),
+            ],
+            origin="agent",
+        )
     assert await TaskService.list(session, user) == []
     assert (await session.scalars(CalendarOperation.__table__.select())).all() == []
 
@@ -67,21 +88,31 @@ async def test_multi_action_command_is_atomic(session, user):
 @pytest.mark.asyncio
 async def test_command_id_is_idempotent(session, user):
     command_id = uuid.uuid4()
-    first = await CalendarCommandService.execute(session, user, [
-        CalendarMutation("create", "task", {"title": "Once"})
-    ], origin="agent", command_id=command_id)
-    second = await CalendarCommandService.execute(session, user, [
-        CalendarMutation("create", "task", {"title": "Twice"})
-    ], origin="agent", command_id=command_id)
+    first = await CalendarCommandService.execute(
+        session,
+        user,
+        [CalendarMutation("create", "task", {"title": "Once"})],
+        origin="agent",
+        command_id=command_id,
+    )
+    second = await CalendarCommandService.execute(
+        session,
+        user,
+        [CalendarMutation("create", "task", {"title": "Twice"})],
+        origin="agent",
+        command_id=command_id,
+    )
     assert second[0].id == first[0].id
     assert [task.title for task in await TaskService.list(session, user)] == ["Once"]
 
 
 @pytest.mark.asyncio
 async def test_undo_is_compensating_and_itself_undoable(session, user):
-    created = (await CalendarCommandService.execute(session, user, [
-        CalendarMutation("create", "task", {"title": "Keep"})
-    ], origin="rest"))[0]
+    created = (
+        await CalendarCommandService.execute(
+            session, user, [CalendarMutation("create", "task", {"title": "Keep"})], origin="rest"
+        )
+    )[0]
     undo = await CalendarCommandService.undo(session, user, created.id)
     assert undo.operation == "delete" and undo.reverts_operation_id == created.id
     assert await TaskService.get(session, user, created.target_id) is None
@@ -92,30 +123,53 @@ async def test_undo_is_compensating_and_itself_undoable(session, user):
 
 @pytest.mark.asyncio
 async def test_undo_rejects_changed_state(session, user):
-    created = (await CalendarCommandService.execute(session, user, [
-        CalendarMutation("create", "task", {"title": "Original"})
-    ], origin="rest"))[0]
-    await CalendarCommandService.execute(session, user, [
-        CalendarMutation("update", "task", {"title": "Changed"}, created.target_id)
-    ], origin="rest")
+    created = (
+        await CalendarCommandService.execute(
+            session,
+            user,
+            [CalendarMutation("create", "task", {"title": "Original"})],
+            origin="rest",
+        )
+    )[0]
+    await CalendarCommandService.execute(
+        session,
+        user,
+        [CalendarMutation("update", "task", {"title": "Changed"}, created.target_id)],
+        origin="rest",
+    )
     with pytest.raises(UndoConflict):
         await CalendarCommandService.undo(session, user, created.id)
 
 
 @pytest.mark.asyncio
 async def test_update_and_delete_undo_restore_prior_state(session, user):
-    created = (await CalendarCommandService.execute(session, user, [
-        CalendarMutation("create", "task", {"title": "Before", "description": "Keep"})
-    ], origin="rest"))[0]
-    updated = (await CalendarCommandService.execute(session, user, [
-        CalendarMutation("update", "task", {"title": "After"}, created.target_id)
-    ], origin="rest"))[0]
+    created = (
+        await CalendarCommandService.execute(
+            session,
+            user,
+            [CalendarMutation("create", "task", {"title": "Before", "description": "Keep"})],
+            origin="rest",
+        )
+    )[0]
+    updated = (
+        await CalendarCommandService.execute(
+            session,
+            user,
+            [CalendarMutation("update", "task", {"title": "After"}, created.target_id)],
+            origin="rest",
+        )
+    )[0]
     await CalendarCommandService.undo(session, user, updated.id)
     restored = await TaskService.get(session, user, created.target_id)
     assert (restored.title, restored.description) == ("Before", "Keep")
-    deleted = (await CalendarCommandService.execute(session, user, [
-        CalendarMutation("delete", "task", {}, created.target_id)
-    ], origin="rest"))[0]
+    deleted = (
+        await CalendarCommandService.execute(
+            session,
+            user,
+            [CalendarMutation("delete", "task", {}, created.target_id)],
+            origin="rest",
+        )
+    )[0]
     await CalendarCommandService.undo(session, user, deleted.id)
     restored = await TaskService.get(session, user, created.target_id)
     assert (restored.title, restored.description) == ("Before", "Keep")
@@ -126,26 +180,36 @@ async def test_operations_and_targets_are_owner_scoped(session, user):
     other = User(email="other@example.test", password_hash="x")
     session.add(other)
     await session.flush()
-    created = (await CalendarCommandService.execute(session, user, [
-        CalendarMutation("create", "task", {"title": "Private"})
-    ], origin="rest"))[0]
-    with pytest.raises(Exception):
-        await CalendarCommandService.execute(session, other, [
-            CalendarMutation("update", "task", {"title": "Stolen"}, created.target_id)
-        ], origin="rest")
-    with pytest.raises(Exception):
+    created = (
+        await CalendarCommandService.execute(
+            session, user, [CalendarMutation("create", "task", {"title": "Private"})], origin="rest"
+        )
+    )[0]
+    with pytest.raises(CalendarTargetNotFound):
+        await CalendarCommandService.execute(
+            session,
+            other,
+            [CalendarMutation("update", "task", {"title": "Stolen"}, created.target_id)],
+            origin="rest",
+        )
+    with pytest.raises(CalendarTargetNotFound):
         await CalendarCommandService.undo(session, other, created.id)
     assert (await TaskService.get(session, user, created.target_id)).title == "Private"
 
 
 @pytest.mark.asyncio
 async def test_replay_rebuilds_projection(session, user):
-    created = (await CalendarCommandService.execute(session, user, [
-        CalendarMutation("create", "task", {"title": "Before"})
-    ], origin="rest"))[0]
-    await CalendarCommandService.execute(session, user, [
-        CalendarMutation("update", "task", {"title": "After"}, created.target_id)
-    ], origin="rest")
+    created = (
+        await CalendarCommandService.execute(
+            session, user, [CalendarMutation("create", "task", {"title": "Before"})], origin="rest"
+        )
+    )[0]
+    await CalendarCommandService.execute(
+        session,
+        user,
+        [CalendarMutation("update", "task", {"title": "After"}, created.target_id)],
+        origin="rest",
+    )
     await session.execute(Task.__table__.delete())
     await CalendarCommandService.replay(session, user)
     assert (await TaskService.get(session, user, created.target_id)).title == "After"
@@ -153,9 +217,14 @@ async def test_replay_rebuilds_projection(session, user):
 
 @pytest.mark.asyncio
 async def test_replay_validates_history_before_deleting_projection(session, user):
-    created = (await CalendarCommandService.execute(session, user, [
-        CalendarMutation("create", "task", {"title": "Still present"})
-    ], origin="rest"))[0]
+    created = (
+        await CalendarCommandService.execute(
+            session,
+            user,
+            [CalendarMutation("create", "task", {"title": "Still present"})],
+            origin="rest",
+        )
+    )[0]
     await session.flush()
     created.after_state = {**created.after_state, "title": None}
 
@@ -170,8 +239,13 @@ async def test_langgraph_executes_mutation_immediately(session, user, monkeypatc
     conversation = Conversation(owner_id=user.id)
     session.add(conversation)
     await session.flush()
-    message = AgentMessage(owner_id=user.id, conversation_id=conversation.id, sequence=1,
-                           input_text="create", status=MessageStatus.processing)
+    message = AgentMessage(
+        owner_id=user.id,
+        conversation_id=conversation.id,
+        sequence=1,
+        input_text="create",
+        status=MessageStatus.processing,
+    )
     session.add(message)
     await session.flush()
 
@@ -179,7 +253,9 @@ async def test_langgraph_executes_mutation_immediately(session, user, monkeypatc
         return '{"reply":"Готово","reads":[],"mutations":[{"operation":"create","resource":"task","payload":{"title":"Graph task"}}],"clarification":null}'
 
     monkeypatch.setattr(agent, "_complete", decision)
-    result = await run_agent("create", AgentRunContext(session, user.id, conversation.id, message.id))
+    result = await run_agent(
+        "create", AgentRunContext(session, user.id, conversation.id, message.id)
+    )
     payload = json.loads(result.result)
     assert result.state == "completed"
     assert payload["operations"][0]["after"]["title"] == "Graph task"

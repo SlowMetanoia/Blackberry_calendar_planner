@@ -1,5 +1,5 @@
-from datetime import datetime, timedelta, timezone
 import uuid
+from datetime import UTC, datetime, timedelta
 
 import bcrypt
 import jwt
@@ -25,16 +25,20 @@ def verify_password(password: str, password_hash: str) -> bool:
 
 def create_token(user_id: uuid.UUID) -> str:
     settings = get_settings()
-    expiry = datetime.now(timezone.utc) + timedelta(minutes=settings.jwt_expire_minutes)
+    expiry = datetime.now(UTC) + timedelta(minutes=settings.jwt_expire_minutes)
     return jwt.encode({"sub": str(user_id), "exp": expiry}, settings.jwt_secret, algorithm="HS256")
 
 
-async def current_user(token: str = Depends(oauth2_scheme), session: AsyncSession = Depends(get_session)) -> User:
+async def current_user(
+    token: str = Depends(oauth2_scheme), session: AsyncSession = Depends(get_session)
+) -> User:
     try:
         payload = jwt.decode(token, get_settings().jwt_secret, algorithms=["HS256"])
         user_id = uuid.UUID(payload["sub"])
     except (KeyError, ValueError, jwt.PyJWTError) as exc:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token") from exc
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token"
+        ) from exc
     user = await session.scalar(select(User).where(User.id == user_id))
     if user is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")

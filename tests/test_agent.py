@@ -146,8 +146,10 @@ def test_decision_envelope_rejects_free_text() -> None:
 @pytest.mark.asyncio
 async def test_agent_hides_invalid_model_envelope_details(monkeypatch) -> None:
     async def invalid(*_args, **_kwargs):
-        return '{"reply":"ok","reads":[],"mutations":[{"operation":"create",' \
+        return (
+            '{"reply":"ok","reads":[],"mutations":[{"operation":"create",'
             '"resource":"task","payload":{"title":null}}],"clarification":null}'
+        )
 
     monkeypatch.setattr(agent, "_complete", invalid)
     result = await run_agent("создай задачу")

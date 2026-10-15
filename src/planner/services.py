@@ -1,5 +1,6 @@
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+from typing import ClassVar
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import func, select
@@ -13,7 +14,7 @@ def normalize_datetime(value: datetime | None, user: User) -> datetime | None:
         return None
     if value.tzinfo is None:
         value = value.replace(tzinfo=ZoneInfo(user.timezone))
-    return value.astimezone(timezone.utc)
+    return value.astimezone(UTC)
 
 
 def _normalize_payload(data: dict, user: User, datetime_fields: set[str]) -> dict:
@@ -28,7 +29,7 @@ def _normalize_payload(data: dict, user: User, datetime_fields: set[str]) -> dic
 
 class ResourceService:
     model = Task
-    datetime_fields: set[str] = set()
+    datetime_fields: ClassVar[set[str]] = set()
 
     @classmethod
     def _range_conditions(
@@ -80,13 +81,18 @@ class ResourceService:
             *cls._range_conditions(user, from_datetime, to_datetime),
         ]
         order_column = getattr(cls.model, next(iter(cls.datetime_fields)), cls.model.id)
-        items = list((await session.scalars(
-            select(cls.model).where(*conditions).order_by(order_column, cls.model.id)
-            .offset(offset).limit(limit)
-        )).all())
-        total = await session.scalar(
-            select(func.count()).select_from(cls.model).where(*conditions)
+        items = list(
+            (
+                await session.scalars(
+                    select(cls.model)
+                    .where(*conditions)
+                    .order_by(order_column, cls.model.id)
+                    .offset(offset)
+                    .limit(limit)
+                )
+            ).all()
         )
+        total = await session.scalar(select(func.count()).select_from(cls.model).where(*conditions))
         return items, int(total or 0)
 
     @classmethod
@@ -94,11 +100,12 @@ class ResourceService:
         query = select(cls.model).where(cls.model.id == ident, cls.model.owner_id == user.id)
         return await session.scalar(query)
 
+
 class TaskService(ResourceService):
     model = Task
-    datetime_fields = {"deadline"}
+    datetime_fields: ClassVar[set[str]] = {"deadline"}
 
 
 class EventService(ResourceService):
     model = Event
-    datetime_fields = {"starts_at"}
+    datetime_fields: ClassVar[set[str]] = {"starts_at"}

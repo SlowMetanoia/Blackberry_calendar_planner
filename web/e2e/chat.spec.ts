@@ -58,15 +58,18 @@ test("keeps the page fixed while sidebar and messages scroll independently", asy
   });
   await page.goto("/");
   const firstHistoryItem = page.locator(".history-item").first();
+  const secondHistoryItem = page.locator(".history-item").nth(1);
+  const secondBefore = await secondHistoryItem.boundingBox();
+  const scrollHeightBefore = await page.locator(".operation-list").evaluate(element => element.scrollHeight);
   await firstHistoryItem.hover();
-  const historyDetail = await firstHistoryItem.locator(".history-detail").boundingBox();
-  const historySidebar = await page.locator(".operation-sidebar").boundingBox();
-  expect(historyDetail).not.toBeNull();
-  expect(historySidebar).not.toBeNull();
-  expect(historyDetail!.x).toBeGreaterThanOrEqual(historySidebar!.x);
-  expect(historyDetail!.x + historyDetail!.width).toBeLessThanOrEqual(
-    historySidebar!.x + historySidebar!.width,
-  );
+  const historyPreview = await page.getByRole("tooltip").boundingBox();
+  const secondAfter = await secondHistoryItem.boundingBox();
+  const scrollHeightAfter = await page.locator(".operation-list").evaluate(element => element.scrollHeight);
+  expect(historyPreview).not.toBeNull();
+  expect(historyPreview!.x).toBeGreaterThanOrEqual(8);
+  expect(historyPreview!.x + historyPreview!.width).toBeLessThanOrEqual(await page.evaluate(()=>window.innerWidth-8));
+  expect(secondAfter).toEqual(secondBefore);
+  expect(scrollHeightAfter).toBe(scrollHeightBefore);
   await page.getByRole("button", {name:"История сессий"}).click();
   await page.getByRole("button", {name:/Диалог 0/}).click();
   await expect(page.getByText("Ответ 29")).toBeVisible();

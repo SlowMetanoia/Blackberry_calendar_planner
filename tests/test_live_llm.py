@@ -6,7 +6,6 @@ import pytest
 
 from planner.agent import _complete, build_system_prompt, parse_decision
 
-
 pytestmark = pytest.mark.skipif(
     os.getenv("PLANNER_LIVE_LLM_TEST") != "1",
     reason="set PLANNER_LIVE_LLM_TEST=1 to call the configured model",
@@ -36,7 +35,9 @@ async def test_live_qwen_returns_valid_planner_decisions() -> None:
     event = parse_decision(
         await _complete("Запланируй встречу с Ильёй завтра в 13:00", system_prompt=prompt)
     )
-    actions = [item for item in event.mutations if item.operation == "create" and item.resource == "event"]
+    actions = [
+        item for item in event.mutations if item.operation == "create" and item.resource == "event"
+    ]
     assert actions
     assert actions[0].payload.starts_at.isoformat() == "2026-10-15T13:00:00+03:00"
 

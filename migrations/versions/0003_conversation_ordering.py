@@ -2,6 +2,7 @@
 
 Revision ID: 0003_conversation_ordering
 """
+
 from alembic import op
 
 revision = "0003_conversation_ordering"
@@ -46,6 +47,4 @@ def upgrade() -> None:
 def downgrade() -> None:
     op.drop_constraint("fk_action_plans_conversation", "action_plans", type_="foreignkey")
     op.drop_constraint("fk_agent_messages_conversation", "agent_messages", type_="foreignkey")
-    op.drop_constraint(
-        "uq_agent_messages_conversation_sequence", "agent_messages", type_="unique"
-    )
+    op.drop_constraint("uq_agent_messages_conversation_sequence", "agent_messages", type_="unique")

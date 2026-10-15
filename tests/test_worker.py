@@ -4,10 +4,10 @@ import pytest
 from arq import Retry
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
+from planner import worker
 from planner.agent import AgentResult, TranscriptionError
 from planner.db import Base
 from planner.models import AgentMessage, Conversation, MessageStatus, User
-from planner import worker
 
 
 class FakeRedis:
@@ -52,18 +52,36 @@ async def test_messages_in_one_conversation_wait_for_previous(worker_db, monkeyp
         conversation = Conversation(owner_id=user.id)
         session.add(conversation)
         await session.flush()
-        first = AgentMessage(owner_id=user.id, conversation_id=conversation.id, sequence=1,
-                             input_text="first", status=MessageStatus.queued)
-        second = AgentMessage(owner_id=user.id, conversation_id=conversation.id, sequence=2,
-                              input_text="second", status=MessageStatus.queued)
+        first = AgentMessage(
+            owner_id=user.id,
+            conversation_id=conversation.id,
+            sequence=1,
+            input_text="first",
+            status=MessageStatus.queued,
+        )
+        second = AgentMessage(
+            owner_id=user.id,
+            conversation_id=conversation.id,
+            sequence=2,
+            input_text="second",
+            status=MessageStatus.queued,
+        )
         session.add_all([first, second])
         await session.commit()
         first_id, second_id = first.id, second.id
 
     async def completed(_text, _context=None):
-        return AgentResult("completed", json.dumps({
-            "reply": "ok", "reads": [], "mutations": [], "clarification": None,
-        }))
+        return AgentResult(
+            "completed",
+            json.dumps(
+                {
+                    "reply": "ok",
+                    "reads": [],
+                    "mutations": [],
+                    "clarification": None,
+                }
+            ),
+        )
 
     monkeypatch.setattr(worker, "run_agent", completed)
     redis = FakeRedis()
@@ -88,19 +106,37 @@ async def test_different_conversations_use_different_locks(worker_db, monkeypatc
         session.add_all([first_conversation, second_conversation])
         await session.flush()
         messages = [
-            AgentMessage(owner_id=user.id, conversation_id=first_conversation.id, sequence=1,
-                         input_text="first", status=MessageStatus.queued),
-            AgentMessage(owner_id=user.id, conversation_id=second_conversation.id, sequence=1,
-                         input_text="second", status=MessageStatus.queued),
+            AgentMessage(
+                owner_id=user.id,
+                conversation_id=first_conversation.id,
+                sequence=1,
+                input_text="first",
+                status=MessageStatus.queued,
+            ),
+            AgentMessage(
+                owner_id=user.id,
+                conversation_id=second_conversation.id,
+                sequence=1,
+                input_text="second",
+                status=MessageStatus.queued,
+            ),
         ]
         session.add_all(messages)
         await session.commit()
         ids = [message.id for message in messages]
 
     async def completed(_text, _context=None):
-        return AgentResult("completed", json.dumps({
-            "reply": "ok", "reads": [], "mutations": [], "clarification": None,
-        }))
+        return AgentResult(
+            "completed",
+            json.dumps(
+                {
+                    "reply": "ok",
+                    "reads": [],
+                    "mutations": [],
+                    "clarification": None,
+                }
+            ),
+        )
 
     monkeypatch.setattr(worker, "run_agent", completed)
     redis = FakeRedis()
@@ -152,7 +188,9 @@ async def test_transcription_failure_is_safe_and_does_not_run_agent(worker_db, m
 
 
 @pytest.mark.asyncio
-async def test_unexpected_worker_error_does_not_leak_internal_details(worker_db, monkeypatch) -> None:
+async def test_unexpected_worker_error_does_not_leak_internal_details(
+    worker_db, monkeypatch
+) -> None:
     async with worker_db() as session:
         user = User(email="safe-worker@example.test", password_hash="x")
         session.add(user)

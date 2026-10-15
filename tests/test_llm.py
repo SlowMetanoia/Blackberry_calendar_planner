@@ -1,8 +1,8 @@
 import httpx
 import pytest
 
-from planner.config import Settings
 from planner import llm
+from planner.config import Settings
 
 
 class FakeResponse:
@@ -89,6 +89,8 @@ async def test_startup_probe_rejects_missing_model(monkeypatch) -> None:
 async def test_startup_probe_rejects_unreachable_server(monkeypatch) -> None:
     request = httpx.Request("GET", "http://lm.test/v1/models")
     error = httpx.ConnectError("down", request=request)
-    monkeypatch.setattr(llm.httpx, "AsyncClient", lambda **kwargs: FakeClient(error=error, **kwargs))
+    monkeypatch.setattr(
+        llm.httpx, "AsyncClient", lambda **kwargs: FakeClient(error=error, **kwargs)
+    )
     with pytest.raises(RuntimeError, match="unavailable"):
         await llm.verify_llm_connection(settings())

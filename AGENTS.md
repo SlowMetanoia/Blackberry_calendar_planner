@@ -10,6 +10,8 @@ Use the checked-in Python project and Docker Compose commands:
 
 - `.venv/bin/python -m pytest -q` — run the full test suite.
 - `.venv/bin/python -m pytest tests/test_security.py -q` — run focused tests.
+- `.venv/bin/python -m ruff check .` — lint Python code.
+- `.venv/bin/python -m ruff format --check .` — verify Python formatting.
 - `PYTHONPATH=src uvicorn planner.main:app --reload` — run the FastAPI service locally.
 - `docker compose --profile release run --rm migrate` — apply Alembic migrations.
 - `docker compose up --build` — start API, worker, Redis, and PostgreSQL.

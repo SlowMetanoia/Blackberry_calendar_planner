@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatDuration, formatMessageTimestamp, formatSchedule } from "./format";
+import { formatDuration, formatHistoryDate, formatHistoryTime, formatMessageTimestamp, formatSchedule, historyDateKey } from "./format";
 
 describe("date and duration formatting", () => {
   it("shows only the local time for a message from today", () => {
@@ -28,6 +28,12 @@ describe("date and duration formatting", () => {
     expect(formatSchedule("2026-10-15T08:00:00Z", 90, "Europe/Moscow"))
       .toBe("15 октября 2026, 11:00–12:30");
     expect(formatDuration(90)).toBe("1 час 30 минут");
+  });
+
+  it("formats history date groups and action time in the supplied timezone", () => {
+    expect(historyDateKey("2026-10-14T22:30:00Z", "Europe/Moscow")).toBe("2026-10-15");
+    expect(formatHistoryDate("2026-10-14T22:30:00Z", "Europe/Moscow")).toBe("15 октября 2026");
+    expect(formatHistoryTime("2026-10-14T22:30:00Z", "Europe/Moscow")).toBe("01:30");
   });
 
   it("does not expose invalid dates", () => {
