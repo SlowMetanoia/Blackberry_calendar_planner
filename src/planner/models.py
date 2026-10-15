@@ -33,9 +33,7 @@ class MessageStatus(str, enum.Enum):
 class User(Base):
     __tablename__ = "users"
     __table_args__ = (
-        CheckConstraint(
-            "upcoming_days BETWEEN 1 AND 90", name="ck_users_upcoming_days_range"
-        ),
+        CheckConstraint("upcoming_days BETWEEN 1 AND 90", name="ck_users_upcoming_days_range"),
     )
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     email: Mapped[str] = mapped_column(String(320), unique=True, index=True)

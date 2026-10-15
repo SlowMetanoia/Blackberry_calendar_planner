@@ -249,10 +249,34 @@ async def test_langgraph_executes_mutation_immediately(session, user, monkeypatc
     session.add(message)
     await session.flush()
 
-    async def decision(_text, **_kwargs):
-        return '{"reply":"Готово","reads":[],"mutations":[{"operation":"create","resource":"task","payload":{"title":"Graph task"}}],"clarification":null}'
+    async def decision(_messages, _tools):
+        return {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [
+                {
+                    "id": "commit-1",
+                    "type": "function",
+                    "function": {
+                        "name": "commit_calendar_command",
+                        "arguments": json.dumps(
+                            {
+                                "reply": "Готово",
+                                "mutations": [
+                                    {
+                                        "operation": "create",
+                                        "resource": "task",
+                                        "payload": {"title": "Graph task"},
+                                    }
+                                ],
+                            }
+                        ),
+                    },
+                }
+            ],
+        }
 
-    monkeypatch.setattr(agent, "_complete", decision)
+    monkeypatch.setattr(agent, "_complete_react", decision)
     result = await run_agent(
         "create", AgentRunContext(session, user.id, conversation.id, message.id)
     )

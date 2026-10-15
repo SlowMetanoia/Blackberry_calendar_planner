@@ -146,12 +146,23 @@ def test_decision_envelope_rejects_free_text() -> None:
 @pytest.mark.asyncio
 async def test_agent_hides_invalid_model_envelope_details(monkeypatch) -> None:
     async def invalid(*_args, **_kwargs):
-        return (
-            '{"reply":"ok","reads":[],"mutations":[{"operation":"create",'
-            '"resource":"task","payload":{"title":null}}],"clarification":null}'
-        )
+        return {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [
+                {
+                    "id": "bad",
+                    "type": "function",
+                    "function": {
+                        "name": "commit_calendar_command",
+                        "arguments": '{"reply":"ok","mutations":[{"operation":"create",'
+                        '"resource":"task","payload":{"title":null}}]}',
+                    },
+                }
+            ],
+        }
 
-    monkeypatch.setattr(agent, "_complete", invalid)
+    monkeypatch.setattr(agent, "_complete_react", invalid)
     result = await run_agent("создай задачу")
     assert result.state == "failed"
     assert "Переформулируйте" in result.result
@@ -196,7 +207,7 @@ def test_system_prompt_contains_local_clock_and_timezone() -> None:
     assert "2026-10-14T19:30:00+03:00" in prompt
     assert "Europe/Moscow" in prompt
     assert "absolute ISO-8601" in prompt
-    assert "both tasks and events" in prompt
+    assert "both list_tasks and list_events" in prompt
     assert "time_range" in prompt
     assert "complete resulting title" in prompt
     assert "preserve every unrequested part" in prompt
@@ -223,7 +234,7 @@ async def test_context_overflow_requests_a_new_conversation(monkeypatch) -> None
     async def overflow(*_args, **_kwargs):
         raise ContextWindowExceeded("context window exceeded")
 
-    monkeypatch.setattr(agent, "_complete", overflow)
+    monkeypatch.setattr(agent, "_complete_react", overflow)
     result = await run_agent("продолжим")
     payload = __import__("json").loads(result.result)
     assert result.state == "needs_clarification"

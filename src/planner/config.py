@@ -18,6 +18,9 @@ class Settings(BaseSettings):
     llm_startup_timeout_seconds: float = Field(default=5, gt=0)
     llm_request_timeout_seconds: float = Field(default=120, gt=0)
     llm_max_tokens: int = Field(default=2048, ge=1)
+    agent_max_model_turns: int = Field(default=6, ge=1, le=20)
+    agent_max_tool_calls: int = Field(default=12, ge=1, le=100)
+    agent_max_observation_items: int = Field(default=100, ge=1, le=500)
     stt_base_url: str | None = None
     stt_api_key: str | None = None
     stt_model: str = "gigaam-v3-e2e-rnnt"

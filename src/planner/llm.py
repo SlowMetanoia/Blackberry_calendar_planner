@@ -30,7 +30,7 @@ def decision_response_format() -> dict[str, Any]:
     }
 
 
-def completion_payload(settings: Settings, messages: list[dict[str, str]]) -> dict[str, Any]:
+def completion_payload(settings: Settings, messages: list[dict[str, Any]]) -> dict[str, Any]:
     return {
         "model": settings.llm_model,
         "messages": messages,
@@ -41,6 +41,26 @@ def completion_payload(settings: Settings, messages: list[dict[str, str]]) -> di
         "stream": False,
         "reasoning_effort": settings.llm_reasoning_effort,
         "response_format": decision_response_format(),
+    }
+
+
+def react_completion_payload(
+    settings: Settings,
+    messages: list[dict[str, Any]],
+    tools: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Build an OpenAI-compatible tool-calling request for the ReAct loop."""
+    return {
+        "model": settings.llm_model,
+        "messages": messages,
+        "tools": tools,
+        "tool_choice": "auto",
+        "temperature": 0,
+        "top_p": 1,
+        "top_k": 20,
+        "max_tokens": settings.llm_max_tokens,
+        "stream": False,
+        "reasoning_effort": settings.llm_reasoning_effort,
     }
 
 

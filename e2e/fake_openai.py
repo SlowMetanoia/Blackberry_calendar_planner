@@ -24,82 +24,89 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"text": "создай задачу Голосовая задача"})
             return
         request = json.loads(raw or b"{}")
-        text = next(
-            (m["content"] for m in reversed(request.get("messages", [])) if m["role"] == "user"), ""
-        )
+        messages = request.get("messages", [])
+        text = next((m["content"] for m in reversed(messages) if m["role"] == "user"), "")
         lowered = text.lower()
+        observed = bool(messages and messages[-1].get("role") == "tool")
         earlier_user_messages = [
-            message["content"].lower()
-            for message in request.get("messages", [])[:-1]
-            if message["role"] == "user"
+            message["content"].lower() for message in messages[:-1] if message["role"] == "user"
         ]
         if "что у меня на завтра" in lowered:
             time_range = {"from": "2026-10-15T00:00:00+03:00", "to": "2026-10-16T00:00:00+03:00"}
-            envelope = {
-                "reply": "Вот ваши задачи и события на завтра",
-                "reads": [
-                    {"operation": "list", "resource": "task", "time_range": time_range},
-                    {"operation": "list", "resource": "event", "time_range": time_range},
-                ],
-                "mutations": [],
-                "clarification": None,
-            }
+            calls = (
+                [("finish_response", {"reply": "Вот ваши задачи и события на завтра"})]
+                if observed
+                else [
+                    ("list_tasks", {"time_range": time_range}),
+                    ("list_events", {"time_range": time_range}),
+                ]
+            )
         elif "по поводу релиза" in lowered and any(
             "добавь встречу" in item for item in earlier_user_messages
         ):
-            envelope = {
-                "reply": "Подготовил встречу по поводу релиза",
-                "reads": [],
-                "mutations": [
+            calls = [
+                (
+                    "commit_calendar_command",
                     {
-                        "operation": "create",
-                        "resource": "event",
-                        "payload": {
-                            "title": "Встреча по поводу релиза",
-                            "starts_at": "2026-10-15T11:00:00+03:00",
-                        },
-                    }
-                ],
-                "clarification": None,
-            }
+                        "reply": "Подготовил встречу по поводу релиза",
+                        "mutations": [
+                            {
+                                "operation": "create",
+                                "resource": "event",
+                                "payload": {
+                                    "title": "Встреча по поводу релиза",
+                                    "starts_at": "2026-10-15T11:00:00+03:00",
+                                },
+                            }
+                        ],
+                    },
+                )
+            ]
         elif "добавь встречу" in lowered:
-            envelope = {
-                "reply": "Уточните повод встречи",
-                "reads": [],
-                "mutations": [],
-                "clarification": "Уточните повод встречи",
-            }
+            calls = [("request_clarification", {"question": "Уточните повод встречи"})]
         elif "покажи" in lowered:
-            envelope = {
-                "reply": "Вот ваши задачи",
-                "reads": [{"operation": "list", "resource": "task"}],
-                "mutations": [],
-                "clarification": None,
-            }
+            calls = (
+                [("finish_response", {"reply": "Вот ваши задачи"})]
+                if observed
+                else [("list_tasks", {})]
+            )
         elif "непонятно" in lowered:
-            envelope = {
-                "reply": "Уточните, пожалуйста",
-                "reads": [],
-                "mutations": [],
-                "clarification": "Уточните, пожалуйста",
-            }
+            calls = [("request_clarification", {"question": "Уточните, пожалуйста"})]
         else:
             title = text.split("задачу", 1)[-1].strip() or "Новая задача"
-            envelope = {
-                "reply": "Подготовил план",
-                "reads": [],
-                "mutations": [
+            calls = [
+                (
+                    "commit_calendar_command",
                     {
-                        "operation": "create",
-                        "resource": "task",
-                        "target_id": None,
-                        "payload": {"title": title},
-                    }
-                ],
-                "clarification": None,
+                        "reply": "Подготовил план",
+                        "mutations": [
+                            {
+                                "operation": "create",
+                                "resource": "task",
+                                "target_id": None,
+                                "payload": {"title": title},
+                            }
+                        ],
+                    },
+                )
+            ]
+        tool_calls = [
+            {
+                "id": f"fake-{index}",
+                "type": "function",
+                "function": {"name": name, "arguments": json.dumps(arguments, ensure_ascii=False)},
             }
+            for index, (name, arguments) in enumerate(calls, start=1)
+        ]
         self._json(
-            {"choices": [{"message": {"content": json.dumps(envelope, ensure_ascii=False)}}]}
+            {
+                "choices": [
+                    {
+                        "finish_reason": "tool_calls",
+                        "message": {"role": "assistant", "content": None, "tool_calls": tool_calls},
+                    }
+                ]
+            }
         )
 
     def log_message(self, *_args):

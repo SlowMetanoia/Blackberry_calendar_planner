@@ -66,6 +66,19 @@ def test_qwen_payload_disables_thinking_and_uses_json_schema() -> None:
     assert {"reply", "reads", "mutations", "clarification"} <= set(schema["properties"])
 
 
+def test_react_payload_uses_tools_without_json_response_format() -> None:
+    tools = [
+        {
+            "type": "function",
+            "function": {"name": "finish_response", "parameters": {"type": "object"}},
+        }
+    ]
+    payload = llm.react_completion_payload(settings(), [{"role": "user", "content": "test"}], tools)
+    assert payload["tools"] == tools
+    assert payload["tool_choice"] == "auto"
+    assert "response_format" not in payload
+
+
 def test_empty_api_key_omits_authorization_header() -> None:
     assert "Authorization" not in llm.auth_headers(settings(llm_api_key=None))
 

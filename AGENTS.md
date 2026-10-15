@@ -18,6 +18,10 @@ Use the checked-in Python project and Docker Compose commands:
 
 LangGraph is the agent orchestration layer; keep its graph behind the `run_agent` application boundary. Redis/ARQ handles background jobs, while PostgreSQL stores application data.
 
+## Container Freshness
+
+Every major implementation stage must end by rebuilding and restarting the affected Docker Compose services. Treat architectural changes, new execution paths, schema or dependency changes, and completed todo-plan milestones as major stages. Use `docker compose up --build -d` (or rebuild/restart only the affected services), run migrations first when required, and perform a focused smoke check against the running containers. Do not consider the stage complete until you have verified that the live API and worker are executing the newly built code rather than a stale image. If containers cannot be restarted, report that explicitly as unfinished work.
+
 ## Coding Style & Naming Conventions
 
 Use Python 4-space indentation, type hints, and small functions. Prefer `snake_case` for modules, functions, and variables; `PascalCase` for classes; and descriptive names (`Task`, `Event`, `CalendarClient`). Format and lint with tools declared in `pyproject.toml` (for example, Ruff), and keep imports and public interfaces explicit. React code should use the project’s formatter and `PascalCase` component names.
@@ -38,6 +42,6 @@ There is no Git history yet, so no existing commit convention can be inferred. U
 
 Keep database URLs, API keys, and model credentials in environment variables or an untracked `.env` file. Never commit secrets, recordings, or personal calendar data. Validate and authorize every agent tool call, and use isolated test databases for PostgreSQL-backed tests.
 
-Agent workflow uses LangGraph behind `run_agent`: strict JSON envelope validation, immediate reads, and atomic immediate C/U/D commands. Every mutation appends an immutable, owner-scoped `CalendarOperation`; task and event tables are replayable projections. History is available under `/calendar/history`, and undo appends a compensating operation. Message jobs remain serialized per conversation with a Redis lock. Run `.venv/bin/python -m pytest -q` for the full suite; focused checks: `.venv/bin/python -m pytest tests/test_calendar_history.py -q` and `.venv/bin/python -m pytest tests/test_worker.py -q`.
+Agent workflow uses a bounded LangGraph ReAct loop behind `run_agent`: owner-scoped read tools execute immediately and return structured observations to the model. The only mutating terminal tool is `commit_calendar_command`; it validates and executes the final C/U/D batch atomically. Every mutation appends an immutable, owner-scoped `CalendarOperation`; task and event tables are replayable projections. History is available under `/calendar/history`, and undo appends a compensating operation. Message jobs remain serialized per conversation with a Redis lock. Run `.venv/bin/python -m pytest -q` for the full suite; focused checks: `.venv/bin/python -m pytest tests/test_react_agent.py tests/test_calendar_history.py -q` and `.venv/bin/python -m pytest tests/test_worker.py -q`.
 
 The React/Vite client lives in `web/`; run `npm --prefix web test` and `npm --prefix web run build`. Full API/worker coverage uses the isolated fake LLM/STT environment through `./dev/test-e2e`.
