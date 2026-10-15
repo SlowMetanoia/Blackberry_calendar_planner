@@ -105,6 +105,43 @@ class TaskService(ResourceService):
     model = Task
     datetime_fields: ClassVar[set[str]] = {"deadline"}
 
+    @classmethod
+    async def page(
+        cls,
+        session: AsyncSession,
+        user: User,
+        *,
+        limit: int,
+        offset: int,
+        from_datetime: datetime | None = None,
+        to_datetime: datetime | None = None,
+        status: str | None = None,
+        deadline_presence: str = "any",
+    ):
+        conditions = [
+            cls.model.owner_id == user.id,
+            *cls._range_conditions(user, from_datetime, to_datetime),
+        ]
+        if status is not None:
+            conditions.append(cls.model.status == status)
+        if deadline_presence == "dated":
+            conditions.append(cls.model.deadline.is_not(None))
+        elif deadline_presence == "undated":
+            conditions.append(cls.model.deadline.is_(None))
+        items = list(
+            (
+                await session.scalars(
+                    select(cls.model)
+                    .where(*conditions)
+                    .order_by(cls.model.deadline.asc().nulls_last(), cls.model.id)
+                    .offset(offset)
+                    .limit(limit)
+                )
+            ).all()
+        )
+        total = await session.scalar(select(func.count()).select_from(cls.model).where(*conditions))
+        return items, int(total or 0)
+
 
 class EventService(ResourceService):
     model = Event

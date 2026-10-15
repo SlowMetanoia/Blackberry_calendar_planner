@@ -5,8 +5,9 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from planner.agent import parse_decision
 from planner.db import Base
-from planner.main import list_conversations
+from planner.main import get_user_preferences, list_conversations, update_user_preferences
 from planner.models import AgentMessage, Conversation, Event, MessageStatus, Task, User
+from planner.schemas import UserPreferencesUpdate
 from planner.services import EventService, TaskService
 
 
@@ -87,6 +88,70 @@ async def test_services_filter_owner_scoped_half_open_ranges(session, user) -> N
 
     assert [item.title for item in events] == ["boundary start", "inside"]
     assert [item.title for item in tasks] == ["dated"]
+
+
+@pytest.mark.asyncio
+async def test_task_service_filters_status_and_deadline_presence(session, user) -> None:
+    other = User(email="other-filter@example.test", password_hash="x")
+    session.add(other)
+    await session.flush()
+    session.add_all(
+        [
+            Task(
+                owner_id=user.id,
+                title="open dated",
+                deadline=datetime(2026, 10, 16, 8, tzinfo=UTC),
+                status="open",
+            ),
+            Task(
+                owner_id=user.id,
+                title="completed dated",
+                deadline=datetime(2026, 10, 16, 9, tzinfo=UTC),
+                status="completed",
+            ),
+            Task(owner_id=user.id, title="open undated", deadline=None, status="open"),
+            Task(owner_id=other.id, title="foreign undated", deadline=None, status="open"),
+        ]
+    )
+    await session.commit()
+
+    dated, dated_total = await TaskService.page(
+        session,
+        user,
+        limit=100,
+        offset=0,
+        status="open",
+        deadline_presence="dated",
+    )
+    undated, undated_total = await TaskService.page(
+        session,
+        user,
+        limit=100,
+        offset=0,
+        status="open",
+        deadline_presence="undated",
+    )
+
+    assert dated_total == 1
+    assert [item.title for item in dated] == ["open dated"]
+    assert undated_total == 1
+    assert [item.title for item in undated] == ["open undated"]
+
+
+@pytest.mark.asyncio
+async def test_user_preferences_default_and_partial_update(session, user) -> None:
+    current = await get_user_preferences(user=user)
+    assert current.timezone == "Europe/Moscow"
+    assert current.upcoming_days == 7
+
+    updated = await update_user_preferences(
+        data=UserPreferencesUpdate(upcoming_days=14),
+        user=user,
+        session=session,
+    )
+    assert updated.timezone == "Europe/Moscow"
+    assert updated.upcoming_days == 14
+    assert user.upcoming_days == 14
 
 
 @pytest.mark.asyncio

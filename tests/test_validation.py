@@ -13,7 +13,7 @@ from planner.calendar import CalendarCommandService, CalendarMutation, CalendarV
 from planner.db import Base
 from planner.main import _save_audio_upload, validation_problem
 from planner.models import CalendarOperation, User
-from planner.schemas import AgentInput, EventUpdate, TaskCreate, TaskUpdate
+from planner.schemas import AgentInput, EventUpdate, TaskCreate, TaskUpdate, UserPreferencesUpdate
 from planner.services import TaskService
 
 
@@ -36,6 +36,17 @@ def test_public_inputs_reject_invalid_shapes(model, payload) -> None:
 def test_optional_fields_can_still_be_cleared() -> None:
     assert TaskUpdate.model_validate({"description": None}).model_fields_set == {"description"}
     assert EventUpdate.model_validate({"location": None}).model_fields_set == {"location"}
+
+
+@pytest.mark.parametrize("value", [0, 91])
+def test_user_preferences_reject_invalid_upcoming_days(value: int) -> None:
+    with pytest.raises(ValidationError):
+        UserPreferencesUpdate(upcoming_days=value)
+
+
+def test_user_preferences_reject_empty_patch() -> None:
+    with pytest.raises(ValidationError):
+        UserPreferencesUpdate()
 
 
 @pytest.mark.parametrize(

@@ -3,12 +3,13 @@ import uuid
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Literal
 
 from arq import create_pool
 from arq.connections import RedisSettings
 from fastapi import Depends, FastAPI, File, Header, HTTPException, Query, Request, UploadFile
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -40,8 +41,17 @@ from .schemas import (
     TaskUpdate,
     TimezoneValue,
     TokenResponse,
+    UserPreferencesResponse,
+    UserPreferencesUpdate,
 )
-from .security import create_token, current_user, hash_password, verify_password
+from .security import (
+    AuthSessionContext,
+    create_auth_session,
+    current_auth_session,
+    current_user,
+    hash_password,
+    verify_password,
+)
 from .services import EventService, TaskService, normalize_datetime
 
 AUDIO_DIR = Path("/tmp/planner-audio")
@@ -164,9 +174,10 @@ async def register(
         raise HTTPException(409, "Email is already registered")
     user = User(email=data.email, password_hash=hash_password(data.password))
     session.add(user)
+    await session.flush()
+    token, _ = await create_auth_session(session, user.id)
     await session.commit()
-    await session.refresh(user)
-    return TokenResponse(access_token=create_token(user.id))
+    return TokenResponse(access_token=token)
 
 
 @app.post("/auth/login", response_model=TokenResponse)
@@ -174,7 +185,19 @@ async def login(data: AuthRequest, session: AsyncSession = Depends(get_session))
     user = await session.scalar(select(User).where(User.email == data.email))
     if user is None or not verify_password(data.password, user.password_hash):
         raise HTTPException(401, "Invalid credentials")
-    return TokenResponse(access_token=create_token(user.id))
+    token, _ = await create_auth_session(session, user.id)
+    await session.commit()
+    return TokenResponse(access_token=token)
+
+
+@app.post("/auth/logout", status_code=204)
+async def logout(
+    context: AuthSessionContext = Depends(current_auth_session),
+    session: AsyncSession = Depends(get_session),
+) -> Response:
+    await session.delete(context.auth_session)
+    await session.commit()
+    return Response(status_code=204)
 
 
 @app.put("/users/me/timezone", response_model=TimezoneValue)
@@ -186,6 +209,25 @@ async def set_user_timezone(
     user.timezone = data.timezone
     await session.commit()
     return data
+
+
+@app.get("/users/me/preferences", response_model=UserPreferencesResponse)
+async def get_user_preferences(
+    user: User = Depends(current_user),
+) -> UserPreferencesResponse:
+    return UserPreferencesResponse.model_validate(user)
+
+
+@app.patch("/users/me/preferences", response_model=UserPreferencesResponse)
+async def update_user_preferences(
+    data: UserPreferencesUpdate,
+    user: User = Depends(current_user),
+    session: AsyncSession = Depends(get_session),
+) -> UserPreferencesResponse:
+    for field, value in data.model_dump(exclude_unset=True).items():
+        setattr(user, field, value)
+    await session.commit()
+    return UserPreferencesResponse.model_validate(user)
 
 
 @app.post("/tasks", response_model=TaskResponse, status_code=201)
@@ -209,6 +251,8 @@ async def list_tasks(
     offset: int = Query(0, ge=0),
     deadline_from: datetime | None = None,
     deadline_to: datetime | None = None,
+    status: Literal["open", "completed"] | None = None,
+    deadline_presence: Literal["dated", "undated", "any"] = "any",
     user: User = Depends(current_user),
     session: AsyncSession = Depends(get_session),
 ) -> Page[TaskResponse]:
@@ -225,6 +269,8 @@ async def list_tasks(
         offset=offset,
         from_datetime=deadline_from,
         to_datetime=deadline_to,
+        status=status,
+        deadline_presence=deadline_presence,
     )
     return Page(items=items, total=total, limit=limit, offset=offset)
 

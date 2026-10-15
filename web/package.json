@@ -10,11 +10,13 @@
     "test:e2e": "playwright test"
   },
   "dependencies": {
+    "@fullcalendar/react": "^7.1.2",
     "@vitejs/plugin-react": "latest",
-    "vite": "latest",
-    "typescript": "latest",
     "react": "latest",
-    "react-dom": "latest"
+    "react-dom": "latest",
+    "temporal-polyfill": "^1.0.6",
+    "typescript": "latest",
+    "vite": "latest"
   },
   "devDependencies": {
     "@playwright/test": "latest",

@@ -25,16 +25,36 @@ def register(client, email):
     return {"Authorization": f"Bearer {response.json()['access_token']}"}
 
 
+def login(client, email):
+    response = client.post("/auth/login", json={"email": email, "password": "password1"})
+    response.raise_for_status()
+    return {"Authorization": f"Bearer {response.json()['access_token']}"}
+
+
 def test_text_voice_history_undo_and_owner_isolation():
     with httpx.Client(base_url=BASE_URL, timeout=10) as client:
         owner = register(client, "owner-e2e@example.com")
         other = register(client, "other-e2e@example.com")
+        second_owner_session = login(client, "owner-e2e@example.com")
+
+        assert client.post("/auth/logout", headers=owner).status_code == 204
+        assert client.get("/tasks", headers=owner).status_code == 401
+        assert client.get("/tasks", headers=second_owner_session).status_code == 200
+        owner = second_owner_session
 
         timezone = client.put(
             "/users/me/timezone", headers=owner, json={"timezone": "Europe/Moscow"}
         )
         assert timezone.status_code == 200
         assert timezone.json() == {"timezone": "Europe/Moscow"}
+        preferences = client.get("/users/me/preferences", headers=owner)
+        assert preferences.status_code == 200
+        assert preferences.json() == {"timezone": "Europe/Moscow", "upcoming_days": 7}
+        preferences = client.patch(
+            "/users/me/preferences", headers=owner, json={"upcoming_days": 14}
+        )
+        assert preferences.status_code == 200
+        assert preferences.json() == {"timezone": "Europe/Moscow", "upcoming_days": 14}
         assert (
             client.put(
                 "/users/me/timezone", headers=owner, json={"timezone": "Not/AZone"}
@@ -51,6 +71,10 @@ def test_text_voice_history_undo_and_owner_isolation():
         tasks = client.get("/tasks?limit=10&offset=0", headers=owner).json()
         assert tasks["total"] == 1
         assert tasks["items"][0]["title"] == "Купить молоко"
+        undated_tasks = client.get(
+            "/tasks?status=open&deadline_presence=undated", headers=owner
+        ).json()
+        assert undated_tasks["total"] == 1
         task_id = tasks["items"][0]["id"]
         patched = client.patch(
             f"/tasks/{task_id}", headers=owner, json={"description": "Изменено частично"}

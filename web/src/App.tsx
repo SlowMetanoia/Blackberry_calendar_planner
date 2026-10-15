@@ -1,21 +1,25 @@
 import { FormEvent, Fragment, PointerEvent, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { getCalendarHistory, getConversationHistory, getConversations, getMessage, request, undoOperation } from "./api";
+import { AUTH_EXPIRED_EVENT, clearStoredToken, getCalendarHistory, getConversationHistory, getConversations, getMessage, getStoredToken, logoutSession, request, storeToken, undoOperation } from "./api";
 import { browserTimeZone, formatDateTime, formatDuration, formatHistoryDate, formatHistoryTime, formatMessageTimestamp, formatSchedule, formatSessionTimestamp, historyDateKey } from "./format";
 import type { AgentMessage, CalendarOperation, ConversationSummary } from "./types";
+import { PlannerSidebar } from "./PlannerSidebar";
 
 const terminal = new Set(["needs_clarification", "completed", "failed"]);
 const pending = new Set(["queued", "transcribing", "processing"]);
 const delay = (ms:number) => new Promise(resolve => setTimeout(resolve, ms));
 
 export default function App() {
-  const [token,setToken]=useState(()=>sessionStorage.getItem("planner-token"));
+  const [token,setToken]=useState(getStoredToken);
   const [register,setRegister]=useState(false),[email,setEmail]=useState(""),[password,setPassword]=useState("");
   const [text,setText]=useState(""),[messages,setMessages]=useState<AgentMessage[]>([]);
   const [sessions,setSessions]=useState<ConversationSummary[]>([]),[history,setHistory]=useState<CalendarOperation[]>([]);
   const [conversation,setConversation]=useState<string|null>(null),[error,setError]=useState("");
-  const [recording,setRecording]=useState(false),[sidebarOpen,setSidebarOpen]=useState(false),[sessionsOpen,setSessionsOpen]=useState(false);
+  const [recording,setRecording]=useState(false),[sidebarOpen,setSidebarOpen]=useState(false),[plannerOpen,setPlannerOpen]=useState(false),[sessionsOpen,setSessionsOpen]=useState(false),[calendarRevision,setCalendarRevision]=useState(0);
   const recorder=useRef<MediaRecorder|null>(null),chunks=useRef<Blob[]>([]),selectionVersion=useRef(0),chat=useRef<HTMLElement|null>(null);
+
+  function clearAuthentication(message=""){clearStoredToken();selectionVersion.current++;setToken(null);setSessions([]);setHistory([]);setConversation(null);setMessages([]);setSessionsOpen(false);setSidebarOpen(false);setPlannerOpen(false);setError(message);}
+  useEffect(()=>{const expired=()=>clearAuthentication("Сессия истекла или недействительна. Войдите снова.");window.addEventListener(AUTH_EXPIRED_EVENT,expired);return()=>window.removeEventListener(AUTH_EXPIRED_EVENT,expired);},[]);
 
   async function collectPages<T>(load:(offset:number)=>Promise<{items:T[];total:number}>){const all:T[]=[];let offset=0;for(;;){const page=await load(offset);all.push(...page.items);offset+=page.items.length;if(offset>=page.total||!page.items.length)return all;}}
   async function refreshSessions(){setSessions(await collectPages(offset=>getConversations(100,offset)));}
@@ -23,29 +27,31 @@ export default function App() {
   useEffect(()=>{if(!token)return;void Promise.all([refreshSessions(),refreshHistory()]).catch(e=>setError((e as Error).message));request<{timezone:string}>("/users/me/timezone",{method:"PUT",body:JSON.stringify({timezone:browserTimeZone()})}).catch(e=>setError((e as Error).message));},[token]);
   useEffect(()=>{if(messages.length)requestAnimationFrame(()=>chat.current?.scrollTo({top:chat.current.scrollHeight,behavior:"smooth"}));},[messages]);
 
-  async function authenticate(event:FormEvent){event.preventDefault();setError("");try{const data=await request<{access_token:string}>(register?"/auth/register":"/auth/login",{method:"POST",body:JSON.stringify({email,password})});sessionStorage.setItem("planner-token",data.access_token);setToken(data.access_token);}catch(e){setError((e as Error).message);}}
+  async function authenticate(event:FormEvent){event.preventDefault();setError("");try{const data=await request<{access_token:string}>(register?"/auth/register":"/auth/login",{method:"POST",body:JSON.stringify({email,password})});storeToken(data.access_token);setToken(data.access_token);}catch(e){setError((e as Error).message);}}
   function mergeMessage(message:AgentMessage){setMessages(old=>[...old.filter(item=>item.id!==message.id),message].sort((a,b)=>a.sequence-b.sequence));}
-  async function pollMessage(id:string,version:number){for(;;){const message=await getMessage(id);if(version!==selectionVersion.current)return;mergeMessage(message);if(terminal.has(message.status)){await refreshHistory();return;}await delay(700);}}
+  async function pollMessage(id:string,version:number){for(;;){const message=await getMessage(id);if(version!==selectionVersion.current)return;mergeMessage(message);if(terminal.has(message.status)){await refreshHistory();setCalendarRevision(value=>value+1);return;}await delay(700);}}
   async function acceptMessage(message:AgentMessage,version:number){if(version!==selectionVersion.current)return;mergeMessage(message);setConversation(message.conversation_id);void refreshSessions();await pollMessage(message.id,version);if(version===selectionVersion.current)await refreshSessions();}
   async function sendText(event:FormEvent){event.preventDefault();if(!text.trim())return;const body={text:text.trim(),conversation_id:conversation},version=selectionVersion.current;setText("");try{await acceptMessage(await request<AgentMessage>("/agent/messages",{method:"POST",body:JSON.stringify(body)}),version);}catch(e){setError((e as Error).message);}}
   async function sendAudio(blob:Blob){if(!blob.size)return;const body=new FormData(),version=selectionVersion.current;body.append("audio",blob,"message.webm");try{await acceptMessage(await request<AgentMessage>(`/agent/messages/audio${conversation?`?conversation_id=${conversation}`:""}`,{method:"POST",body}),version);}catch(e){setError((e as Error).message);}}
   async function startRecording(event:PointerEvent){event.currentTarget.setPointerCapture(event.pointerId);setError("");try{const stream=await navigator.mediaDevices.getUserMedia({audio:true});chunks.current=[];const media=new MediaRecorder(stream);recorder.current=media;media.ondataavailable=e=>{if(e.data.size)chunks.current.push(e.data);};media.onstop=()=>{stream.getTracks().forEach(track=>track.stop());setRecording(false);void sendAudio(new Blob(chunks.current,{type:media.mimeType||"audio/webm"}));};media.start();setRecording(true);}catch{setError("Не удалось получить доступ к микрофону");}}
   function stopRecording(){if(recorder.current?.state==="recording")recorder.current.stop();}
   async function openConversation(id:string){const version=++selectionVersion.current;setConversation(id);setMessages([]);setSessionsOpen(false);setError("");try{const all:AgentMessage[]=[];let offset=0;for(;;){const page=await getConversationHistory(id,100,offset);all.push(...page.items);offset+=page.items.length;if(offset>=page.total||!page.items.length)break;}if(version===selectionVersion.current)setMessages(all);}catch(e){if(version===selectionVersion.current)setError((e as Error).message);}}
-  function startNewConversation(){selectionVersion.current++;setConversation(null);setMessages([]);setSessionsOpen(false);setSidebarOpen(false);setError("");}
-  async function undo(id:string){try{await undoOperation(id);await refreshHistory();}catch(e){setError((e as Error).message);}}
-  function logout(){sessionStorage.clear();selectionVersion.current++;setToken(null);setSessions([]);setHistory([]);setConversation(null);setMessages([]);}
+  function startNewConversation(){selectionVersion.current++;setConversation(null);setMessages([]);setSessionsOpen(false);setSidebarOpen(false);setPlannerOpen(false);setError("");}
+  async function undo(id:string){try{await undoOperation(id);await refreshHistory();setCalendarRevision(value=>value+1);}catch(e){setError((e as Error).message);}}
+  async function logout(){try{await logoutSession();}catch{}finally{clearAuthentication();}}
 
   if(!token)return <main className="auth-shell"><section className="auth-card"><div className="brand">День за днём</div><h1>{register?"Создать аккаунт":"Войти в ежедневник"}</h1><p>Задачи и встречи — просто скажите, что нужно.</p><form onSubmit={authenticate}><label>Email<input type="email" value={email} onChange={e=>setEmail(e.target.value)} required/></label><label>Пароль<input type="password" minLength={8} value={password} onChange={e=>setPassword(e.target.value)} required/></label><button className="primary">{register?"Зарегистрироваться":"Войти"}</button></form><button className="link" onClick={()=>setRegister(!register)}>{register?"Уже есть аккаунт":"Нет аккаунта? Создать"}</button>{error&&<div className="error">{error}</div>}</section></main>;
 
   return <main className="app-shell">
     <div className={`sidebar-scrim ${sidebarOpen?"visible":""}`} onClick={()=>setSidebarOpen(false)}/>
+    <div className={`planner-scrim ${plannerOpen?"visible":""}`} onClick={()=>setPlannerOpen(false)}/>
     <aside className={`session-sidebar operation-sidebar ${sidebarOpen?"open":""}`}><div className="sidebar-head"><div><div className="eyebrow">Календарь</div><b>История изменений</b></div><button className="sidebar-close" aria-label="Закрыть историю" onClick={()=>setSidebarOpen(false)}>×</button></div><nav className="operation-list" aria-label="История изменений календаря">{history.map((item,index)=>{const showDate=index===0||historyDateKey(item.created_at)!==historyDateKey(history[index-1].created_at);return <Fragment key={item.id}>{showDate&&<div className="history-date"><span>{formatHistoryDate(item.created_at)}</span></div>}<HistoryItem item={item} undo={undo}/></Fragment>;})}{!history.length&&<p className="sessions-empty">Изменения календаря появятся здесь.</p>}</nav></aside>
-    <section className="workspace"><header><button className="sessions-toggle" aria-label="Открыть историю изменений" onClick={()=>setSidebarOpen(true)}>☰</button><div><div className="eyebrow">Умный ежедневник</div><h1>Что запланируем?</h1></div><div className="header-actions"><button className="quiet" onClick={startNewConversation}>Новый диалог</button><button className="quiet" onClick={()=>setSessionsOpen(true)}>История сессий</button><button className="quiet" onClick={logout}>Выйти</button></div></header>
+    <section className="workspace"><header><button className="sessions-toggle" aria-label="Открыть историю изменений" onClick={()=>setSidebarOpen(true)}>☰</button><div><div className="eyebrow">Умный ежедневник</div><h1>Что запланируем?</h1></div><div className="header-actions"><button className="quiet planner-toggle" onClick={()=>setPlannerOpen(true)}>Планы</button><button className="quiet" onClick={startNewConversation}>Новый диалог</button><button className="quiet" onClick={()=>setSessionsOpen(true)}>История сессий</button><button className="quiet" onClick={()=>void logout()}>Выйти</button></div></header>
       <section className="chat" ref={chat} aria-live="polite">{!messages.length&&<div className="empty"><span>✦</span><h2>Начните с простой просьбы</h2><p>«Покажи задачи на сегодня» или «Напомни подготовить отчёт»</p></div>}{messages.map(message=><MessageExchange key={message.id} message={message} startNewConversation={startNewConversation}/>)}</section>
       {error&&<div className="toast">{error}<button onClick={()=>setError("")}>×</button></div>}
       <footer><form className="composer" onSubmit={sendText}><input aria-label="Сообщение" placeholder="Напишите задачу или вопрос…" value={text} onChange={e=>setText(e.target.value)}/><button className="send" aria-label="Отправить">↑</button><button type="button" className={`mic ${recording?"recording":""}`} aria-label="Удерживайте для записи" onPointerDown={startRecording} onPointerUp={stopRecording} onPointerCancel={stopRecording}>{recording?"■":"●"}</button></form><small>{recording?"Отпустите, чтобы отправить":"Удерживайте красную кнопку для записи"}</small></footer>
     </section>
+    <PlannerSidebar open={plannerOpen} onClose={()=>setPlannerOpen(false)} revision={calendarRevision} onHistoryChanged={async()=>{await refreshHistory();setCalendarRevision(value=>value+1);}} onError={setError}/>
     {sessionsOpen&&<div className="modal-scrim" role="presentation" onMouseDown={()=>setSessionsOpen(false)}><section className="sessions-modal" role="dialog" aria-modal="true" aria-label="История сессий" onMouseDown={e=>e.stopPropagation()}><div className="sidebar-head"><div><div className="eyebrow">Диалоги</div><h2>История сессий</h2></div><button className="sidebar-close" aria-label="Закрыть историю сессий" onClick={()=>setSessionsOpen(false)}>×</button></div><nav className="session-list">{sessions.map(session=><button key={session.id} className={`session-item ${conversation===session.id?"active":""}`} onClick={()=>void openConversation(session.id)}><span>{session.preview}</span><time>{formatSessionTimestamp(session.last_activity_at)}</time></button>)}{!sessions.length&&<p className="sessions-empty">Здесь появятся прошлые диалоги.</p>}</nav></section></div>}
   </main>;
 }

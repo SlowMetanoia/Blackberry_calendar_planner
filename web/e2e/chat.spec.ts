@@ -7,7 +7,7 @@ test("shows authentication entry point", async ({page}) => {
 });
 
 test("opens a saved session with rich reads and left-aligned assistant time", async ({page}) => {
-  await page.addInitScript(() => sessionStorage.setItem("planner-token", "test-token"));
+  await page.addInitScript(() => localStorage.setItem("planner-token", "test-token"));
   await page.route("**/api/**", async route => {
     const url = new URL(route.request().url());
     if (route.request().method() === "PUT") {
@@ -17,6 +17,10 @@ test("opens a saved session with rich reads and left-aligned assistant time", as
     } else if (url.pathname === "/api/agent/conversations/c1/messages") {
       await route.fulfill({json:{items:[{id:"m1",conversation_id:"c1",sequence:1,input_text:"Что у меня на завтра?",status:"completed",reply:"Вот ваше событие",reads:[{resource:"event",id:"e1",data:{title:"Лекция",starts_at:"2026-10-15T09:00:00Z",duration_minutes:90,location:"Политех",description:"Параллельное программирование"}}],operations:[],error:null,created_at:"2026-10-14T09:59:00Z"}],total:1,limit:100,offset:0}});
     } else if (url.pathname === "/api/calendar/history") {
+      await route.fulfill({json:{items:[],total:0,limit:100,offset:0}});
+    } else if (url.pathname === "/api/users/me/preferences") {
+      await route.fulfill({json:{timezone:"Europe/Moscow",upcoming_days:7}});
+    } else if (url.pathname === "/api/tasks" || url.pathname === "/api/events") {
       await route.fulfill({json:{items:[],total:0,limit:100,offset:0}});
     } else {
       await route.fulfill({status:404,json:{detail:"not mocked"}});
@@ -37,7 +41,7 @@ test("opens a saved session with rich reads and left-aligned assistant time", as
 });
 
 test("keeps the page fixed while sidebar and messages scroll independently", async ({page}) => {
-  await page.addInitScript(() => sessionStorage.setItem("planner-token", "test-token"));
+  await page.addInitScript(() => localStorage.setItem("planner-token", "test-token"));
   const sessions = Array.from({length:30}, (_,index) => ({
     id:`c${index}`, preview:`Диалог ${index}`, created_at:"2026-10-14T09:00:00Z", last_activity_at:"2026-10-14T09:00:00Z",
   }));
@@ -54,6 +58,8 @@ test("keeps the page fixed while sidebar and messages scroll independently", asy
     else if (url.pathname === "/api/agent/conversations") await route.fulfill({json:{items:sessions,total:sessions.length,limit:100,offset:0}});
     else if (url.pathname === "/api/agent/conversations/c0/messages") await route.fulfill({json:{items:messages,total:messages.length,limit:100,offset:0}});
     else if (url.pathname === "/api/calendar/history") await route.fulfill({json:{items:operations,total:operations.length,limit:100,offset:0}});
+    else if (url.pathname === "/api/users/me/preferences") await route.fulfill({json:{timezone:"Europe/Moscow",upcoming_days:7}});
+    else if (url.pathname === "/api/tasks" || url.pathname === "/api/events") await route.fulfill({json:{items:[],total:0,limit:100,offset:0}});
     else await route.fulfill({status:404,json:{detail:"not mocked"}});
   });
   await page.goto("/");
@@ -93,4 +99,39 @@ test("keeps the page fixed while sidebar and messages scroll independently", asy
   });
   expect(layout).toMatchObject({bodyFixed:true,sidebarScrollable:true,chatScrollable:true,independent:true,footerVisible:true});
   expect(layout.bodyBackground).not.toBe("rgba(0, 0, 0, 0)");
+});
+
+test("shows the planner sidebar and opens detailed calendar and task editor", async ({page}) => {
+  await page.addInitScript(() => localStorage.setItem("planner-token", "test-token"));
+  const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+  const dayAfterTomorrow = new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString();
+  await page.route("**/api/**", async route => {
+    const url = new URL(route.request().url());
+    if (route.request().method() === "PUT") await route.fulfill({json:{timezone:"Europe/Moscow"}});
+    else if (url.pathname === "/api/users/me/preferences") await route.fulfill({json:{timezone:"Europe/Moscow",upcoming_days:7}});
+    else if (url.pathname === "/api/tasks") {
+      const undated = url.searchParams.get("deadline_presence") === "undated";
+      await route.fulfill({json:{items:[undated
+        ? {id:"t2",owner_id:"u1",title:"Разобрать заметки",description:null,deadline:null,estimated_minutes:null,status:"open"}
+        : {id:"t1",owner_id:"u1",title:"Подготовить отчёт",description:"Черновик",deadline:tomorrow,estimated_minutes:45,status:"open"}],total:1,limit:100,offset:0}});
+    } else if (url.pathname === "/api/events") await route.fulfill({json:{items:[{id:"e1",owner_id:"u1",title:"Созвон",description:null,starts_at:dayAfterTomorrow,duration_minutes:30,location:"Онлайн"}],total:1,limit:100,offset:0}});
+    else if (url.pathname === "/api/agent/conversations" || url.pathname === "/api/calendar/history") await route.fulfill({json:{items:[],total:0,limit:100,offset:0}});
+    else await route.fulfill({status:404,json:{detail:"not mocked"}});
+  });
+  await page.goto("/");
+  await expect(page.getByRole("complementary", {name:"Календарь и ближайшие дела"})).toBeVisible();
+  await expect(page.getByRole("button", {name:/Подготовить отчёт/})).toBeVisible();
+  await expect(page.getByRole("heading", {name:"Без срока"})).toBeVisible();
+  await page.getByRole("button", {name:/Подготовить отчёт/}).click();
+  await expect(page.getByRole("dialog", {name:"Редактирование записи"})).toBeVisible();
+  await expect(page.getByLabel("Название")).toHaveValue("Подготовить отчёт");
+  await page.getByRole("button", {name:"Закрыть форму"}).click();
+  await page.getByRole("button", {name:"Развернуть календарь"}).click();
+  await expect(page.getByRole("dialog", {name:"Подробный календарь"})).toBeVisible();
+  await page.getByRole("button", {name:"Закрыть подробный календарь"}).click();
+  await page.setViewportSize({width:900,height:720});
+  const planner = page.getByRole("complementary", {name:"Календарь и ближайшие дела"});
+  await expect(planner).not.toBeInViewport();
+  await page.getByRole("button", {name:"Планы"}).click();
+  await expect(planner).toBeInViewport();
 });

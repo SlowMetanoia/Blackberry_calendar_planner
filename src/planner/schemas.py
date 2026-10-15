@@ -44,6 +44,38 @@ class TimezoneValue(StrictInput):
         return value
 
 
+class UserPreferencesResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    timezone: str
+    upcoming_days: int
+
+
+class UserPreferencesUpdate(StrictInput):
+    timezone: str | None = Field(default=None, min_length=1, max_length=64)
+    upcoming_days: int | None = Field(default=None, strict=True, ge=1, le=90)
+
+    @field_validator("timezone")
+    @classmethod
+    def valid_timezone(cls, value: str | None) -> str | None:
+        if value is None:
+            return value
+        try:
+            ZoneInfo(value)
+        except ZoneInfoNotFoundError as exc:
+            raise ValueError("timezone must be a valid IANA timezone") from exc
+        return value
+
+    @model_validator(mode="after")
+    def valid_patch(self):
+        if not self.model_fields_set:
+            raise ValueError("preference update must contain at least one field")
+        for field in self.model_fields_set:
+            if getattr(self, field) is None:
+                raise ValueError(f"{field} cannot be null")
+        return self
+
+
 class TaskCreate(StrictInput):
     title: str = Field(min_length=1, max_length=500)
     description: str | None = Field(default=None, max_length=MAX_TEXT_LENGTH)

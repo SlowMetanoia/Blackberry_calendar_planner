@@ -8,8 +8,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     database_url: str = "postgresql+asyncpg://planner:planner@postgres:5432/planner"
     redis_url: str = "redis://redis:6379/0"
-    jwt_secret: str = "change-me-in-production-use-a-long-random-secret"
-    jwt_expire_minutes: int = Field(default=60, ge=1)
+    auth_session_ttl_days: int = Field(default=7, ge=1)
+    auth_session_renew_interval_hours: int = Field(default=24, ge=1)
     llm_base_url: str | None = None
     llm_api_key: str | None = None
     llm_model: str = "planner-model"
