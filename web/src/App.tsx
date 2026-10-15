@@ -70,10 +70,11 @@ function Metadata({items}:{items:Array<{label?:string;value:string}>}){return it
 export function ReadCard({read,timeZone=browserTimeZone()}:{read:{resource:string;id:string;data:Record<string,unknown>};timeZone?:string}){return <article className="read-card"><span className="read-kind">{resourceHeadings[read.resource]||read.resource}</span><strong>{stringField(read.data,"title")||read.id}</strong><Metadata items={resourceMetadata(read.resource,read.data,timeZone)}/></article>;}
 function OperationReceipt({item}:{item:CalendarOperation}){const data=item.after||item.before||{};return <article className="read-card operation-receipt"><span className="read-kind">{operationWords[item.operation]} · {resourceHeadings[item.resource]}</span><strong>{stringField(data,"title")||item.target_id}</strong><Metadata items={resourceMetadata(item.resource,data)}/>{item.operation==="update"&&<Changes changes={item.changes}/>}</article>;}
 function Changes({changes}:{changes:CalendarOperation["changes"]}){return <dl className="operation-changes">{Object.entries(changes).filter(([key])=>key!=="id").map(([key,value])=><div key={key}><dt>{key}</dt><dd>{String(value.before??"—")} → {String(value.after??"—")}</dd></div>)}</dl>;}
+function operationSchedule(resource:CalendarOperation["resource"],data:Record<string,unknown>){const value=stringField(data,resource==="event"?"starts_at":"deadline");if(!value)return "";return `${resource==="event"?"запланировано на":"запланировано к"} ${formatDateTime(value)}`;}
 type PreviewAnchor={x:number;y:number};
 
 export function HistoryItem({item,undo}:{item:CalendarOperation;undo:(id:string)=>void}){
-  const data=item.after||item.before||{},title=stringField(data,"title")||item.target_id;
+  const data=item.after||item.before||{},title=stringField(data,"title")||item.target_id,scheduled=operationSchedule(item.resource,data);
   const [anchor,setAnchor]=useState<PreviewAnchor|null>(null),[position,setPosition]=useState<PreviewAnchor|null>(null);
   const itemRef=useRef<HTMLElement|null>(null),previewRef=useRef<HTMLDivElement|null>(null),lastPointerType=useRef("");
   const previewId=`history-preview-${item.id}`;
@@ -97,7 +98,7 @@ export function HistoryItem({item,undo}:{item:CalendarOperation;undo:(id:string)
 
   const preview=anchor&&createPortal(<div id={previewId} ref={previewRef} role="tooltip" className="history-preview" style={{left:position?.x??anchor.x+12,top:position?.y??anchor.y+12,visibility:position?"visible":"hidden"}}><b>{operationWords[item.operation]}: {title}</b><Metadata items={resourceMetadata(item.resource,data)}/>{item.operation==="update"&&<Changes changes={item.changes}/>}<small>Источник: {item.origin}{item.reverts_operation_id?" · компенсирующая операция":""}</small></div>,document.body);
 
-  return <article ref={itemRef} className={`history-item ${item.operation}`} tabIndex={0} aria-label={`${operationWords[item.operation]}: ${title}`} aria-describedby={anchor?previewId:undefined}
+  return <article ref={itemRef} className={`history-item ${item.operation}`} tabIndex={0} aria-label={`${operationWords[item.operation]}: ${title}${scheduled?`. ${scheduled}`:""}`} aria-describedby={anchor?previewId:undefined}
     onPointerDown={event=>{lastPointerType.current=event.pointerType;if(!(event.target as HTMLElement).closest("button"))event.preventDefault();}}
     onPointerEnter={event=>{if(event.pointerType==="mouse")setAnchor({x:event.clientX,y:event.clientY});}}
     onPointerMove={event=>{if(event.pointerType==="mouse"&&anchor)setAnchor({x:event.clientX,y:event.clientY});}}
@@ -106,6 +107,6 @@ export function HistoryItem({item,undo}:{item:CalendarOperation;undo:(id:string)
     onFocus={()=>{if(lastPointerType.current!=="touch"&&lastPointerType.current!=="pen")anchorToItem();lastPointerType.current="";}}
     onBlur={event=>{if(!itemRef.current?.contains(event.relatedTarget as Node))setAnchor(null);}}
     onKeyDown={event=>{if(event.key==="Escape"){setAnchor(null);itemRef.current?.blur();}}}>
-    <time dateTime={item.created_at}>{formatHistoryTime(item.created_at)}</time><span className="history-title">{title}</span><button className="history-undo" aria-label={`Отменить ${undoWords[item.operation]}`} onPointerDown={event=>event.stopPropagation()} onPointerUp={event=>event.stopPropagation()} onClick={event=>{event.stopPropagation();undo(item.id);}}><span aria-hidden="true">↶</span><span className="undo-label">Отменить {undoWords[item.operation]}</span></button>{preview}
+    <time dateTime={item.created_at}>{formatHistoryTime(item.created_at)}</time><span className="history-copy"><span className="history-title">{title}</span>{scheduled&&<small>{scheduled}</small>}</span><button className="history-undo" aria-label={`Отменить ${undoWords[item.operation]}`} onPointerDown={event=>event.stopPropagation()} onPointerUp={event=>event.stopPropagation()} onClick={event=>{event.stopPropagation();undo(item.id);}}><span aria-hidden="true">↶</span><span className="undo-label">Отменить {undoWords[item.operation]}</span></button>{preview}
   </article>;
 }

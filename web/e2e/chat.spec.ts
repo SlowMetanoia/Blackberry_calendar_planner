@@ -103,7 +103,10 @@ test("keeps the page fixed while sidebar and messages scroll independently", asy
 
 test("shows the planner sidebar and opens detailed calendar and task editor", async ({page}) => {
   await page.addInitScript(() => localStorage.setItem("planner-token", "test-token"));
-  const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+  const tomorrowDate = new Date(Date.now() + 24 * 60 * 60 * 1000);
+  const tomorrow = tomorrowDate.toISOString();
+  const part = (value:number) => String(value).padStart(2,"0");
+  const tomorrowKey = `${tomorrowDate.getFullYear()}-${part(tomorrowDate.getMonth()+1)}-${part(tomorrowDate.getDate())}`;
   const dayAfterTomorrow = new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString();
   await page.route("**/api/**", async route => {
     const url = new URL(route.request().url());
@@ -120,12 +123,26 @@ test("shows the planner sidebar and opens detailed calendar and task editor", as
   });
   await page.goto("/");
   await expect(page.getByRole("complementary", {name:"Календарь и ближайшие дела"})).toBeVisible();
-  await expect(page.getByRole("button", {name:/Подготовить отчёт/})).toBeVisible();
+  const upcomingTask = page.getByRole("button", {name:/Подготовить отчёт/});
+  await expect(upcomingTask).toBeVisible();
+  await upcomingTask.hover();
+  await expect(page.getByRole("tooltip")).toContainText("Черновик");
+  await expect(page.getByRole("tooltip")).toContainText("Оценка: 45 минут");
   await expect(page.getByRole("heading", {name:"Без срока"})).toBeVisible();
-  await page.getByRole("button", {name:/Подготовить отчёт/}).click();
+  await expect(page.locator(".mini-calendar .fc-event")).toHaveCount(0);
+  const day = page.locator(`.mini-calendar [data-date="${tomorrowKey}"]`);
+  await expect(day).toHaveClass(/calendar-day-occupied/);
+  await day.hover();
+  await expect(page.getByRole("tooltip")).toContainText("Подготовить отчёт");
+  await day.click();
+  const dayDialog = page.getByRole("dialog", {name:/Дела на/});
+  await expect(dayDialog).toBeVisible();
+  await expect(dayDialog).toContainText("Черновик");
+  await dayDialog.getByRole("button", {name:/Подготовить отчёт/}).click();
   await expect(page.getByRole("dialog", {name:"Редактирование записи"})).toBeVisible();
   await expect(page.getByLabel("Название")).toHaveValue("Подготовить отчёт");
   await page.getByRole("button", {name:"Закрыть форму"}).click();
+  await page.getByRole("button", {name:"Закрыть дела на день"}).click();
   await page.getByRole("button", {name:"Развернуть календарь"}).click();
   await expect(page.getByRole("dialog", {name:"Подробный календарь"})).toBeVisible();
   await page.getByRole("button", {name:"Закрыть подробный календарь"}).click();

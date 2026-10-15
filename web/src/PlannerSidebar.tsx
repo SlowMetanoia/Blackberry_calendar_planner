@@ -1,5 +1,6 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
-import FullCalendar, { type DateClickInfo, type DatesSetInfo, type EventClickInfo, type EventInput } from "@fullcalendar/react";
+import { createPortal } from "react-dom";
+import FullCalendar, { type DatesSetInfo } from "@fullcalendar/react";
 import dayGridPlugin from "@fullcalendar/react/daygrid";
 import interactionPlugin from "@fullcalendar/react/interaction";
 import classicThemePlugin from "@fullcalendar/react/themes/classic";
@@ -21,11 +22,13 @@ import {
   updateUserPreferences,
 } from "./api";
 import { partitionUpcoming, toCalendarEntries } from "./planner-data";
+import { formatDuration, formatSchedule } from "./format";
 import type { CalendarEntry, Event, Task } from "./types";
 
 const horizonOptions=[1,3,7,14,30];
 type Resource="task"|"event";
 type EditorState={resource:Resource;entry?:CalendarEntry;date?:string};
+type DayHover={date:string;x:number;y:number};
 
 function localDateKey(value:Date|string):string {
   const date=typeof value==="string"?new Date(value):value;
@@ -57,19 +60,11 @@ function entryLabel(entry:CalendarEntry):string {
   return new Intl.DateTimeFormat("ru-RU",{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"}).format(new Date(entry.startsAt));
 }
 
-function fullCalendarEvents(entries:CalendarEntry[]):EventInput[] {
-  return entries.map(entry=>{
-    const result:EventInput={id:`${entry.resource}:${entry.id}`,title:entry.title,start:entry.startsAt,classNames:[`calendar-${entry.resource}`],extendedProps:{entry}};
-    if(entry.resource==="event"&&entry.durationMinutes){result.end=new Date(new Date(entry.startsAt).getTime()+entry.durationMinutes*60_000).toISOString();}
-    return result;
-  });
-}
-
 export function PlannerSidebar({open,onClose,revision,onHistoryChanged,onError}:{open:boolean;onClose:()=>void;revision:number;onHistoryChanged:()=>Promise<void>|void;onError:(message:string)=>void}) {
   const [upcomingDays,setUpcomingDays]=useState(7),[overviewTasks,setOverviewTasks]=useState<Task[]>([]),[overviewEvents,setOverviewEvents]=useState<Event[]>([]);
   const [calendarTasks,setCalendarTasks]=useState<Task[]>([]),[calendarEvents,setCalendarEvents]=useState<Event[]>([]);
   const [visibleRange,setVisibleRange]=useState<{from:string;to:string}|null>(null),[loading,setLoading]=useState(true),[fullOpen,setFullOpen]=useState(false);
-  const [selectedDate,setSelectedDate]=useState(localDateKey(new Date())),[editor,setEditor]=useState<EditorState|null>(null);
+  const [dayOpen,setDayOpen]=useState<string|null>(null),[dayHover,setDayHover]=useState<DayHover|null>(null),[editor,setEditor]=useState<EditorState|null>(null);
 
   const loadOverview=useCallback(async(days:number)=>{
     const now=new Date(),end=new Date(now.getTime()+days*86_400_000);
@@ -100,17 +95,16 @@ export function PlannerSidebar({open,onClose,revision,onHistoryChanged,onError}:
   useEffect(()=>{void refresh();},[refresh,revision]);
 
   const entries=useMemo(()=>toCalendarEntries(calendarTasks,calendarEvents),[calendarTasks,calendarEvents]);
-  const calendarEventsInput=useMemo(()=>fullCalendarEvents(entries),[entries]);
   const occupied=useMemo(()=>new Set(entries.map(entry=>localDateKey(entry.startsAt))),[entries]);
-  const selectedEntries=useMemo(()=>entries.filter(entry=>localDateKey(entry.startsAt)===selectedDate),[entries,selectedDate]);
+  const entriesByDate=useMemo(()=>{const result=new Map<string,CalendarEntry[]>();entries.forEach(entry=>{const key=localDateKey(entry.startsAt);result.set(key,[...(result.get(key)||[]),entry]);});return result;},[entries]);
+  const selectedEntries=dayOpen?entriesByDate.get(dayOpen)||[]:[];
   const overview=useMemo(()=>partitionUpcoming(overviewTasks,overviewEvents,new Date(),upcomingDays),[overviewTasks,overviewEvents,upcomingDays]);
 
   const datesSet=useCallback((info:DatesSetInfo)=>{
     const range={from:info.start.toISOString(),to:info.end.toISOString()};
     setVisibleRange(current=>current?.from===range.from&&current.to===range.to?current:range);
   },[]);
-  const openDate=(info:DateClickInfo,fullscreen:boolean)=>{const key=info.dateStr.slice(0,10);setSelectedDate(key);if(fullscreen&&!occupied.has(key))setEditor({resource:"event",date:key});else setFullOpen(true);};
-  const openEvent=(info:EventClickInfo)=>{const entry=info.event.extendedProps.entry as CalendarEntry;setSelectedDate(localDateKey(entry.startsAt));setEditor({resource:entry.resource,entry});};
+  const openDate=(date:string)=>{setDayHover(null);setDayOpen(date);};
   const changed=async()=>{setEditor(null);await Promise.all([refresh(),Promise.resolve(onHistoryChanged())]);};
   const changeHorizon=async(value:number)=>{setUpcomingDays(value);try{await updateUserPreferences({upcoming_days:value});await loadOverview(value);}catch(error){onError((error as Error).message);}};
 
@@ -121,14 +115,10 @@ export function PlannerSidebar({open,onClose,revision,onHistoryChanged,onError}:
     headerToolbar={{left:"prev",center:"title",right:"next today"}}
     height={fullscreen?"100%":"auto"}
     fixedWeekCount={false}
-    dayMaxEvents={fullscreen?false:2}
-    events={calendarEventsInput}
     datesSet={datesSet}
-    dateClick={info=>openDate(info,fullscreen)}
-    eventClick={openEvent}
-    moreLinkClick={info=>{setSelectedDate(localDateKey(info.date));setFullOpen(true);}}
     dayCellClass={info=>occupied.has(localDateKey(info.date))?"calendar-day-occupied":""}
-    eventContent={info=><span title={info.event.title}>{info.timeText&&<b>{info.timeText} </b>}{info.event.title}</span>}
+    dayCellDidMount={info=>{const date=localDateKey(info.date);info.el.tabIndex=0;info.el.setAttribute("aria-label",`Открыть дела на ${date}`);info.el.onclick=()=>openDate(date);info.el.onkeydown=event=>{if(event.key==="Enter"||event.key===" "){event.preventDefault();openDate(date);}};info.el.onmouseenter=()=>{const rect=info.el.getBoundingClientRect();if(info.el.classList.contains("calendar-day-occupied"))setDayHover({date,x:Math.min(rect.left,window.innerWidth-292),y:rect.bottom+230<window.innerHeight?rect.bottom+5:Math.max(8,rect.top-225)});};info.el.onmouseleave=()=>setDayHover(current=>current?.date===date?null:current);}}
+    dayCellWillUnmount={info=>{info.el.onclick=null;info.el.onkeydown=null;info.el.onmouseenter=null;info.el.onmouseleave=null;}}
   />;
 
   return <>
@@ -137,9 +127,11 @@ export function PlannerSidebar({open,onClose,revision,onHistoryChanged,onError}:
       <div className="mini-calendar">{calendar(false)}</div>
       <button className="calendar-expand" onClick={()=>setFullOpen(true)}>Развернуть календарь</button>
       <div className="upcoming-head"><b>Ближайшие дела</b><label><span className="sr-only">Период ближайших дел</span><select aria-label="Период ближайших дел" value={upcomingDays} onChange={event=>void changeHorizon(Number(event.target.value))}>{horizonOptions.map(value=><option value={value} key={value}>{value} дн.</option>)}</select></label></div>
-      <div className="upcoming-list">{loading&&<p className="sidebar-state">Загружаю…</p>}<ScheduleSection title="Просрочено" entries={overview.overdue} onOpen={entry=>setEditor({resource:entry.resource,entry})}/><ScheduleSection title="В ближайшие дни" entries={overview.upcoming} onOpen={entry=>setEditor({resource:entry.resource,entry})}/>{overview.undated.length>0&&<section className="schedule-section"><h3>Без срока</h3>{overview.undated.map(task=><button className="schedule-item task" key={task.id} onClick={()=>setEditor({resource:"task",entry:{id:task.id,resource:"task",title:task.title,startsAt:"",durationMinutes:task.estimated_minutes,task}})}><strong>{task.title}</strong><small>Задача без срока</small></button>)}</section>}{!loading&&!overview.overdue.length&&!overview.upcoming.length&&!overview.undated.length&&<p className="sidebar-state">На выбранный период ничего не запланировано.</p>}</div>
+      <div className="upcoming-list">{loading&&<p className="sidebar-state">Загружаю…</p>}<ScheduleSection title="Просрочено" entries={overview.overdue} onOpen={entry=>setEditor({resource:entry.resource,entry})}/><ScheduleSection title="В ближайшие дни" entries={overview.upcoming} onOpen={entry=>setEditor({resource:entry.resource,entry})}/>{overview.undated.length>0&&<section className="schedule-section"><h3>Без срока</h3>{overview.undated.map(task=>{const entry:CalendarEntry={id:task.id,resource:"task",title:task.title,startsAt:"",durationMinutes:task.estimated_minutes,task};return <ScheduleItem entry={entry} key={task.id} onOpen={item=>setEditor({resource:item.resource,entry:item})}/>;})}</section>}{!loading&&!overview.overdue.length&&!overview.upcoming.length&&!overview.undated.length&&<p className="sidebar-state">На выбранный период ничего не запланировано.</p>}</div>
     </aside>
-    {fullOpen&&<div className="calendar-modal-scrim" role="presentation" onMouseDown={()=>setFullOpen(false)}><section className="calendar-modal" role="dialog" aria-modal="true" aria-label="Подробный календарь" onMouseDown={event=>event.stopPropagation()}><div className="calendar-modal-head"><div><div className="eyebrow">Планы</div><h2>Календарь</h2></div><button aria-label="Закрыть подробный календарь" onClick={()=>setFullOpen(false)}>×</button></div><div className="calendar-modal-body"><div className="calendar-full">{calendar(true)}</div><DayPanel date={selectedDate} entries={selectedEntries} onOpen={entry=>setEditor({resource:entry.resource,entry})} onCreate={resource=>setEditor({resource,date:selectedDate})}/></div></section></div>}
+    {dayHover&&createPortal(<DayHoverPreview date={dayHover.date} entries={entriesByDate.get(dayHover.date)||[]} x={dayHover.x} y={dayHover.y}/>,document.body)}
+    {fullOpen&&<div className="calendar-modal-scrim" role="presentation" onMouseDown={()=>setFullOpen(false)}><section className="calendar-modal" role="dialog" aria-modal="true" aria-label="Подробный календарь" onMouseDown={event=>event.stopPropagation()}><div className="calendar-modal-head"><div><div className="eyebrow">Планы</div><h2>Календарь</h2></div><button aria-label="Закрыть подробный календарь" onClick={()=>setFullOpen(false)}>×</button></div><div className="calendar-full">{calendar(true)}</div></section></div>}
+    {dayOpen&&<DayDialog date={dayOpen} entries={selectedEntries} onClose={()=>setDayOpen(null)} onOpen={entry=>setEditor({resource:entry.resource,entry})} onCreate={resource=>setEditor({resource,date:dayOpen})}/>}
     {editor&&<CalendarItemDialog state={editor} onClose={()=>setEditor(null)} onChanged={changed} onError={onError}/>} 
   </>;
 }
@@ -148,12 +140,30 @@ function ScheduleSection({title,entries,onOpen}:{title:string;entries:CalendarEn
   if(!entries.length)return null;
   const groups=new Map<string,CalendarEntry[]>();
   entries.forEach(entry=>{const key=localDateKey(entry.startsAt);groups.set(key,[...(groups.get(key)||[]),entry]);});
-  return <section className="schedule-section"><h3>{title}</h3>{[...groups.entries()].map(([date,items])=><div className="schedule-day" key={date}><h4>{new Intl.DateTimeFormat("ru-RU",{weekday:"short",day:"numeric",month:"short"}).format(new Date(`${date}T12:00:00`))}</h4>{items.map(entry=><button className={`schedule-item ${entry.resource}`} key={`${entry.resource}:${entry.id}`} onClick={()=>onOpen(entry)}><strong>{entry.title}</strong><small>{entryLabel(entry)} · {entry.resource==="task"?"задача":"событие"}</small></button>)}</div>)}</section>;
+  return <section className="schedule-section"><h3>{title}</h3>{[...groups.entries()].map(([date,items])=><div className="schedule-day" key={date}><h4>{new Intl.DateTimeFormat("ru-RU",{weekday:"short",day:"numeric",month:"short"}).format(new Date(`${date}T12:00:00`))}</h4>{items.map(entry=><ScheduleItem entry={entry} key={`${entry.resource}:${entry.id}`} onOpen={onOpen}/>)}</div>)}</section>;
 }
 
-function DayPanel({date,entries,onOpen,onCreate}:{date:string;entries:CalendarEntry[];onOpen:(entry:CalendarEntry)=>void;onCreate:(resource:Resource)=>void}) {
+function DayDialog({date,entries,onClose,onOpen,onCreate}:{date:string;entries:CalendarEntry[];onClose:()=>void;onOpen:(entry:CalendarEntry)=>void;onCreate:(resource:Resource)=>void}) {
   const label=new Intl.DateTimeFormat("ru-RU",{dateStyle:"long"}).format(new Date(`${date}T12:00:00`));
-  return <aside className="day-panel"><h3>{label}</h3><div className="day-actions"><button onClick={()=>onCreate("event")}>+ Событие</button><button onClick={()=>onCreate("task")}>+ Задача</button></div>{entries.map(entry=><button className={`schedule-item ${entry.resource}`} key={`${entry.resource}:${entry.id}`} onClick={()=>onOpen(entry)}><strong>{entry.title}</strong><small>{entryLabel(entry)}</small></button>)}{!entries.length&&<p className="sidebar-state">На эту дату ничего нет.</p>}</aside>;
+  return <div className="day-dialog-scrim" role="presentation" onMouseDown={onClose}><section className="day-dialog" role="dialog" aria-modal="true" aria-label={`Дела на ${label}`} onMouseDown={event=>event.stopPropagation()}><div className="item-dialog-head"><div><div className="eyebrow">День</div><h2>{label}</h2></div><button aria-label="Закрыть дела на день" onClick={onClose}>×</button></div><div className="day-actions"><button onClick={()=>onCreate("event")}>+ Событие</button><button onClick={()=>onCreate("task")}>+ Задача</button></div><div className="day-entry-list">{entries.map(entry=><button className={`day-entry ${entry.resource}`} key={`${entry.resource}:${entry.id}`} onClick={()=>onOpen(entry)}><EntryDetails entry={entry}/></button>)}{!entries.length&&<p className="sidebar-state">На эту дату ничего нет. Добавьте событие или задачу.</p>}</div></section></div>;
+}
+
+function entryKind(entry:CalendarEntry):string{return entry.resource==="task"?"Задача":"Событие";}
+
+function EntryDetails({entry,brief=false}:{entry:CalendarEntry;brief?:boolean}) {
+  const source=entry.task||entry.event;
+  return <div className="entry-details"><span className="entry-kind">{entryKind(entry)}</span><strong>{entry.title}</strong><span>{entry.startsAt?formatSchedule(entry.startsAt,entry.resource==="event"?entry.durationMinutes:null):"Без срока"}</span>{!brief&&entry.durationMinutes&&<span>{entry.resource==="event"?"Длительность":"Оценка"}: {formatDuration(entry.durationMinutes)}</span>}{!brief&&entry.event?.location&&<span>Место: {entry.event.location}</span>}{!brief&&entry.task?.status&&<span>Статус: {entry.task.status==="completed"?"Выполнена":"Открыта"}</span>}{!brief&&source?.description&&<span>Описание: {source.description}</span>}</div>;
+}
+
+function DayHoverPreview({date,entries,x,y}:{date:string;entries:CalendarEntry[];x:number;y:number}) {
+  const label=new Intl.DateTimeFormat("ru-RU",{weekday:"long",day:"numeric",month:"long"}).format(new Date(`${date}T12:00:00`));
+  return <div className="day-hover-preview" role="tooltip" style={{left:Math.max(8,x),top:y}}><b>{label}</b>{entries.slice(0,4).map(entry=><EntryDetails entry={entry} brief key={`${entry.resource}:${entry.id}`}/>)}{entries.length>4&&<small>Ещё {entries.length-4}</small>}</div>;
+}
+
+function ScheduleItem({entry,onOpen}:{entry:CalendarEntry;onOpen:(entry:CalendarEntry)=>void}) {
+  const [preview,setPreview]=useState<{x:number;y:number}|null>(null),previewId=`schedule-preview-${entry.resource}-${entry.id}`;
+  const show=(element:HTMLElement)=>{const rect=element.getBoundingClientRect(),width=310;setPreview({x:rect.left>width+16?rect.left-width-10:Math.min(rect.right+10,window.innerWidth-width-8),y:Math.max(8,Math.min(rect.top,window.innerHeight-260))});};
+  return <><button className={`schedule-item ${entry.resource}`} aria-describedby={preview?previewId:undefined} onMouseEnter={event=>show(event.currentTarget)} onMouseLeave={()=>setPreview(null)} onFocus={event=>show(event.currentTarget)} onBlur={()=>setPreview(null)} onClick={()=>onOpen(entry)}><strong>{entry.title}</strong><small>{entry.startsAt?`${entryLabel(entry)} · ${entry.resource==="task"?"задача":"событие"}`:"Задача без срока"}</small></button>{preview&&createPortal(<div id={previewId} className="schedule-preview" role="tooltip" style={{left:preview.x,top:preview.y}}><EntryDetails entry={entry}/></div>,document.body)}</>;
 }
 
 function CalendarItemDialog({state,onClose,onChanged,onError}:{state:EditorState;onClose:()=>void;onChanged:()=>Promise<void>;onError:(message:string)=>void}) {
