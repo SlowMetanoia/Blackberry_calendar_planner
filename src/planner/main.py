@@ -1,4 +1,5 @@
 import json
+import logging
 import uuid
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
@@ -44,6 +45,7 @@ from .schemas import (
     UserPreferencesResponse,
     UserPreferencesUpdate,
 )
+from .search import SearchIndexUnavailable, schedule_calendar_index
 from .security import (
     AuthSessionContext,
     create_auth_session,
@@ -55,6 +57,7 @@ from .security import (
 from .services import EventService, TaskService, normalize_datetime
 
 AUDIO_DIR = Path("/tmp/planner-audio")
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
@@ -134,6 +137,13 @@ async def enqueue(message_id: uuid.UUID) -> None:
         await pool.enqueue_job("process_message", str(message_id), _job_id=f"message:{message_id}")
     finally:
         await pool.close()
+
+
+async def _schedule_index(owner_id: uuid.UUID) -> None:
+    try:
+        await schedule_calendar_index(owner_id, get_settings())
+    except SearchIndexUnavailable:
+        logger.warning("Calendar index enqueue failed for owner %s", owner_id)
 
 
 async def _save_audio_upload(
@@ -242,6 +252,7 @@ async def create_task(
         )
     )[0]
     await session.commit()
+    await _schedule_index(user.id)
     return await TaskService.get(session, user, operation.target_id)
 
 
@@ -304,6 +315,7 @@ async def update_task(
     except CalendarTargetNotFound:
         raise HTTPException(404, "Task not found")
     await session.commit()
+    await _schedule_index(user.id)
     return await TaskService.get(session, user, task_id)
 
 
@@ -320,6 +332,7 @@ async def delete_task(
     except CalendarTargetNotFound:
         raise HTTPException(404, "Task not found")
     await session.commit()
+    await _schedule_index(user.id)
 
 
 @app.post("/events", response_model=EventResponse, status_code=201)
@@ -334,6 +347,7 @@ async def create_event(
         )
     )[0]
     await session.commit()
+    await _schedule_index(user.id)
     return await EventService.get(session, user, operation.target_id)
 
 
@@ -392,6 +406,7 @@ async def update_event(
     except CalendarTargetNotFound:
         raise HTTPException(404, "Event not found")
     await session.commit()
+    await _schedule_index(user.id)
     return await EventService.get(session, user, event_id)
 
 
@@ -408,6 +423,7 @@ async def delete_event(
     except CalendarTargetNotFound:
         raise HTTPException(404, "Event not found")
     await session.commit()
+    await _schedule_index(user.id)
 
 
 @app.get("/calendar/history", response_model=Page[CalendarOperationResponse])
@@ -458,6 +474,7 @@ async def undo_calendar_operation(
     except UndoConflict as exc:
         return _problem(409, str(exc), "undo_conflict")
     await session.commit()
+    await _schedule_index(user.id)
     await session.refresh(operation)
     return CalendarOperationResponse.from_operation(operation)
 

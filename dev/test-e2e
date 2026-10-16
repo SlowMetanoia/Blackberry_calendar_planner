@@ -9,5 +9,5 @@ cleanup() { $compose down -v --remove-orphans; }
 trap cleanup EXIT INT TERM
 $compose up -d --build postgres redis fake-openai
 $compose --profile release run --rm --build migrate
-$compose up -d --build --wait --wait-timeout 60 api worker
+$compose up -d --build --wait --wait-timeout 60 api worker indexer
 E2E_BASE_URL="http://127.0.0.1:$API_PORT" .venv/bin/python -m pytest tests/test_e2e_http.py -q

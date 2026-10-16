@@ -88,3 +88,25 @@ async def test_live_qwen_uses_terminal_commit_for_create() -> None:
     assert command.mutations[0].operation == "create"
     assert command.mutations[0].resource == "task"
     assert command.mutations[0].payload.title == "Купить молоко"
+
+
+@pytest.mark.asyncio
+async def test_live_qwen_uses_hybrid_search_for_approximate_reference() -> None:
+    local_now = datetime(2026, 10, 16, 12, 0, tzinfo=ZoneInfo("Europe/Moscow"))
+    message = await _complete_react(
+        [
+            {
+                "role": "system",
+                "content": build_system_prompt(local_now, "Europe/Moscow"),
+            },
+            {
+                "role": "user",
+                "content": "Найди в календаре занятие по иностранному языку, кажется французский",
+            },
+        ],
+        _tool_schemas(),
+    )
+    _call, name, args = function_call(message)
+
+    assert name == "search_calendar"
+    assert "француз" in args["query"].lower() or "язык" in args["query"].lower()

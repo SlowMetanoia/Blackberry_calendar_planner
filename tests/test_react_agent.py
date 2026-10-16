@@ -10,6 +10,7 @@ from planner.config import Settings
 from planner.db import Base
 from planner.models import AgentMessage, Conversation, MessageStatus, Task, User
 from planner.schemas import StrictInput
+from planner.search import CalendarRetriever, SearchPage
 from planner.services import EventService, TaskService
 
 
@@ -103,6 +104,72 @@ async def test_react_reads_then_updates_observed_task(session, user, monkeypatch
     observation = json.loads(seen_messages[1][-1]["content"])
     assert observation["ok"] is True
     assert observation["data"][0]["data"]["title"] == "Черновик"
+
+
+@pytest.mark.asyncio
+async def test_search_tool_returns_metadata_and_observes_target(session, user, monkeypatch) -> None:
+    task = Task(owner_id=user.id, title="Французский")
+    session.add(task)
+    context = await runtime_context(session, user, "переименуй французский")
+    await session.commit()
+
+    async def search(_cls, _session, _user, _settings, **_kwargs):
+        return SearchPage(
+            items=[
+                {
+                    "resource": "task",
+                    "id": str(task.id),
+                    "data": {"id": str(task.id), "title": task.title},
+                    "matches": [
+                        {
+                            "kind": "fuzzy",
+                            "field": "title",
+                            "score": 0.8,
+                            "threshold": 0.5,
+                        }
+                    ],
+                }
+            ],
+            total=1,
+            has_more=False,
+            next_cursor=None,
+            index_generation=3,
+            thresholds={"fuzzy": 0.5, "semantic": 0.5},
+        )
+
+    monkeypatch.setattr(CalendarRetriever, "search", classmethod(search))
+    responses = [
+        tool_call("search-1", "search_calendar", {"query": "французкий"}),
+        tool_call(
+            "commit-1",
+            "commit_calendar_command",
+            {
+                "reply": "Переименовал",
+                "mutations": [
+                    {
+                        "operation": "update",
+                        "resource": "task",
+                        "target_id": str(task.id),
+                        "payload": {"title": "Французский язык"},
+                    }
+                ],
+            },
+        ),
+    ]
+    seen = []
+
+    async def complete(messages, _tools):
+        seen.append(messages)
+        return responses.pop(0)
+
+    monkeypatch.setattr(agent, "_complete_react", complete)
+    result = await run_agent("переименуй французский", context)
+
+    assert result.state == "completed"
+    assert (await TaskService.get(session, user, task.id)).title == "Французский язык"
+    observation = json.loads(seen[1][-1]["content"])
+    assert observation["meta"]["index_generation"] == 3
+    assert observation["data"][0]["matches"][0]["kind"] == "fuzzy"
 
 
 @pytest.mark.asyncio

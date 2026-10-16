@@ -44,4 +44,11 @@ Keep database URLs, API keys, and model credentials in environment variables or 
 
 Agent workflow uses a bounded LangGraph ReAct loop behind `run_agent`: owner-scoped read tools execute immediately and return structured observations to the model. The only mutating terminal tool is `commit_calendar_command`; it validates and executes the final C/U/D batch atomically. Every mutation appends an immutable, owner-scoped `CalendarOperation`; task and event tables are replayable projections. History is available under `/calendar/history`, and undo appends a compensating operation. Message jobs remain serialized per conversation with a Redis lock. Run `.venv/bin/python -m pytest -q` for the full suite; focused checks: `.venv/bin/python -m pytest tests/test_react_agent.py tests/test_calendar_history.py -q` and `.venv/bin/python -m pytest tests/test_worker.py -q`.
 
+Approximate calendar references use the owner-scoped `search_calendar` ReAct read tool. It combines
+exact, substring, PostgreSQL trigram, and EmbeddingGemma semantic signals without collapsing them
+into one score. Search results are threshold-selected and cursor-paginated. CUD invalidates a
+per-user search generation without waiting for embeddings; the dedicated `indexer` ARQ service
+rebuilds that user's vectors, and search waits for the required generation. Focused checks:
+`.venv/bin/python -m pytest tests/test_calendar_search.py tests/test_search_worker.py tests/test_embeddings.py -q`.
+
 The React/Vite client lives in `web/`; run `npm --prefix web test` and `npm --prefix web run build`. Full API/worker coverage uses the isolated fake LLM/STT environment through `./dev/test-e2e`.

@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from .models import CalendarOperation, Event, Task, User
 from .schemas import EventCreate, EventUpdate, TaskCreate, TaskUpdate
+from .search import mark_search_index_dirty, rebuild_search_documents, sync_search_document
 from .services import _normalize_payload
 
 
@@ -184,6 +185,7 @@ class CalendarCommandService:
             or 0
         )
         result: list[CalendarOperation] = []
+        search_projection_changed = False
         async with session.begin_nested():
             for ordinal, mutation in enumerate(validated):
                 model = MODELS[mutation.resource]
@@ -218,6 +220,14 @@ class CalendarCommandService:
                 }
                 if mutation.operation == "update" and not changes:
                     continue
+                await sync_search_document(
+                    session,
+                    user.id,
+                    mutation.resource,
+                    target_id,
+                    after,
+                )
+                search_projection_changed = True
                 sequence += 1
                 operation = CalendarOperation(
                     owner_id=user.id,
@@ -236,6 +246,8 @@ class CalendarCommandService:
                 session.add(operation)
                 result.append(operation)
             await session.flush()
+            if search_projection_changed:
+                await mark_search_index_dirty(session, user.id)
         return result
 
     @classmethod
@@ -337,3 +349,4 @@ class CalendarCommandService:
                 for key, value in normalized.items():
                     setattr(current, key, value)
         await session.flush()
+        await rebuild_search_documents(session, user)

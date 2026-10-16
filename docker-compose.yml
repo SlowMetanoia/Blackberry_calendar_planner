@@ -28,6 +28,14 @@ services:
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_started }
+  indexer:
+    build: .
+    command: arq planner.search_worker.SearchWorkerSettings
+    env_file: ${ENV_FILE:-.env.example}
+    extra_hosts: ["host.docker.internal:host-gateway"]
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_started }
   migrate:
     build: .
     command: alembic upgrade head
@@ -36,7 +44,7 @@ services:
     depends_on:
       postgres: { condition: service_healthy }
   postgres:
-    image: postgres:16-alpine
+    image: pgvector/pgvector:pg16
     environment:
       POSTGRES_DB: planner
       POSTGRES_USER: planner

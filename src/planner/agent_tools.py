@@ -7,8 +7,10 @@ from typing import Any, Literal, Protocol
 
 from pydantic import Field
 
+from .config import get_settings
 from .models import User
 from .schemas import DecisionAction, DecisionTimeRange, StrictInput
+from .search import CalendarRetriever
 from .services import EventService, TaskService
 
 
@@ -35,6 +37,13 @@ class GetResourceArgs(StrictInput):
     target_id: uuid.UUID
 
 
+class SearchCalendarArgs(StrictInput):
+    query: str = Field(min_length=1, max_length=1000)
+    resource: Literal["all", "task", "event"] = "all"
+    time_range: DecisionTimeRange | None = None
+    cursor: str | None = Field(default=None, max_length=4096)
+
+
 class FinishResponseArgs(StrictInput):
     reply: str = Field(min_length=1, max_length=10_000)
 
@@ -49,7 +58,18 @@ class CommitCalendarCommandArgs(StrictInput):
 
 
 ToolKind = Literal["read", "terminal"]
-ToolExecutor = Callable[[ToolRuntimeContext, StrictInput, int], Awaitable[list[dict[str, Any]]]]
+
+
+@dataclass(frozen=True)
+class ToolExecutionResult:
+    items: list[dict[str, Any]]
+    metadata: dict[str, Any]
+
+
+ToolExecutor = Callable[
+    [ToolRuntimeContext, StrictInput, int],
+    Awaitable[list[dict[str, Any]] | ToolExecutionResult],
+]
 
 
 @dataclass(frozen=True)
@@ -120,6 +140,37 @@ def _get_executor(resource: Literal["task", "event"]) -> ToolExecutor:
     return execute
 
 
+async def _search_executor(
+    context: ToolRuntimeContext, raw_args: StrictInput, observation_limit: int
+) -> ToolExecutionResult:
+    args = SearchCalendarArgs.model_validate(raw_args)
+    user = await context.session.get(User, context.owner_id)
+    if user is None:
+        raise LookupError("agent owner not found")
+    time_range = args.time_range
+    page = await CalendarRetriever.search(
+        context.session,
+        user,
+        get_settings(),
+        query=args.query,
+        resource=args.resource,
+        from_datetime=time_range.from_datetime if time_range else None,
+        to_datetime=time_range.to_datetime if time_range else None,
+        cursor=args.cursor,
+        page_size=min(50, observation_limit),
+    )
+    return ToolExecutionResult(
+        items=page.items,
+        metadata={
+            "total": page.total,
+            "has_more": page.has_more,
+            "next_cursor": page.next_cursor,
+            "index_generation": page.index_generation,
+            "thresholds": page.thresholds,
+        },
+    )
+
+
 def default_tool_registry() -> Mapping[str, AgentTool]:
     tools = [
         AgentTool(
@@ -149,6 +200,17 @@ def default_tool_registry() -> Mapping[str, AgentTool]:
             GetResourceArgs,
             "read",
             _get_executor("event"),
+        ),
+        AgentTool(
+            "search_calendar",
+            (
+                "Search the current user's tasks and events by approximate title or description. "
+                "Returns threshold-matched exact, substring, fuzzy and semantic evidence. "
+                "Follow next_cursor while has_more is true if no confident match has been found."
+            ),
+            SearchCalendarArgs,
+            "read",
+            _search_executor,
         ),
         AgentTool(
             "finish_response",

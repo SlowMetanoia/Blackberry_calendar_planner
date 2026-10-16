@@ -8,12 +8,20 @@ services:
       LLM_API_KEY: test
       LLM_MODEL: fake-planner
       LLM_REQUIRED: "true"
+      EMBEDDING_BASE_URL: http://fake-openai:8080/v1
+      EMBEDDING_API_KEY: test
+      EMBEDDING_MODEL: fake-embedding
+      EMBEDDING_INDEX_WAIT_SECONDS: 10
       STT_BASE_URL: http://fake-openai:8080/v1
       STT_API_KEY: test
       CREATE_AUTO_CONFIRM_SECONDS: 1
     depends_on:
       fake-openai: { condition: service_healthy }
   worker:
+    environment: *test-env
+    depends_on:
+      fake-openai: { condition: service_healthy }
+  indexer:
     environment: *test-env
     depends_on:
       fake-openai: { condition: service_healthy }

@@ -2,6 +2,7 @@ import enum
 import uuid
 from datetime import datetime
 
+from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
     JSON,
     BigInteger,
@@ -108,6 +109,54 @@ class Event(Base):
     starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     duration_minutes: Mapped[int | None] = mapped_column()
     location: Mapped[str | None] = mapped_column(String(500))
+
+
+class CalendarSearchDocument(Base):
+    __tablename__ = "calendar_search_documents"
+    __table_args__ = (
+        CheckConstraint("resource IN ('task', 'event')", name="ck_search_documents_resource"),
+        Index("ix_search_documents_owner_resource", "owner_id", "resource"),
+    )
+    owner_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    resource: Mapped[str] = mapped_column(String(16), primary_key=True)
+    target_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    normalized_title: Mapped[str] = mapped_column(Text())
+    normalized_description: Mapped[str] = mapped_column(Text(), default="", server_default="")
+    content_hash: Mapped[str] = mapped_column(String(64))
+    embedding: Mapped[list[float] | None] = mapped_column(
+        Vector(768).with_variant(JSON(none_as_null=True), "sqlite"), nullable=True
+    )
+    embedding_model: Mapped[str | None] = mapped_column(String(255))
+    embedding_content_hash: Mapped[str | None] = mapped_column(String(64))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class CalendarSearchIndexState(Base):
+    __tablename__ = "calendar_search_index_states"
+    __table_args__ = (
+        CheckConstraint(
+            "requested_generation >= completed_generation",
+            name="ck_search_index_generation_order",
+        ),
+        CheckConstraint(
+            "status IN ('pending', 'indexing', 'ready', 'failed')",
+            name="ck_search_index_status",
+        ),
+    )
+    owner_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    requested_generation: Mapped[int] = mapped_column(BigInteger, default=0, server_default="0")
+    completed_generation: Mapped[int] = mapped_column(BigInteger, default=0, server_default="0")
+    status: Mapped[str] = mapped_column(String(16), default="ready", server_default="ready")
+    error: Mapped[str | None] = mapped_column(Text())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
 
 
 class AgentMessage(Base):

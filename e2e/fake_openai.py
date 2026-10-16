@@ -13,7 +13,15 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path.endswith("/models"):
-            self._json({"object": "list", "data": [{"id": "fake-planner", "object": "model"}]})
+            self._json(
+                {
+                    "object": "list",
+                    "data": [
+                        {"id": "fake-planner", "object": "model"},
+                        {"id": "fake-embedding", "object": "model"},
+                    ],
+                }
+            )
             return
         self._json({"status": "ok"})
 
@@ -24,6 +32,25 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"text": "создай задачу Голосовая задача"})
             return
         request = json.loads(raw or b"{}")
+        if self.path.endswith("/embeddings"):
+            inputs = request.get("input", [])
+            if isinstance(inputs, str):
+                inputs = [inputs]
+            self._json(
+                {
+                    "object": "list",
+                    "model": "fake-embedding",
+                    "data": [
+                        {
+                            "object": "embedding",
+                            "index": index,
+                            "embedding": [1.0, *([0.0] * 767)],
+                        }
+                        for index, _text in enumerate(inputs)
+                    ],
+                }
+            )
+            return
         messages = request.get("messages", [])
         text = next((m["content"] for m in reversed(messages) if m["role"] == "user"), "")
         lowered = text.lower()
@@ -64,6 +91,12 @@ class Handler(BaseHTTPRequestHandler):
             ]
         elif "добавь встречу" in lowered:
             calls = [("request_clarification", {"question": "Уточните повод встречи"})]
+        elif "найди молоко" in lowered:
+            calls = (
+                [("finish_response", {"reply": "Нашёл задачу"})]
+                if observed
+                else [("search_calendar", {"query": "молоко", "resource": "task"})]
+            )
         elif "покажи" in lowered:
             calls = (
                 [("finish_response", {"reply": "Вот ваши задачи"})]

@@ -71,6 +71,14 @@ def test_text_voice_history_undo_and_owner_isolation():
         tasks = client.get("/tasks?limit=10&offset=0", headers=owner).json()
         assert tasks["total"] == 1
         assert tasks["items"][0]["title"] == "Купить молоко"
+        search = client.post(
+            "/agent/messages",
+            headers=owner,
+            json={"text": "Найди молоко", "conversation_id": message["conversation_id"]},
+        ).json()
+        search_message = wait_message(client, owner, search["id"])
+        assert search_message["status"] == "completed", search_message.get("error")
+        assert search_message["reads"][0]["data"]["title"] == "Купить молоко"
         undated_tasks = client.get(
             "/tasks?status=open&deadline_presence=undated", headers=owner
         ).json()

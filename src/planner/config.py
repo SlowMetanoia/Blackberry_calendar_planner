@@ -21,6 +21,15 @@ class Settings(BaseSettings):
     agent_max_model_turns: int = Field(default=6, ge=1, le=20)
     agent_max_tool_calls: int = Field(default=12, ge=1, le=100)
     agent_max_observation_items: int = Field(default=100, ge=1, le=500)
+    embedding_base_url: str | None = None
+    embedding_api_key: str | None = None
+    embedding_model: str = "ggml-org/embeddinggemma-300M-GGUF"
+    embedding_dimensions: int = Field(default=768, ge=1)
+    embedding_request_timeout_seconds: float = Field(default=120, gt=0)
+    embedding_index_wait_seconds: float = Field(default=60, gt=0)
+    embedding_batch_size: int = Field(default=32, ge=1, le=256)
+    search_fuzzy_threshold: float = Field(default=0.5, ge=0, le=1)
+    search_semantic_threshold: float = Field(default=0.34, ge=-1, le=1)
     stt_base_url: str | None = None
     stt_api_key: str | None = None
     stt_model: str = "gigaam-v3-e2e-rnnt"

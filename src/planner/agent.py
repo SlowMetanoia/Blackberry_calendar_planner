@@ -21,6 +21,7 @@ from .agent_tools import (
     FinishResponseArgs,
     RequestClarificationArgs,
     SchedulingPolicy,
+    ToolExecutionResult,
     default_tool_registry,
 )
 from .calendar import (
@@ -38,6 +39,7 @@ from .llm import (
 )
 from .models import AgentMessage, CalendarOperation, User
 from .schemas import DecisionEnvelope
+from .search import SearchIndexUnavailable
 from .services import EventService, TaskService
 
 logger = logging.getLogger(__name__)
@@ -104,6 +106,7 @@ Current local datetime: {local_now.isoformat()}
 User IANA timezone: {timezone_name}
 Resolve relative dates such as today and tomorrow against this local datetime. Return all deadline and starts_at values as absolute ISO-8601 datetimes with an explicit UTC offset.
 Use read tools whenever facts from the calendar are required. Observe their structured results before deciding the next action. Never guess an existing record ID, time, duration, title, or search result.
+When the user refers to a task or event by approximate title, description, topic, person, or wording, use search_calendar instead of loading the whole calendar. A result may include exact, substring, fuzzy, and semantic match evidence; you decide whether it fits the user's context. If has_more is true and no confident match is present, follow next_cursor before reporting not found or asking for clarification.
 For time-bounded list requests, use a time_range with timezone-aware `from` (inclusive) and `to` (exclusive). For broad requests such as "what do I have tomorrow", call both list_tasks and list_events with the same local-day range.
 Every run must finish with exactly one terminal tool: finish_response, request_clarification, or commit_calendar_command. Never combine a terminal tool with read tools in one response.
 Every terminal tool must contain a non-empty reply or question for the user.
@@ -635,14 +638,29 @@ async def _execute_read_tools(state: AgentState) -> AgentState:
         try:
             if context is None or tool.executor is None:
                 raise RuntimeError("tool runtime context is unavailable")
-            data = await tool.executor(context, call["args"], observation_limit)
+            result = await tool.executor(context, call["args"], observation_limit)
+            if isinstance(result, ToolExecutionResult):
+                data = result.items
+                metadata = result.metadata
+            else:
+                data = result
+                metadata = None
             for item in data:
                 key = _resource_key(item.get("resource"), item.get("id"))
                 if key:
                     reads.append(item)
                     if key not in known:
                         known.append(key)
-            content = json.dumps({"ok": True, "tool": tool.name, "data": data}, ensure_ascii=False)
+            payload = {"ok": True, "tool": tool.name, "data": data}
+            if metadata is not None:
+                payload["meta"] = metadata
+            content = json.dumps(payload, ensure_ascii=False)
+        except SearchIndexUnavailable as exc:
+            logger.warning("Agent search index unavailable: %s", type(exc).__name__)
+            content = _safe_tool_error(
+                "index_unavailable",
+                "Поисковый индекс календаря временно недоступен. Попробуйте ещё раз.",
+            )
         except Exception as exc:  # noqa: BLE001 - tools are an isolation boundary
             logger.warning("Agent read tool %s failed: %s", tool.name, type(exc).__name__)
             content = _safe_tool_error("tool_failed", "Не удалось выполнить чтение календаря")

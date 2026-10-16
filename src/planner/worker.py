@@ -102,6 +102,14 @@ async def process_message(ctx: dict, message_id: str) -> None:
 
                 conversation.last_activity_at = func.now()
             await session.commit()
+            try:
+                await redis.enqueue_job(
+                    "index_owner_calendar",
+                    str(message.owner_id),
+                    _queue_name="calendar-index",
+                )
+            except Exception:  # noqa: BLE001 - indexing is repaired by the next search
+                logger.warning("Calendar index enqueue failed for owner %s", message.owner_id)
         except Retry:
             raise
         except TranscriptionError as exc:
