@@ -192,7 +192,7 @@ class CalendarOperationResponse(BaseModel):
         )
 
 
-class AgentReadResponse(BaseModel):
+class AgentDisplayItemResponse(BaseModel):
     resource: Literal["task", "event"]
     id: uuid.UUID
     data: dict
@@ -206,7 +206,7 @@ class AgentMessageResponse(BaseModel):
     input_text: str | None = None
     error: str | None = None
     reply: str | None = None
-    reads: list[AgentReadResponse] = Field(default_factory=list)
+    display_items: list[AgentDisplayItemResponse] = Field(default_factory=list)
     operations: list[CalendarOperationResponse] = Field(default_factory=list)
     requires_new_conversation: bool = False
     created_at: datetime

@@ -44,6 +44,15 @@ class SearchCalendarArgs(StrictInput):
     cursor: str | None = Field(default=None, max_length=4096)
 
 
+class CalendarItemReference(StrictInput):
+    resource: Literal["task", "event"]
+    target_id: uuid.UUID
+
+
+class ShowCalendarItemsArgs(StrictInput):
+    items: list[CalendarItemReference] = Field(min_length=1, max_length=100)
+
+
 class FinishResponseArgs(StrictInput):
     reply: str = Field(min_length=1, max_length=10_000)
 
@@ -57,7 +66,7 @@ class CommitCalendarCommandArgs(StrictInput):
     mutations: list[DecisionAction] = Field(min_length=1, max_length=50)
 
 
-ToolKind = Literal["read", "terminal"]
+ToolKind = Literal["read", "presentation", "terminal"]
 
 
 @dataclass(frozen=True)
@@ -211,6 +220,16 @@ def default_tool_registry() -> Mapping[str, AgentTool]:
             SearchCalendarArgs,
             "read",
             _search_executor,
+        ),
+        AgentTool(
+            "show_calendar_items",
+            (
+                "Select already observed tasks or events to display as user-facing cards. "
+                "Internal read results are never displayed automatically. Call this in a "
+                "separate step after reads and before the terminal response."
+            ),
+            ShowCalendarItemsArgs,
+            "presentation",
         ),
         AgentTool(
             "finish_response",

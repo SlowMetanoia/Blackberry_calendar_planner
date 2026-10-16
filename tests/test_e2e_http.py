@@ -88,7 +88,7 @@ def test_text_voice_history_undo_and_owner_isolation():
         ).json()
         search_message = wait_message(client, owner, search["id"])
         assert search_message["status"] == "completed", search_message.get("error")
-        assert search_message["reads"][0]["data"]["title"] == "Купить молоко"
+        assert search_message["display_items"][0]["data"]["title"] == "Купить молоко"
         undated_tasks = client.get(
             "/tasks?status=open&deadline_presence=undated", headers=owner
         ).json()
@@ -133,7 +133,7 @@ def test_text_voice_history_undo_and_owner_isolation():
         ).json()
         read_message = wait_message(client, owner, read["id"])
         assert read_message["operations"] == []
-        assert {item["data"]["title"] for item in read_message["reads"]} == {
+        assert {item["data"]["title"] for item in read_message["display_items"]} == {
             "Купить молоко",
             "Голосовая задача",
         }
@@ -165,9 +165,9 @@ def test_text_voice_history_undo_and_owner_isolation():
             json={"text": "Что у меня на завтра?", "conversation_id": message["conversation_id"]},
         ).json()
         tomorrow_message = wait_message(client, owner, tomorrow["id"])
-        assert [item["resource"] for item in tomorrow_message["reads"]] == ["event"]
-        assert tomorrow_message["reads"][0]["data"]["title"] == "Встреча по поводу релиза"
-        assert tomorrow_message["reads"][0]["data"]["starts_at"].startswith("2026-10-15")
+        assert [item["resource"] for item in tomorrow_message["display_items"]] == ["event"]
+        assert tomorrow_message["display_items"][0]["data"]["title"] == "Встреча по поводу релиза"
+        assert tomorrow_message["display_items"][0]["data"]["starts_at"].startswith("2026-10-15")
 
         history = client.get("/calendar/history?limit=100&offset=0", headers=owner).json()
         assert history["total"] >= 4

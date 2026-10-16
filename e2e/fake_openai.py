@@ -55,19 +55,37 @@ class Handler(BaseHTTPRequestHandler):
         text = next((m["content"] for m in reversed(messages) if m["role"] == "user"), "")
         lowered = text.lower()
         observed = bool(messages and messages[-1].get("role") == "tool")
+        last_tool = messages[-1].get("name") if observed else None
+        observed_references = []
+        seen_references = set()
+        for message in messages:
+            if message.get("role") != "tool" or message.get("name") == "show_calendar_items":
+                continue
+            try:
+                tool_payload = json.loads(message.get("content") or "{}")
+            except json.JSONDecodeError:
+                continue
+            for item in tool_payload.get("data", []):
+                key = (item.get("resource"), item.get("id"))
+                if key[0] in {"task", "event"} and key[1] and key not in seen_references:
+                    observed_references.append({"resource": key[0], "target_id": key[1]})
+                    seen_references.add(key)
         earlier_user_messages = [
             message["content"].lower() for message in messages[:-1] if message["role"] == "user"
         ]
         if "что у меня на завтра" in lowered:
             time_range = {"from": "2026-10-15T00:00:00+03:00", "to": "2026-10-16T00:00:00+03:00"}
-            calls = (
-                [("finish_response", {"reply": "Вот ваши задачи и события на завтра"})]
-                if observed
-                else [
+            if last_tool == "show_calendar_items":
+                calls = [("finish_response", {"reply": "Вот ваши задачи и события на завтра"})]
+            elif observed and observed_references:
+                calls = [("show_calendar_items", {"items": observed_references})]
+            elif observed:
+                calls = [("finish_response", {"reply": "На завтра ничего не найдено"})]
+            else:
+                calls = [
                     ("list_tasks", {"time_range": time_range}),
                     ("list_events", {"time_range": time_range}),
                 ]
-            )
         elif "по поводу релиза" in lowered and any(
             "добавь встречу" in item for item in earlier_user_messages
         ):
@@ -92,17 +110,23 @@ class Handler(BaseHTTPRequestHandler):
         elif "добавь встречу" in lowered:
             calls = [("request_clarification", {"question": "Уточните повод встречи"})]
         elif "найди молоко" in lowered:
-            calls = (
-                [("finish_response", {"reply": "Нашёл задачу"})]
-                if observed
-                else [("search_calendar", {"query": "молоко", "resource": "task"})]
-            )
+            if last_tool == "show_calendar_items":
+                calls = [("finish_response", {"reply": "Нашёл задачу"})]
+            elif observed and observed_references:
+                calls = [("show_calendar_items", {"items": observed_references})]
+            elif observed:
+                calls = [("finish_response", {"reply": "Задача не найдена"})]
+            else:
+                calls = [("search_calendar", {"query": "молоко", "resource": "task"})]
         elif "покажи" in lowered:
-            calls = (
-                [("finish_response", {"reply": "Вот ваши задачи"})]
-                if observed
-                else [("list_tasks", {})]
-            )
+            if last_tool == "show_calendar_items":
+                calls = [("finish_response", {"reply": "Вот ваши задачи"})]
+            elif observed and observed_references:
+                calls = [("show_calendar_items", {"items": observed_references})]
+            elif observed:
+                calls = [("finish_response", {"reply": "Задач нет"})]
+            else:
+                calls = [("list_tasks", {})]
         elif "непонятно" in lowered:
             calls = [("request_clarification", {"question": "Уточните, пожалуйста"})]
         else:

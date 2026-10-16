@@ -63,6 +63,72 @@ def tool_call(call_id: str, name: str, arguments: dict) -> dict:
     }
 
 
+def test_assistant_history_hides_private_observation_references() -> None:
+    content = agent._assistant_history_content(
+        json.dumps(
+            {
+                "reply": "Вот задача",
+                "display_items": [],
+                "observed_resources": [
+                    {
+                        "resource": "task",
+                        "target_id": "5f1264ac-738f-4d1f-a64b-206469187de7",
+                    }
+                ],
+                "operations": [],
+            }
+        )
+    )
+
+    assert "observed_resources" not in json.loads(content)
+
+
+@pytest.mark.asyncio
+async def test_internal_reads_are_hidden_and_show_tool_selects_one_card(
+    session, user, monkeypatch
+) -> None:
+    task = Task(owner_id=user.id, title="Встреча с Артёмом")
+    session.add(task)
+    context = await runtime_context(session, user, "Когда я виделся с Артёмом?")
+    await session.commit()
+    reference = {"resource": "task", "target_id": str(task.id)}
+    responses = [
+        tool_call("list-1", "list_tasks", {}),
+        tool_call("get-1", "get_task", {"target_id": str(task.id)}),
+        tool_call(
+            "show-1",
+            "show_calendar_items",
+            {"items": [reference, reference]},
+        ),
+        tool_call("finish-1", "finish_response", {"reply": "Вот встреча"}),
+    ]
+
+    async def complete(_messages, _tools):
+        return responses.pop(0)
+
+    monkeypatch.setattr(agent, "_complete_react", complete)
+    result = await run_agent("Когда я виделся с Артёмом?", context)
+    payload = json.loads(result.result)
+
+    assert result.state == "completed"
+    assert payload["display_items"] == [
+        {
+            "resource": "task",
+            "id": str(task.id),
+            "data": {
+                "id": str(task.id),
+                "title": "Встреча с Артёмом",
+                "description": None,
+                "deadline": None,
+                "estimated_minutes": None,
+                "status": "open",
+            },
+        }
+    ]
+    assert payload["observed_resources"] == [{"resource": "task", "target_id": str(task.id)}]
+    assert "reads" not in payload
+
+
 @pytest.mark.asyncio
 async def test_react_reads_then_updates_observed_task(session, user, monkeypatch) -> None:
     task = Task(owner_id=user.id, title="Черновик")
@@ -99,7 +165,8 @@ async def test_react_reads_then_updates_observed_task(session, user, monkeypatch
     assert result.state == "completed"
     assert (await TaskService.get(session, user, task.id)).title == "Готово"
     payload = json.loads(result.result)
-    assert payload["reads"][0]["id"] == str(task.id)
+    assert payload["observed_resources"] == [{"resource": "task", "target_id": str(task.id)}]
+    assert payload["display_items"] == []
     assert len(payload["operations"]) == 1
     observation = json.loads(seen_messages[1][-1]["content"])
     assert observation["ok"] is True
@@ -372,8 +439,118 @@ async def test_read_tool_cannot_access_another_owner_record(session, user, monke
     result = await run_agent("покажи задачу", context)
 
     assert result.state == "completed"
-    assert json.loads(result.result)["reads"] == []
+    assert json.loads(result.result)["display_items"] == []
+    assert json.loads(result.result)["observed_resources"] == []
     assert json.loads(observations[1][-1]["content"])["data"] == []
+
+
+@pytest.mark.asyncio
+async def test_show_tool_rejects_unobserved_or_foreign_record(session, user, monkeypatch) -> None:
+    other = User(email="foreign-show@example.test", password_hash="x")
+    session.add(other)
+    await session.flush()
+    foreign = Task(owner_id=other.id, title="Чужая задача")
+    session.add(foreign)
+    context = await runtime_context(session, user, "покажи задачу")
+    await session.commit()
+    responses = [
+        tool_call(
+            "show-1",
+            "show_calendar_items",
+            {"items": [{"resource": "task", "target_id": str(foreign.id)}]},
+        ),
+        tool_call("finish-1", "finish_response", {"reply": "Не могу показать"}),
+    ]
+    seen = []
+
+    async def complete(messages, _tools):
+        seen.append(messages)
+        return responses.pop(0)
+
+    monkeypatch.setattr(agent, "_complete_react", complete)
+    result = await run_agent("покажи задачу", context)
+
+    error = json.loads(seen[1][-1]["content"])
+    assert error["error"]["code"] == "item_not_observed"
+    assert json.loads(result.result)["display_items"] == []
+
+
+@pytest.mark.asyncio
+async def test_invalid_show_replaces_previous_selection_with_nothing(
+    session, user, monkeypatch
+) -> None:
+    task = Task(owner_id=user.id, title="Наблюдаемая задача")
+    session.add(task)
+    context = await runtime_context(session, user, "Покажи задачу")
+    await session.commit()
+    responses = [
+        tool_call("read-1", "list_tasks", {}),
+        tool_call(
+            "show-1",
+            "show_calendar_items",
+            {"items": [{"resource": "task", "target_id": str(task.id)}]},
+        ),
+        tool_call(
+            "show-2",
+            "show_calendar_items",
+            {
+                "items": [
+                    {
+                        "resource": "task",
+                        "target_id": "5f1264ac-738f-4d1f-a64b-206469187de7",
+                    }
+                ]
+            },
+        ),
+        tool_call("finish-1", "finish_response", {"reply": "Не могу показать"}),
+    ]
+
+    async def complete(_messages, _tools):
+        return responses.pop(0)
+
+    monkeypatch.setattr(agent, "_complete_react", complete)
+    result = await run_agent("Покажи задачу", context)
+
+    assert json.loads(result.result)["display_items"] == []
+
+
+@pytest.mark.asyncio
+async def test_clarification_keeps_explicitly_selected_candidates(
+    session, user, monkeypatch
+) -> None:
+    tasks = [
+        Task(owner_id=user.id, title="Встреча с Артёмом утром"),
+        Task(owner_id=user.id, title="Встреча с Артёмом вечером"),
+    ]
+    session.add_all(tasks)
+    context = await runtime_context(session, user, "Какую встречу с Артёмом?")
+    await session.commit()
+    responses = [
+        tool_call("list-1", "list_tasks", {}),
+        tool_call(
+            "show-1",
+            "show_calendar_items",
+            {"items": [{"resource": "task", "target_id": str(task.id)} for task in tasks]},
+        ),
+        tool_call(
+            "clarify-1",
+            "request_clarification",
+            {"question": "Какую из двух встреч вы имеете в виду?"},
+        ),
+    ]
+
+    async def complete(_messages, _tools):
+        return responses.pop(0)
+
+    monkeypatch.setattr(agent, "_complete_react", complete)
+    result = await run_agent("Какую встречу с Артёмом?", context)
+    payload = json.loads(result.result)
+
+    assert result.state == "needs_clarification"
+    assert [item["data"]["title"] for item in payload["display_items"]] == [
+        "Встреча с Артёмом утром",
+        "Встреча с Артёмом вечером",
+    ]
 
 
 @pytest.mark.asyncio

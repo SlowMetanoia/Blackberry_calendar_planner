@@ -51,4 +51,10 @@ per-user search generation without waiting for embeddings; the dedicated `indexe
 rebuilds that user's vectors, and search waits for the required generation. Focused checks:
 `.venv/bin/python -m pytest tests/test_calendar_search.py tests/test_search_worker.py tests/test_embeddings.py -q`.
 
+Read-tool results are private ReAct observations and must not be rendered automatically. The model
+uses `show_calendar_items` in a separate step to select already observed owner-scoped records for
+the user. Agent message responses expose those records as `display_items`; persisted
+`observed_resources` remain internal and only support later conversation context. Legacy saved
+`reads` are accepted only as a backward-compatible source for deduplicated display items.
+
 The React/Vite client lives in `web/`; run `npm --prefix web test` and `npm --prefix web run build`. Full API/worker coverage uses the isolated fake LLM/STT environment through `./dev/test-e2e`.

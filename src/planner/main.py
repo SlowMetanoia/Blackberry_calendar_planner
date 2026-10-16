@@ -599,6 +599,27 @@ async def _message_response(message: AgentMessage, session: AsyncSession) -> Age
             payload = json.loads(message.result)
         except json.JSONDecodeError:
             payload = {"reply": message.result}
+    display_items = payload.get("display_items")
+    if not isinstance(display_items, list):
+        display_items = payload.get("reads", [])
+    unique_display_items = []
+    seen_display_items = set()
+    if isinstance(display_items, list):
+        for item in display_items:
+            if not isinstance(item, dict):
+                continue
+            resource = item.get("resource")
+            try:
+                ident = uuid.UUID(str(item.get("id")))
+            except (TypeError, ValueError, AttributeError):
+                continue
+            if resource not in {"task", "event"}:
+                continue
+            key = (resource, ident)
+            if key in seen_display_items:
+                continue
+            seen_display_items.add(key)
+            unique_display_items.append(item)
     return AgentMessageResponse(
         id=message.id,
         conversation_id=message.conversation_id,
@@ -607,7 +628,7 @@ async def _message_response(message: AgentMessage, session: AsyncSession) -> Age
         status=message.status,
         error=message.error,
         reply=payload.get("reply"),
-        reads=payload.get("reads", []),
+        display_items=unique_display_items,
         operations=payload.get("operations", []),
         requires_new_conversation=payload.get("requires_new_conversation", False),
         created_at=message.created_at,

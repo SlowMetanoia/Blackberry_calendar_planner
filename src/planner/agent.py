@@ -21,6 +21,7 @@ from .agent_tools import (
     FinishResponseArgs,
     RequestClarificationArgs,
     SchedulingPolicy,
+    ShowCalendarItemsArgs,
     ToolExecutionResult,
     default_tool_registry,
 )
@@ -83,7 +84,8 @@ class AgentState(TypedDict, total=False):
     terminal_call: dict[str, Any]
     route: str
     reply: str
-    reads: list[dict]
+    observed_resources: list[dict[str, str]]
+    display_refs: list[dict[str, str]]
     operations: list[dict]
     known_resources: list[str]
 
@@ -106,6 +108,7 @@ Current local datetime: {local_now.isoformat()}
 User IANA timezone: {timezone_name}
 Resolve relative dates such as today and tomorrow against this local datetime. Return all deadline and starts_at values as absolute ISO-8601 datetimes with an explicit UTC offset.
 Use read tools whenever facts from the calendar are required. Observe their structured results before deciding the next action. Never guess an existing record ID, time, duration, title, or search result.
+Read-tool results are private observations and are never displayed automatically. When the user asks to see calendar records or when showing candidates would help a clarification, call show_calendar_items in a separate step after all required reads and before the terminal tool. Select only the records relevant to the answer and never show the same record twice. Do not call show_calendar_items merely to identify a mutation target; completed mutations are rendered separately.
 When the user refers to a task or event by approximate title, description, topic, person, or wording, use search_calendar instead of loading the whole calendar. A result may include exact, substring, fuzzy, and semantic match evidence; you decide whether it fits the user's context. If has_more is true and no confident match is present, follow next_cursor before reporting not found or asking for clarification.
 For time-bounded list requests, use a time_range with timezone-aware `from` (inclusive) and `to` (exclusive). For broad requests such as "what do I have tomorrow", call both list_tasks and list_events with the same local-day range.
 Every run must finish with exactly one terminal tool: finish_response, request_clarification, or commit_calendar_command. Never combine a terminal tool with read tools in one response.
@@ -237,7 +240,16 @@ def _assistant_history_content(result: str | None) -> str | None:
         value = json.loads(result)
     except json.JSONDecodeError:
         return result
-    return json.dumps(value, ensure_ascii=False)
+    if not isinstance(value, dict):
+        return None
+    visible = {
+        key: value[key]
+        for key in ("reply", "display_items", "operations", "requires_new_conversation")
+        if key in value
+    }
+    if "display_items" not in visible and isinstance(value.get("reads"), list):
+        visible["display_items"] = _deduplicate_resource_items(value["reads"])
+    return json.dumps(visible, ensure_ascii=False) if visible else None
 
 
 async def _conversation_messages(context: AgentRunContext) -> list[AgentMessage]:
@@ -290,6 +302,27 @@ def _resource_reference(resource: object, ident: object) -> tuple[str, uuid.UUID
         return None
 
 
+def _resource_reference_dict(resource: object, ident: object) -> dict[str, str] | None:
+    reference = _resource_reference(resource, ident)
+    if reference is None:
+        return None
+    return {"resource": reference[0], "target_id": str(reference[1])}
+
+
+def _deduplicate_resource_items(items: list[object]) -> list[dict]:
+    result: list[dict] = []
+    seen: set[tuple[str, uuid.UUID]] = set()
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        reference = _resource_reference(item.get("resource"), item.get("id"))
+        if reference is None or reference in seen:
+            continue
+        seen.add(reference)
+        result.append(item)
+    return result
+
+
 async def _referenced_resource_context(
     context: AgentRunContext,
     messages: list[AgentMessage],
@@ -298,12 +331,16 @@ async def _referenced_resource_context(
     message_ids: list[uuid.UUID] = []
     for message in messages:
         payload = _result_payload(message.result)
-        reads = payload.get("reads", [])
-        if isinstance(reads, list):
-            for read in reads:
-                if not isinstance(read, dict):
+        observed = payload.get("observed_resources")
+        if not isinstance(observed, list):
+            observed = payload.get("reads", [])
+        if isinstance(observed, list):
+            for item in observed:
+                if not isinstance(item, dict):
                     continue
-                reference = _resource_reference(read.get("resource"), read.get("id"))
+                reference = _resource_reference(
+                    item.get("resource"), item.get("target_id") or item.get("id")
+                )
                 if reference:
                     references.pop(reference, None)
                     references[reference] = None
@@ -402,7 +439,8 @@ async def _prepare_context(state: AgentState) -> AgentState:
     ]
     return {
         "messages": llm_messages,
-        "reads": [],
+        "observed_resources": [],
+        "display_refs": [],
         "operations": [],
         "known_resources": known_resources,
         "model_turns": 0,
@@ -582,7 +620,7 @@ async def _process_model(state: AgentState) -> AgentState:
                     item["name"],
                     _safe_tool_error(
                         "mixed_tool_calls",
-                        "Terminal и read tools нужно вызывать на разных шагах",
+                        "Read, presentation и terminal tools нужно вызывать на разных шагах",
                     ),
                 )
             )
@@ -612,14 +650,16 @@ async def _process_model(state: AgentState) -> AgentState:
             "tool_call_count": call_count,
             "route": "terminal",
         }
-    return {"pending_calls": validated, "tool_call_count": call_count, "route": "reads"}
+    route = "presentation" if kinds == {"presentation"} else "reads"
+    return {"pending_calls": validated, "tool_call_count": call_count, "route": route}
 
 
 def _route_after_processing(
     state: AgentState,
-) -> Literal["execute_reads", "validate_terminal", "call_model", "failed"]:
+) -> Literal["execute_reads", "execute_presentations", "validate_terminal", "call_model", "failed"]:
     return {
         "reads": "execute_reads",
+        "presentation": "execute_presentations",
         "terminal": "validate_terminal",
         "retry": "call_model",
         "failed": "failed",
@@ -629,7 +669,12 @@ def _route_after_processing(
 async def _execute_read_tools(state: AgentState) -> AgentState:
     context = state.get("context")
     messages = list(state["messages"])
-    reads = list(state.get("reads", []))
+    observed = list(state.get("observed_resources", []))
+    observed_keys = {
+        key
+        for item in observed
+        if (key := _resource_key(item.get("resource"), item.get("target_id"))) is not None
+    }
     known = list(state.get("known_resources", []))
     observation_limit = get_settings().agent_max_observation_items
     for call in state["pending_calls"]:
@@ -648,7 +693,11 @@ async def _execute_read_tools(state: AgentState) -> AgentState:
             for item in data:
                 key = _resource_key(item.get("resource"), item.get("id"))
                 if key:
-                    reads.append(item)
+                    if key not in observed_keys:
+                        reference = _resource_reference_dict(item.get("resource"), item.get("id"))
+                        if reference is not None:
+                            observed.append(reference)
+                            observed_keys.add(key)
                     if key not in known:
                         known.append(key)
             payload = {"ok": True, "tool": tool.name, "data": data}
@@ -671,7 +720,51 @@ async def _execute_read_tools(state: AgentState) -> AgentState:
             context.source_message_id if context else None,
         )
         messages.append(_tool_result_message(call["id"], call["name"], content))
-    return {"messages": messages, "reads": reads, "known_resources": known}
+    return {
+        "messages": messages,
+        "observed_resources": observed,
+        "known_resources": known,
+    }
+
+
+async def _execute_presentation_tools(state: AgentState) -> AgentState:
+    context = state.get("context")
+    messages = list(state["messages"])
+    known = set(state.get("known_resources", []))
+    selected = list(state.get("display_refs", []))
+    user = await context.session.get(User, context.owner_id) if context is not None else None
+    for call in state["pending_calls"]:
+        args = ShowCalendarItemsArgs.model_validate(call["args"])
+        references: list[dict[str, str]] = []
+        reference_keys: set[str] = set()
+        invalid = False
+        for item in args.items:
+            key = _resource_key(item.resource, item.target_id)
+            if key is None or key not in known or context is None or user is None:
+                invalid = True
+                break
+            service = TaskService if item.resource == "task" else EventService
+            current = await service.get(context.session, user, item.target_id)
+            if current is None:
+                invalid = True
+                break
+            if key not in reference_keys:
+                references.append({"resource": item.resource, "target_id": str(item.target_id)})
+                reference_keys.add(key)
+        if invalid:
+            selected = []
+            content = _safe_tool_error(
+                "item_not_observed",
+                "Можно показать только доступные записи, полученные из инструментов чтения",
+            )
+        else:
+            selected = references
+            content = json.dumps(
+                {"ok": True, "tool": call["name"], "selected": references},
+                ensure_ascii=False,
+            )
+        messages.append(_tool_result_message(call["id"], call["name"], content))
+    return {"messages": messages, "display_refs": selected}
 
 
 async def _validate_terminal(state: AgentState) -> AgentState:
@@ -778,16 +871,62 @@ async def _failed(state: AgentState) -> AgentState:
 
 
 async def _clarify(state: AgentState) -> AgentState:
+    if state.get("result"):
+        return {"state": "needs_clarification", "result": state["result"]}
+    payload = await _final_response_payload(
+        state,
+        state.get("reply", "Нужно уточнение"),
+    )
     return {
         "state": "needs_clarification",
-        "result": state.get("result")
-        or json.dumps({"reply": state.get("reply", "Нужно уточнение")}, ensure_ascii=False),
+        "result": json.dumps(payload, ensure_ascii=False),
+    }
+
+
+async def _selected_display_items(state: AgentState) -> list[dict[str, Any]]:
+    context = state.get("context")
+    if context is None:
+        return []
+    user = await context.session.get(User, context.owner_id)
+    if user is None:
+        return []
+    items: list[dict[str, Any]] = []
+    for reference in state.get("display_refs", []):
+        parsed = _resource_reference(reference.get("resource"), reference.get("target_id"))
+        if parsed is None:
+            continue
+        resource, ident = parsed
+        service = TaskService if resource == "task" else EventService
+        row = await service.get(context.session, user, ident)
+        if row is None:
+            continue
+        data = {
+            column.name: getattr(row, column.name)
+            for column in row.__table__.columns
+            if column.name != "owner_id"
+        }
+        items.append(
+            json.loads(
+                json.dumps(
+                    {"resource": resource, "id": str(row.id), "data": data},
+                    default=str,
+                )
+            )
+        )
+    return items
+
+
+async def _final_response_payload(state: AgentState, reply: str) -> dict[str, Any]:
+    return {
+        "reply": reply,
+        "display_items": await _selected_display_items(state),
+        "observed_resources": state.get("observed_resources", []),
+        "operations": state.get("operations", []),
     }
 
 
 async def _finish(state: AgentState) -> AgentState:
-    result = {"reply": state["reply"], "reads": state.get("reads", [])}
-    result["operations"] = state.get("operations", [])
+    result = await _final_response_payload(state, state["reply"])
     return {
         "state": "completed",
         "result": json.dumps(result, ensure_ascii=False),
@@ -801,6 +940,7 @@ def _compiled_graph():
     graph.add_node("call_model", _call_model)
     graph.add_node("process_model", _process_model)
     graph.add_node("execute_reads", _execute_read_tools)
+    graph.add_node("execute_presentations", _execute_presentation_tools)
     graph.add_node("validate_terminal", _validate_terminal)
     graph.add_node("commit_mutations", _commit_mutations)
     graph.add_node("clarify", _clarify)
@@ -811,6 +951,7 @@ def _compiled_graph():
     graph.add_conditional_edges("call_model", _route_after_model)
     graph.add_conditional_edges("process_model", _route_after_processing)
     graph.add_edge("execute_reads", "call_model")
+    graph.add_edge("execute_presentations", "call_model")
     graph.add_conditional_edges("validate_terminal", _route_after_terminal)
     graph.add_conditional_edges("commit_mutations", _route_after_commit)
     graph.add_edge("clarify", END)

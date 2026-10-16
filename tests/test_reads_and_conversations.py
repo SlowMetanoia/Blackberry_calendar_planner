@@ -1,3 +1,4 @@
+import json
 from datetime import UTC, datetime
 
 import pytest
@@ -5,7 +6,12 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from planner.agent import parse_decision
 from planner.db import Base
-from planner.main import get_user_preferences, list_conversations, update_user_preferences
+from planner.main import (
+    _message_response,
+    get_user_preferences,
+    list_conversations,
+    update_user_preferences,
+)
 from planner.models import AgentMessage, Conversation, Event, MessageStatus, Task, User
 from planner.schemas import UserPreferencesUpdate
 from planner.services import EventService, TaskService
@@ -212,3 +218,30 @@ async def test_conversation_list_is_owner_scoped_and_uses_first_phrase(session, 
     assert page.total == 2
     assert [item.id for item in page.items] == [recent.id, older.id]
     assert page.items[0].preview == "Первая фраза новой сессии"
+
+
+@pytest.mark.asyncio
+async def test_legacy_message_reads_become_deduplicated_display_items(session, user) -> None:
+    conversation = Conversation(owner_id=user.id)
+    session.add(conversation)
+    await session.flush()
+    item = {
+        "resource": "task",
+        "id": "5f1264ac-738f-4d1f-a64b-206469187de7",
+        "data": {"title": "Старая карточка"},
+    }
+    message = AgentMessage(
+        owner_id=user.id,
+        conversation_id=conversation.id,
+        sequence=1,
+        input_text="Покажи задачу",
+        status=MessageStatus.completed,
+        result=json.dumps({"reply": "Вот задача", "reads": [item, item], "operations": []}),
+    )
+    session.add(message)
+    await session.flush()
+
+    response = await _message_response(message, session)
+
+    assert len(response.display_items) == 1
+    assert response.display_items[0].data["title"] == "Старая карточка"

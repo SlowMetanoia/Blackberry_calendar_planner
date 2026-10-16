@@ -31,3 +31,10 @@ def test_timezone_endpoint_exists() -> None:
 def test_conversation_list_endpoint_exists() -> None:
     routes = {(route.path, method) for route in app.routes for method in (route.methods or ())}
     assert ("/agent/conversations", "GET") in routes
+
+
+def test_agent_message_exposes_display_items_not_internal_reads() -> None:
+    properties = app.openapi()["components"]["schemas"]["AgentMessageResponse"]["properties"]
+
+    assert "display_items" in properties
+    assert "reads" not in properties
