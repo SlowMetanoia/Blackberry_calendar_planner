@@ -49,12 +49,22 @@ def test_text_voice_history_undo_and_owner_isolation():
         assert timezone.json() == {"timezone": "Europe/Moscow"}
         preferences = client.get("/users/me/preferences", headers=owner)
         assert preferences.status_code == 200
-        assert preferences.json() == {"timezone": "Europe/Moscow", "upcoming_days": 7}
+        assert preferences.json() == {
+            "timezone": "Europe/Moscow",
+            "upcoming_days": 7,
+            "open_air_silence_ms": 1500,
+        }
         preferences = client.patch(
-            "/users/me/preferences", headers=owner, json={"upcoming_days": 14}
+            "/users/me/preferences",
+            headers=owner,
+            json={"upcoming_days": 14, "open_air_silence_ms": 2000},
         )
         assert preferences.status_code == 200
-        assert preferences.json() == {"timezone": "Europe/Moscow", "upcoming_days": 14}
+        assert preferences.json() == {
+            "timezone": "Europe/Moscow",
+            "upcoming_days": 14,
+            "open_air_silence_ms": 2000,
+        }
         assert (
             client.put(
                 "/users/me/timezone", headers=owner, json={"timezone": "Not/AZone"}
@@ -100,6 +110,21 @@ def test_text_voice_history_undo_and_owner_isolation():
         ).json()
         voice = wait_message(client, owner, audio["id"])
         assert voice["input_text"] == "создай задачу Голосовая задача"
+
+        assert (
+            client.post(
+                "/audio/transcriptions",
+                files={"audio": ("open-air.wav", b"fake-audio", "audio/wav")},
+            ).status_code
+            == 401
+        )
+        transcription = client.post(
+            "/audio/transcriptions",
+            headers=owner,
+            files={"audio": ("open-air.wav", b"fake-audio", "audio/wav")},
+        )
+        assert transcription.status_code == 200
+        assert transcription.json() == {"text": "создай задачу Голосовая задача"}
 
         read = client.post(
             "/agent/messages",

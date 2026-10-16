@@ -6,7 +6,7 @@ export type Page<T> = { items:T[]; total:number; limit:number; offset:number };
 export type TaskStatus = "open" | "completed";
 export type Task = { id:string; owner_id:string; title:string; description:string|null; deadline:string|null; estimated_minutes:number|null; status:TaskStatus };
 export type Event = { id:string; owner_id:string; title:string; description:string|null; starts_at:string; duration_minutes:number|null; location:string|null };
-export type UserPreferences = { timezone:string; upcoming_days:number };
+export type UserPreferences = { timezone:string; upcoming_days:number; open_air_silence_ms:number };
 export type CalendarEntry = {
   id:string;
   resource:"task"|"event";

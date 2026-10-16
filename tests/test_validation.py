@@ -1,6 +1,7 @@
 import json
 import uuid
 from io import BytesIO
+from pathlib import Path
 
 import pytest
 from fastapi import HTTPException, UploadFile
@@ -11,7 +12,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from planner.agent import parse_decision
 from planner.calendar import CalendarCommandService, CalendarMutation, CalendarValidationError
 from planner.db import Base
-from planner.main import _save_audio_upload, validation_problem
+from planner.main import _save_audio_upload, _transcribe_audio_upload, validation_problem
 from planner.models import CalendarOperation, User
 from planner.schemas import AgentInput, EventUpdate, TaskCreate, TaskUpdate, UserPreferencesUpdate
 from planner.services import TaskService
@@ -42,6 +43,12 @@ def test_optional_fields_can_still_be_cleared() -> None:
 def test_user_preferences_reject_invalid_upcoming_days(value: int) -> None:
     with pytest.raises(ValidationError):
         UserPreferencesUpdate(upcoming_days=value)
+
+
+@pytest.mark.parametrize("value", [499, 5001])
+def test_user_preferences_reject_invalid_open_air_silence(value: int) -> None:
+    with pytest.raises(ValidationError):
+        UserPreferencesUpdate(open_air_silence_ms=value)
 
 
 def test_user_preferences_reject_empty_patch() -> None:
@@ -284,3 +291,47 @@ async def test_audio_upload_uses_generated_safe_filename(tmp_path) -> None:
     assert path.parent == tmp_path
     assert path.suffix == ".webm"
     assert path.read_bytes() == b"audio"
+
+
+@pytest.mark.asyncio
+async def test_transcription_upload_always_removes_temporary_audio(monkeypatch, tmp_path) -> None:
+    received = None
+
+    async def fake_transcribe(path: str) -> str:
+        nonlocal received
+        received = Path(path).read_bytes()
+        return "Ivory, создай задачу"
+
+    monkeypatch.setattr("planner.main.transcribe", fake_transcribe)
+    result = await _transcribe_audio_upload(
+        UploadFile(
+            filename="phrase.webm",
+            file=BytesIO(b"voice"),
+            headers={"content-type": "audio/webm"},
+        ),
+        directory=tmp_path,
+        max_bytes=10,
+    )
+
+    assert result == "Ivory, создай задачу"
+    assert received == b"voice"
+    assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.asyncio
+async def test_transcription_upload_removes_audio_when_stt_fails(monkeypatch, tmp_path) -> None:
+    async def failed_transcribe(_path: str) -> str:
+        raise RuntimeError("offline")
+
+    monkeypatch.setattr("planner.main.transcribe", failed_transcribe)
+    with pytest.raises(RuntimeError, match="offline"):
+        await _transcribe_audio_upload(
+            UploadFile(
+                filename="phrase.webm",
+                file=BytesIO(b"voice"),
+                headers={"content-type": "audio/webm"},
+            ),
+            directory=tmp_path,
+            max_bytes=10,
+        )
+    assert list(tmp_path.iterdir()) == []

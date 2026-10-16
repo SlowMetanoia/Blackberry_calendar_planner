@@ -5,6 +5,7 @@ def test_async_message_endpoints_exist() -> None:
     routes = {(route.path, tuple(route.methods or ())) for route in app.routes}
     assert ("/agent/messages", ("POST",)) in routes
     assert ("/agent/messages/audio", ("POST",)) in routes
+    assert ("/audio/transcriptions", ("POST",)) in routes
     assert ("/agent/messages/{message_id}", ("GET",)) in routes
 
 

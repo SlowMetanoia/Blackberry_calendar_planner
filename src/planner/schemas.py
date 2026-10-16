@@ -31,6 +31,10 @@ class TokenResponse(BaseModel):
     token_type: str = "bearer"
 
 
+class TranscriptionResponse(BaseModel):
+    text: str
+
+
 class TimezoneValue(StrictInput):
     timezone: str = Field(min_length=1, max_length=64)
 
@@ -49,11 +53,13 @@ class UserPreferencesResponse(BaseModel):
 
     timezone: str
     upcoming_days: int
+    open_air_silence_ms: int
 
 
 class UserPreferencesUpdate(StrictInput):
     timezone: str | None = Field(default=None, min_length=1, max_length=64)
     upcoming_days: int | None = Field(default=None, strict=True, ge=1, le=90)
+    open_air_silence_ms: int | None = Field(default=None, strict=True, ge=500, le=5000)
 
     @field_validator("timezone")
     @classmethod

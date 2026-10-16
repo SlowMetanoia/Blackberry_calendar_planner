@@ -35,12 +35,17 @@ class User(Base):
     __tablename__ = "users"
     __table_args__ = (
         CheckConstraint("upcoming_days BETWEEN 1 AND 90", name="ck_users_upcoming_days_range"),
+        CheckConstraint(
+            "open_air_silence_ms BETWEEN 500 AND 5000",
+            name="ck_users_open_air_silence_range",
+        ),
     )
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     email: Mapped[str] = mapped_column(String(320), unique=True, index=True)
     password_hash: Mapped[str] = mapped_column(String(255))
     timezone: Mapped[str] = mapped_column(String(64), default="UTC")
     upcoming_days: Mapped[int] = mapped_column(default=7, server_default="7")
+    open_air_silence_ms: Mapped[int] = mapped_column(default=1500, server_default="1500")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 

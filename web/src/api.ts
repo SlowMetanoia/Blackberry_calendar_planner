@@ -54,6 +54,10 @@ export const undoOperation = (id:string) => request<CalendarOperation>(`/calenda
 export const logoutSession = () => request<void>("/auth/logout", {method:"POST"});
 export const getUserPreferences = () => request<UserPreferences>("/users/me/preferences");
 export const updateUserPreferences = (data:Partial<UserPreferences>) => request<UserPreferences>("/users/me/preferences", {method:"PATCH",body:JSON.stringify(data)});
+export async function transcribeAudio(audio:Blob):Promise<string> {
+  const body=new FormData();body.append("audio",audio,"open-air.wav");
+  return (await request<{text:string}>("/audio/transcriptions",{method:"POST",body})).text;
+}
 
 function query(path:string,values:Record<string,string|number|undefined>):string {
   const params=new URLSearchParams();

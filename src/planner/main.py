@@ -14,6 +14,7 @@ from fastapi.responses import JSONResponse, Response
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from .agent import TranscriptionError, transcribe
 from .calendar import (
     CalendarCommandService,
     CalendarMutation,
@@ -42,6 +43,7 @@ from .schemas import (
     TaskUpdate,
     TimezoneValue,
     TokenResponse,
+    TranscriptionResponse,
     UserPreferencesResponse,
     UserPreferencesUpdate,
 )
@@ -174,6 +176,19 @@ async def _save_audio_upload(
     except BaseException:
         path.unlink(missing_ok=True)
         raise
+
+
+async def _transcribe_audio_upload(
+    audio: UploadFile,
+    *,
+    directory: Path = AUDIO_DIR,
+    max_bytes: int,
+) -> str:
+    path = await _save_audio_upload(audio, directory=directory, max_bytes=max_bytes)
+    try:
+        return await transcribe(str(path))
+    finally:
+        path.unlink(missing_ok=True)
 
 
 @app.post("/auth/register", response_model=TokenResponse, status_code=201)
@@ -638,6 +653,24 @@ async def submit_audio_message(
         idempotency_key=idempotency_key,
     )
     return await _message_response(message, session)
+
+
+@app.post("/audio/transcriptions", response_model=TranscriptionResponse)
+async def transcribe_audio(
+    audio: UploadFile = File(...),
+    _user: User = Depends(current_user),
+) -> TranscriptionResponse:
+    try:
+        text = await _transcribe_audio_upload(
+            audio,
+            max_bytes=get_settings().audio_max_upload_bytes,
+        )
+    except TranscriptionError as exc:
+        raise HTTPException(502, str(exc)) from exc
+    except RuntimeError as exc:
+        logger.warning("Open-air transcription unavailable: %s", type(exc).__name__)
+        raise HTTPException(503, "Сервис распознавания речи временно недоступен") from exc
+    return TranscriptionResponse(text=text)
 
 
 @app.get("/agent/messages/{message_id}", response_model=AgentMessageResponse)

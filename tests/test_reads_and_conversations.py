@@ -143,15 +143,18 @@ async def test_user_preferences_default_and_partial_update(session, user) -> Non
     current = await get_user_preferences(user=user)
     assert current.timezone == "Europe/Moscow"
     assert current.upcoming_days == 7
+    assert current.open_air_silence_ms == 1500
 
     updated = await update_user_preferences(
-        data=UserPreferencesUpdate(upcoming_days=14),
+        data=UserPreferencesUpdate(upcoming_days=14, open_air_silence_ms=2000),
         user=user,
         session=session,
     )
     assert updated.timezone == "Europe/Moscow"
     assert updated.upcoming_days == 14
+    assert updated.open_air_silence_ms == 2000
     assert user.upcoming_days == 14
+    assert user.open_air_silence_ms == 2000
 
 
 @pytest.mark.asyncio
