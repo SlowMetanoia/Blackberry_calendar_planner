@@ -3,7 +3,6 @@ from typing import Any
 import httpx
 
 from .config import Settings
-from .schemas import DecisionEnvelope
 
 
 def normalize_base_url(value: str) -> str:
@@ -17,31 +16,6 @@ def auth_headers(settings: Settings) -> dict[str, str]:
     if settings.llm_api_key:
         headers["Authorization"] = f"Bearer {settings.llm_api_key}"
     return headers
-
-
-def decision_response_format() -> dict[str, Any]:
-    return {
-        "type": "json_schema",
-        "json_schema": {
-            "name": "planner_decision",
-            "strict": True,
-            "schema": DecisionEnvelope.model_json_schema(),
-        },
-    }
-
-
-def completion_payload(settings: Settings, messages: list[dict[str, Any]]) -> dict[str, Any]:
-    return {
-        "model": settings.llm_model,
-        "messages": messages,
-        "temperature": 0,
-        "top_p": 1,
-        "top_k": 20,
-        "max_tokens": settings.llm_max_tokens,
-        "stream": False,
-        "reasoning_effort": settings.llm_reasoning_effort,
-        "response_format": decision_response_format(),
-    }
 
 
 def react_completion_payload(

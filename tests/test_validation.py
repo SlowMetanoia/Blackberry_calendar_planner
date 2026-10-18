@@ -1,4 +1,3 @@
-import json
 import uuid
 from io import BytesIO
 from pathlib import Path
@@ -9,7 +8,6 @@ from fastapi.exceptions import RequestValidationError
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from planner.agent import parse_decision
 from planner.calendar import CalendarCommandService, CalendarMutation, CalendarValidationError
 from planner.db import Base
 from planner.main import _save_audio_upload, _transcribe_audio_upload, validation_problem
@@ -54,94 +52,6 @@ def test_user_preferences_reject_invalid_open_air_silence(value: int) -> None:
 def test_user_preferences_reject_empty_patch() -> None:
     with pytest.raises(ValidationError):
         UserPreferencesUpdate()
-
-
-@pytest.mark.parametrize(
-    "payload",
-    [
-        {"title": None},
-        {"status": None},
-        {"status": "not-a-status"},
-    ],
-)
-def test_decision_task_update_rejects_invalid_required_values(payload) -> None:
-    raw = json.dumps(
-        {
-            "reply": "ok",
-            "reads": [],
-            "mutations": [
-                {
-                    "operation": "update",
-                    "resource": "task",
-                    "target_id": str(uuid.uuid4()),
-                    "payload": payload,
-                }
-            ],
-            "clarification": None,
-        }
-    )
-    with pytest.raises(ValidationError):
-        parse_decision(raw)
-
-
-def test_decision_event_rejects_null_title_and_naive_datetime() -> None:
-    target_id = str(uuid.uuid4())
-    for mutation in [
-        {
-            "operation": "update",
-            "resource": "event",
-            "target_id": target_id,
-            "payload": {"title": None},
-        },
-        {
-            "operation": "create",
-            "resource": "event",
-            "payload": {"title": "Встреча", "starts_at": "2026-10-15T12:00:00"},
-        },
-    ]:
-        with pytest.raises(ValidationError):
-            parse_decision(
-                json.dumps(
-                    {
-                        "reply": "ok",
-                        "reads": [],
-                        "mutations": [mutation],
-                        "clarification": None,
-                    }
-                )
-            )
-
-
-def test_decision_clarification_is_exclusive() -> None:
-    raw = json.dumps(
-        {
-            "reply": "ok",
-            "reads": [],
-            "mutations": [
-                {
-                    "operation": "create",
-                    "resource": "task",
-                    "payload": {"title": "x"},
-                }
-            ],
-            "clarification": "Уточните",
-        }
-    )
-    with pytest.raises(ValidationError):
-        parse_decision(raw)
-
-
-def test_decision_limits_generated_work() -> None:
-    raw = json.dumps(
-        {
-            "reply": "ok",
-            "reads": [{"operation": "list", "resource": "task"}] * 51,
-            "mutations": [],
-            "clarification": None,
-        }
-    )
-    with pytest.raises(ValidationError):
-        parse_decision(raw)
 
 
 @pytest.mark.asyncio

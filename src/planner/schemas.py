@@ -9,7 +9,6 @@ from .models import MessageStatus
 
 MAX_TEXT_LENGTH = 10_000
 MAX_INTEGER = 2_147_483_647
-MAX_DECISION_ITEMS = 50
 
 
 class StrictInput(BaseModel):
@@ -253,22 +252,6 @@ class DecisionTimeRange(StrictInput):
         return self
 
 
-class DecisionListRead(StrictInput):
-    operation: Literal["list"]
-    resource: Literal["task", "event"]
-    target_id: None = None
-    time_range: DecisionTimeRange | None = None
-
-
-class DecisionGetRead(StrictInput):
-    operation: Literal["get"]
-    resource: Literal["task", "event"]
-    target_id: uuid.UUID
-
-
-DecisionRead = DecisionListRead | DecisionGetRead
-
-
 def _require_aware(value: datetime | None) -> datetime | None:
     if value is not None and (value.tzinfo is None or value.utcoffset() is None):
         raise ValueError("datetime must include a UTC offset")
@@ -365,16 +348,3 @@ DecisionAction = (
     | DecisionEventUpdateAction
     | DecisionEventDeleteAction
 )
-
-
-class DecisionEnvelope(StrictInput):
-    reply: str = Field(min_length=1, max_length=MAX_TEXT_LENGTH)
-    reads: list[DecisionRead] = Field(max_length=MAX_DECISION_ITEMS)
-    mutations: list[DecisionAction] = Field(max_length=MAX_DECISION_ITEMS)
-    clarification: str | None = Field(max_length=MAX_TEXT_LENGTH)
-
-    @model_validator(mode="after")
-    def clarification_is_exclusive(self):
-        if self.clarification and (self.reads or self.mutations):
-            raise ValueError("clarification cannot be combined with reads or mutations")
-        return self

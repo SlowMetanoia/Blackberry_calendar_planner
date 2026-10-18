@@ -20,7 +20,6 @@ from .agent_tools import (
     CommitCalendarCommandArgs,
     FinishResponseArgs,
     RequestClarificationArgs,
-    SchedulingPolicy,
     ShowCalendarItemsArgs,
     ToolExecutionResult,
     default_tool_registry,
@@ -34,13 +33,11 @@ from .calendar import (
 from .config import get_settings
 from .llm import (
     auth_headers,
-    completion_payload,
     normalize_base_url,
     react_completion_payload,
 )
 from .models import AgentMessage, CalendarOperation, User
 from .prompts_manager import get_prompts_manager
-from .schemas import DecisionEnvelope
 from .search import SearchIndexUnavailable
 from .services import EventService, TaskService
 
@@ -68,7 +65,6 @@ class AgentRunContext:
     conversation_id: uuid.UUID
     source_message_id: uuid.UUID
     observed_at_utc: datetime = field(default_factory=lambda: datetime.now(UTC))
-    scheduling_policy: SchedulingPolicy = field(default_factory=SchedulingPolicy)
 
 
 class AgentState(TypedDict, total=False):
@@ -123,20 +119,6 @@ async def _referenced_records_message(resource_context: list[dict]) -> dict[str,
     }
 
 
-def _response_content(body: dict) -> str:
-    try:
-        message = body["choices"][0]["message"]
-        content = message["content"]
-    except (KeyError, IndexError, TypeError) as exc:
-        raise LLMProtocolError("LLM returned an invalid chat completion response") from exc
-    if not isinstance(content, str) or not content.strip():
-        detail = (
-            "; reasoning_content was returned instead" if message.get("reasoning_content") else ""
-        )
-        raise LLMProtocolError(f"LLM returned empty message content{detail}")
-    return content
-
-
 def _context_window_exceeded(response: httpx.Response) -> bool:
     if response.status_code not in {400, 413, 422}:
         return False
@@ -151,36 +133,6 @@ def _context_window_exceeded(response: httpx.Response) -> bool:
         "maximum context",
     )
     return any(marker in detail for marker in markers)
-
-
-async def _complete(
-    text: str,
-    *,
-    system_prompt: str,
-    history: list[dict[str, str]] | None = None,
-    resource_context: list[dict] | None = None,
-) -> str:
-    settings = get_settings()
-    if not settings.llm_base_url:
-        raise RuntimeError("LLM is not configured")
-    messages = [
-        {"role": "system", "content": system_prompt},
-        *(history or []),
-    ]
-    if resource_context:
-        messages.append(await _referenced_records_message(resource_context))
-    messages.append({"role": "user", "content": text})
-    payload = completion_payload(settings, messages)
-    async with httpx.AsyncClient(timeout=settings.llm_request_timeout_seconds) as client:
-        response = await client.post(
-            f"{normalize_base_url(settings.llm_base_url)}/chat/completions",
-            headers=auth_headers(settings),
-            json=payload,
-        )
-        if _context_window_exceeded(response):
-            raise ContextWindowExceeded("LLM context window exceeded")
-        response.raise_for_status()
-    return _response_content(response.json())
 
 
 def _response_message(body: dict[str, Any]) -> dict[str, Any]:
@@ -267,10 +219,6 @@ def _history_from_messages(messages: list[AgentMessage]) -> list[dict[str, str]]
         if assistant_content:
             history.append({"role": "assistant", "content": assistant_content})
     return history
-
-
-async def _conversation_history(context: AgentRunContext) -> list[dict[str, str]]:
-    return _history_from_messages(await _conversation_messages(context))
 
 
 def _result_payload(result: str | None) -> dict:
@@ -985,12 +933,3 @@ async def run_agent(text: str, context: AgentRunContext | None = None) -> AgentR
         initial["context"] = context
     final_state = await _compiled_graph().ainvoke(initial)
     return AgentResult(final_state["state"], final_state["result"])
-
-
-def parse_decision(raw: str) -> DecisionEnvelope:
-    """Strictly validate the LLM envelope; arbitrary prose can never mutate data."""
-    try:
-        value = json.loads(raw)
-    except json.JSONDecodeError as exc:
-        raise ValueError("LLM returned invalid JSON envelope") from exc
-    return DecisionEnvelope.model_validate(value)

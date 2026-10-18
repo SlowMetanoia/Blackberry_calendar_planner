@@ -4,7 +4,6 @@ from datetime import UTC, datetime
 import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from planner.agent import parse_decision
 from planner.db import Base
 from planner.main import (
     _message_response,
@@ -34,36 +33,6 @@ async def user(session):
     session.add(value)
     await session.commit()
     return value
-
-
-def test_read_envelope_accepts_strict_half_open_time_range() -> None:
-    decision = parse_decision(
-        '{"reply":"ok","reads":['
-        '{"operation":"list","resource":"event","time_range":{'
-        '"from":"2026-10-15T00:00:00+03:00","to":"2026-10-16T00:00:00+03:00"}},'
-        '{"operation":"list","resource":"task","time_range":{'
-        '"from":"2026-10-15T00:00:00+03:00","to":"2026-10-16T00:00:00+03:00"}}],'
-        '"mutations":[],"clarification":null}'
-    )
-    assert decision.reads[0].time_range.from_datetime.isoformat() == "2026-10-15T00:00:00+03:00"
-    assert decision.reads[1].time_range.to_datetime.isoformat() == "2026-10-16T00:00:00+03:00"
-
-
-@pytest.mark.parametrize(
-    "time_range",
-    [
-        '{"from":"2026-10-16T00:00:00+03:00","to":"2026-10-15T00:00:00+03:00"}',
-        '{"from":"2026-10-15T00:00:00","to":"2026-10-16T00:00:00+03:00"}',
-    ],
-)
-def test_read_envelope_rejects_invalid_time_range(time_range: str) -> None:
-    raw = (
-        '{"reply":"ok","reads":[{"operation":"list","resource":"event","time_range":'
-        f"{time_range}"
-        '}],"mutations":[],"clarification":null}'
-    )
-    with pytest.raises(ValueError):
-        parse_decision(raw)
 
 
 @pytest.mark.asyncio
