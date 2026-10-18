@@ -39,6 +39,7 @@ from .llm import (
     react_completion_payload,
 )
 from .models import AgentMessage, CalendarOperation, User
+from .prompts_manager import get_prompts_manager
 from .schemas import DecisionEnvelope
 from .search import SearchIndexUnavailable
 from .services import EventService, TaskService
@@ -102,23 +103,24 @@ class TranscriptionError(RuntimeError):
     """A safe, user-facing speech recognition failure."""
 
 
-def build_system_prompt(local_now: datetime, timezone_name: str) -> str:
-    return f"""You are a tool-using agent inside a planner application.
-Current local datetime: {local_now.isoformat()}
-User IANA timezone: {timezone_name}
-Resolve relative dates such as today and tomorrow against this local datetime. Return all deadline and starts_at values as absolute ISO-8601 datetimes with an explicit UTC offset.
-Use read tools whenever facts from the calendar are required. Observe their structured results before deciding the next action. Never guess an existing record ID, time, duration, title, or search result.
-Read-tool results are private observations and are never displayed automatically. When the user asks to see calendar records or when showing candidates would help a clarification, call show_calendar_items in a separate step after all required reads and before the terminal tool. Select only the records relevant to the answer and never show the same record twice. Do not call show_calendar_items merely to identify a mutation target; completed mutations are rendered separately.
-When the user refers to a task or event by approximate title, description, topic, person, or wording, use search_calendar instead of loading the whole calendar. A result may include exact, substring, fuzzy, and semantic match evidence; you decide whether it fits the user's context. If has_more is true and no confident match is present, follow next_cursor before reporting not found or asking for clarification.
-For time-bounded list requests, use a time_range with timezone-aware `from` (inclusive) and `to` (exclusive). For broad requests such as "what do I have tomorrow", call both list_tasks and list_events with the same local-day range.
-Every run must finish with exactly one terminal tool: finish_response, request_clarification, or commit_calendar_command. Never combine a terminal tool with read tools in one response.
-Every terminal tool must contain a non-empty reply or question for the user.
-Create may be committed directly when all required facts are present. Before update or delete, identify the target from fresh tool observations or the supplied referenced records. commit_calendar_command executes all mutations immediately and atomically; describe them as completed actions, never as a plan awaiting confirmation.
-Treat the timezone above as authoritative and never ask the user to confirm it. Infer a useful title from the request: for example, "встреча с Ильёй" is already a sufficient event title. Ask for clarification only when a required fact such as an event date or time is truly absent.
-Resolve pronouns and short references such as "она", "эта конференция", or "эта встреча" against the entire conversation and the current referenced records supplied after the history. Those records contain fresh database values and are authoritative.
-When the user asks to change only a person, organization, conference, place, or another fragment inside a compound title, return the complete resulting title in payload.title and preserve every unrequested part exactly. For example, changing "Acme" to "Contoso" in "Подготовить отчёт для Acme за квартал" must produce "Подготовить отчёт для Contoso за квартал", not merely "Contoso". Replace the entire title only when the user explicitly requests a complete rename.
-If no record matches, finish with a clear not-found answer. If several records could satisfy an update and the intended record is unclear, request clarification and do not mutate.
-Use only payload fields declared by the schema. For event time use starts_at, never start. For a new task omit status unless the user explicitly requested one."""
+async def build_system_prompt(local_now: datetime, timezone_name: str) -> str:
+    return await get_prompts_manager().render(
+        "agent_system",
+        local_now=local_now.isoformat(),
+        timezone_name=timezone_name,
+    )
+
+
+async def _referenced_records_message(resource_context: list[dict]) -> dict[str, Any]:
+    return {
+        "role": "system",
+        "content": await get_prompts_manager().render(
+            "referenced_records",
+            referenced_resources=json.dumps(
+                {"referenced_resources": resource_context}, ensure_ascii=False
+            ),
+        ),
+    }
 
 
 def _response_content(body: dict) -> str:
@@ -164,22 +166,10 @@ async def _complete(
     messages = [
         {"role": "system", "content": system_prompt},
         *(history or []),
-        *(
-            [
-                {
-                    "role": "system",
-                    "content": (
-                        "Current referenced records, freshly loaded from the database. "
-                        "Use their complete fields and IDs when resolving the current request:\n"
-                        + json.dumps({"referenced_resources": resource_context}, ensure_ascii=False)
-                    ),
-                }
-            ]
-            if resource_context
-            else []
-        ),
-        {"role": "user", "content": text},
     ]
+    if resource_context:
+        messages.append(await _referenced_records_message(resource_context))
+    messages.append({"role": "user", "content": text})
     payload = completion_payload(settings, messages)
     async with httpx.AsyncClient(timeout=settings.llm_request_timeout_seconds) as client:
         response = await client.post(
@@ -417,20 +407,11 @@ async def _prepare_context(state: AgentState) -> AgentState:
         resource_context = await _referenced_resource_context(context, messages)
     local_now = observed_at_utc.astimezone(ZoneInfo(timezone_name))
     llm_messages: list[dict[str, Any]] = [
-        {"role": "system", "content": build_system_prompt(local_now, timezone_name)},
+        {"role": "system", "content": await build_system_prompt(local_now, timezone_name)},
         *history,
     ]
     if resource_context:
-        llm_messages.append(
-            {
-                "role": "system",
-                "content": (
-                    "Current referenced records, freshly loaded from the database. "
-                    "Use their complete fields and IDs when resolving the current request:\n"
-                    + json.dumps({"referenced_resources": resource_context}, ensure_ascii=False)
-                ),
-            }
-        )
+        llm_messages.append(await _referenced_records_message(resource_context))
     llm_messages.append({"role": "user", "content": state["text"]})
     known_resources = [
         key
@@ -569,11 +550,7 @@ async def _process_model(state: AgentState) -> AgentState:
             {
                 "role": "system",
                 "content": json.dumps(
-                    {
-                        "protocol_error": (
-                            "A terminal tool call is required; plain assistant content cannot finish."
-                        )
-                    }
+                    {"protocol_error": await get_prompts_manager().render("protocol_error")}
                 ),
             },
         ]

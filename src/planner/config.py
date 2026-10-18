@@ -21,6 +21,8 @@ class Settings(BaseSettings):
     agent_max_model_turns: int = Field(default=6, ge=1, le=20)
     agent_max_tool_calls: int = Field(default=12, ge=1, le=100)
     agent_max_observation_items: int = Field(default=100, ge=1, le=500)
+    prompts_path: str = "prompts/planner-agent.yaml"
+    prompts_cache_ttl_seconds: float = Field(default=30.0, ge=0)
     embedding_base_url: str | None = None
     embedding_api_key: str | None = None
     embedding_model: str = "ggml-org/embeddinggemma-300M-GGUF"

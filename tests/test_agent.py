@@ -201,9 +201,10 @@ def test_decision_envelope_requires_empty_delete_payload() -> None:
         parse_decision(raw)
 
 
-def test_system_prompt_contains_local_clock_and_timezone() -> None:
+@pytest.mark.asyncio
+async def test_system_prompt_contains_local_clock_and_timezone() -> None:
     local_now = datetime(2026, 10, 14, 19, 30, tzinfo=ZoneInfo("Europe/Moscow"))
-    prompt = build_system_prompt(local_now, "Europe/Moscow")
+    prompt = await build_system_prompt(local_now, "Europe/Moscow")
     assert "2026-10-14T19:30:00+03:00" in prompt
     assert "Europe/Moscow" in prompt
     assert "absolute ISO-8601" in prompt
