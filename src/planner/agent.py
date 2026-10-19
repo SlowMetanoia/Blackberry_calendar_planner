@@ -757,7 +757,7 @@ async def _validate_terminal(state: AgentState) -> AgentState:
     for mutation in parsed.mutations:
         payload = mutation.payload
         for field in ("title", "description", "location"):
-            value = payload.get(field)
+            value = getattr(payload, field, None)
             if isinstance(value, str):
                 texts_to_check.append(value)
     for value in texts_to_check:
