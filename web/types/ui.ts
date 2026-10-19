@@ -1,5 +1,6 @@
 import type { CalendarEntry, Resource } from "./calendar";
 
+export type PlannerView = "chat" | "calendar" | "history";
 export type EditorState = {
   resource: Resource;
   entry?: CalendarEntry;

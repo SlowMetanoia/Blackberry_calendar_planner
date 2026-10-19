@@ -49,85 +49,143 @@
 }
 
 :root {
-  --background: oklch(0.984 0.009 86);
-  --foreground: oklch(0.255 0.019 145);
-  --card: oklch(0.996 0.004 90);
-  --card-foreground: oklch(0.255 0.019 145);
-  --popover: oklch(0.996 0.004 90);
-  --popover-foreground: oklch(0.255 0.019 145);
-  --primary: oklch(0.334 0.039 151);
-  --primary-foreground: oklch(0.985 0.008 90);
-  --secondary: oklch(0.947 0.014 84);
-  --secondary-foreground: oklch(0.312 0.027 138);
-  --muted: oklch(0.955 0.011 85);
-  --muted-foreground: oklch(0.512 0.021 72);
-  --accent: oklch(0.928 0.033 65);
-  --accent-foreground: oklch(0.395 0.058 45);
-  --destructive: oklch(0.548 0.187 28);
-  --border: oklch(0.897 0.017 82);
-  --input: oklch(0.884 0.019 82);
-  --ring: oklch(0.574 0.057 148);
-  --chart-1: oklch(0.523 0.084 151);
-  --chart-2: oklch(0.588 0.103 48);
-  --chart-3: oklch(0.486 0.064 241);
-  --chart-4: oklch(0.739 0.071 83);
-  --chart-5: oklch(0.612 0.126 27);
+  /* Ivory paper, fountain-pen ink, one dry highlighter. */
+  --background: oklch(0.968 0.006 92);
+  --foreground: oklch(0.28 0.032 255);
+  --card: oklch(0.991 0.003 92);
+  --card-foreground: oklch(0.28 0.032 255);
+  --popover: oklch(0.995 0.002 92);
+  --popover-foreground: oklch(0.28 0.032 255);
+  --primary: oklch(0.3 0.036 255);
+  --primary-foreground: oklch(0.985 0.004 90);
+  --secondary: oklch(0.938 0.007 92);
+  --secondary-foreground: oklch(0.32 0.03 255);
+  --muted: oklch(0.945 0.005 92);
+  --muted-foreground: oklch(0.47 0.02 255);
+  --accent: oklch(0.895 0.105 92);
+  --accent-foreground: oklch(0.315 0.048 78);
+  --destructive: oklch(0.525 0.175 27);
+  --border: oklch(0.892 0.007 92);
+  --input: oklch(0.875 0.008 92);
+  --ring: oklch(0.55 0.075 255);
+  --chart-1: oklch(0.42 0.06 255);
+  --chart-2: oklch(0.55 0.075 215);
+  --chart-3: oklch(0.715 0.135 72);
+  --chart-4: oklch(0.62 0.02 90);
+  --chart-5: oklch(0.58 0.14 30);
   --radius: 0.75rem;
-  --sidebar: oklch(0.958 0.012 84);
-  --sidebar-foreground: oklch(0.255 0.019 145);
-  --sidebar-primary: oklch(0.334 0.039 151);
-  --sidebar-primary-foreground: oklch(0.985 0.008 90);
-  --sidebar-accent: oklch(0.925 0.026 77);
-  --sidebar-accent-foreground: oklch(0.33 0.045 52);
-  --sidebar-border: oklch(0.892 0.018 82);
-  --sidebar-ring: oklch(0.574 0.057 148);
+  --sidebar: oklch(0.245 0.025 255);
+  --sidebar-foreground: oklch(0.955 0.006 90);
+  --sidebar-primary: oklch(0.895 0.105 92);
+  --sidebar-primary-foreground: oklch(0.28 0.032 255);
+  --sidebar-accent: oklch(0.895 0.105 92);
+  --sidebar-accent-foreground: oklch(0.28 0.032 255);
+  --sidebar-border: oklch(1 0 0 / 10%);
+  --sidebar-ring: oklch(0.895 0.105 92);
+  color-scheme: light;
 }
 
 .dark {
-  --background: oklch(0.19 0.014 130);
-  --foreground: oklch(0.955 0.01 88);
-  --card: oklch(0.235 0.017 130);
-  --card-foreground: oklch(0.955 0.01 88);
-  --popover: oklch(0.235 0.017 130);
-  --popover-foreground: oklch(0.955 0.01 88);
-  --primary: oklch(0.785 0.061 145);
-  --primary-foreground: oklch(0.205 0.022 140);
-  --secondary: oklch(0.293 0.019 126);
-  --secondary-foreground: oklch(0.955 0.01 88);
-  --muted: oklch(0.293 0.019 126);
-  --muted-foreground: oklch(0.735 0.02 82);
-  --accent: oklch(0.35 0.037 62);
-  --accent-foreground: oklch(0.93 0.03 76);
-  --destructive: oklch(0.71 0.161 24);
+  --background: oklch(0.205 0.015 255);
+  --foreground: oklch(0.925 0.012 90);
+  --card: oklch(0.248 0.016 255);
+  --card-foreground: oklch(0.925 0.012 90);
+  --popover: oklch(0.26 0.016 255);
+  --popover-foreground: oklch(0.925 0.012 90);
+  --primary: oklch(0.925 0.012 90);
+  --primary-foreground: oklch(0.225 0.02 255);
+  --secondary: oklch(0.3 0.018 255);
+  --secondary-foreground: oklch(0.925 0.012 90);
+  --muted: oklch(0.3 0.018 255);
+  --muted-foreground: oklch(0.725 0.015 90);
+  --accent: oklch(0.82 0.12 90);
+  --accent-foreground: oklch(0.245 0.045 75);
+  --destructive: oklch(0.7 0.15 27);
   --border: oklch(1 0 0 / 12%);
   --input: oklch(1 0 0 / 16%);
-  --ring: oklch(0.63 0.06 145);
-  --chart-1: oklch(0.7 0.08 151);
-  --chart-2: oklch(0.72 0.1 62);
-  --chart-3: oklch(0.65 0.07 241);
-  --chart-4: oklch(0.82 0.07 83);
-  --chart-5: oklch(0.68 0.13 27);
-  --sidebar: oklch(0.225 0.016 130);
-  --sidebar-foreground: oklch(0.955 0.01 88);
-  --sidebar-primary: oklch(0.785 0.061 145);
-  --sidebar-primary-foreground: oklch(0.205 0.022 140);
-  --sidebar-accent: oklch(0.315 0.032 65);
-  --sidebar-accent-foreground: oklch(0.94 0.028 78);
-  --sidebar-border: oklch(1 0 0 / 12%);
-  --sidebar-ring: oklch(0.63 0.06 145);
+  --ring: oklch(0.7 0.09 250);
+  --chart-1: oklch(0.72 0.06 255);
+  --chart-2: oklch(0.72 0.075 215);
+  --chart-3: oklch(0.8 0.12 72);
+  --chart-4: oklch(0.74 0.02 90);
+  --chart-5: oklch(0.68 0.13 30);
+  --sidebar: oklch(0.165 0.014 255);
+  --sidebar-foreground: oklch(0.925 0.012 90);
+  --sidebar-primary: oklch(0.82 0.12 90);
+  --sidebar-primary-foreground: oklch(0.225 0.02 255);
+  --sidebar-accent: oklch(0.82 0.12 90);
+  --sidebar-accent-foreground: oklch(0.245 0.045 75);
+  --sidebar-border: oklch(1 0 0 / 10%);
+  --sidebar-ring: oklch(0.82 0.12 90);
 }
 
 @layer base {
   * {
     @apply border-border outline-ring/50;
   }
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
   html {
     @apply font-sans antialiased;
+    color-scheme: light;
   }
   body {
-    @apply bg-background text-foreground;
+    @apply overflow-hidden bg-background text-foreground;
+    margin: 0;
   }
   ::selection {
     background: color-mix(in oklab, var(--primary) 22%, transparent);
   }
+}
+
+/* FullCalendar renders its own markup, so its palette is inherited from here - */
+
+.planner-calendar,
+.calendar-full {
+  --fc-classic-button: var(--card);
+  --fc-classic-button-border: var(--border);
+  --fc-classic-button-strong: var(--muted);
+  --fc-classic-button-strong-border: var(--border);
+  --fc-classic-button-outline: var(--ring);
+  --fc-classic-button-foreground: var(--foreground);
+  --fc-classic-primary: var(--primary);
+  --fc-classic-primary-foreground: var(--primary-foreground);
+  --fc-classic-today: color-mix(in oklab, var(--accent) 45%, transparent);
+  --fc-classic-now: var(--destructive);
+  --fc-classic-highlight: color-mix(in oklab, var(--accent) 35%, transparent);
+  --fc-classic-background: var(--card);
+  --fc-classic-foreground: var(--foreground);
+  --fc-classic-muted-foreground: var(--muted-foreground);
+  --fc-classic-faint-foreground: var(--muted-foreground);
+  --fc-classic-faint: color-mix(in oklab, var(--foreground) 5%, transparent);
+  --fc-classic-muted: color-mix(in oklab, var(--foreground) 8%, transparent);
+  --fc-classic-strong: color-mix(in oklab, var(--foreground) 14%, transparent);
+  --fc-classic-border: var(--border);
+  --fc-classic-strong-border: var(--input);
+}
+
+.dark .planner-calendar,
+.dark .calendar-full {
+  --fc-classic-today: color-mix(in oklab, var(--accent) 14%, transparent);
+}
+
+/* A dot marks days that already hold tasks or events. */
+.calendar-day-occupied::after {
+  content: "";
+  position: absolute;
+  bottom: 5px;
+  left: 50%;
+  width: 5px;
+  height: 5px;
+  margin-left: -2.5px;
+  border-radius: 999px;
+  background: var(--primary);
+}
+
+.calendar-full {
+  min-width: 0;
+  min-height: 0;
 }

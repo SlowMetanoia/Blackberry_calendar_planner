@@ -27,10 +27,13 @@ import {
 import { Changes } from "./Changes";
 import { Metadata } from "./Metadata";
 
-const operationTone: Record<CalendarOperation["operation"], string> = {
-  create: "border-emerald-200/70 bg-emerald-50/70",
-  update: "border-amber-200/80 bg-amber-50/75",
-  delete: "border-rose-200/80 bg-rose-50/70",
+const operationTone: Record<
+  CalendarOperation["operation"],
+  { dot: string; label: string }
+> = {
+  create: { dot: "bg-primary", label: "text-foreground/70" },
+  update: { dot: "bg-chart-2", label: "text-foreground/70" },
+  delete: { dot: "bg-destructive", label: "text-destructive" },
 };
 
 export function HistoryItem({
@@ -42,36 +45,42 @@ export function HistoryItem({
 }) {
   const data = item.after || item.before || {},
     title = stringField(data, "title") || item.target_id,
-    scheduled = operationSchedule(item.resource, data);
+    scheduled = operationSchedule(item.resource, data),
+    tone = operationTone[item.operation];
 
   return (
     <TooltipProvider delayDuration={80}>
       <Tooltip>
         <TooltipTrigger asChild>
           <article
-            className={`history-item ${item.operation} group relative flex min-h-11 min-w-0 items-center gap-2 rounded-md border py-1.5 pr-1.5 pl-2 outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring ${operationTone[item.operation]}`}
+            className={`history-item ${item.operation} group relative grid min-h-11 grid-cols-[2.5rem_auto_minmax(0,1fr)_auto] items-start gap-x-2.5 rounded-md px-1.5 py-2.5 outline-none transition-colors hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring`}
             tabIndex={0}
             aria-label={`${operationWords[item.operation]}: ${title}${scheduled ? `. ${scheduled}` : ""}`}
           >
             <time
               dateTime={item.created_at}
-              className="w-9 shrink-0 text-[10px] tabular-nums text-muted-foreground"
+              className="pt-px text-[11px] leading-4 tabular-nums text-muted-foreground"
             >
               {formatHistoryTime(item.created_at)}
             </time>
-            <span className="grid min-w-0 flex-1 gap-0.5">
-              <span className="truncate text-xs font-semibold">{title}</span>
-              {scheduled && (
-                <small className="truncate text-[9px] text-muted-foreground">
-                  {scheduled}
-                </small>
-              )}
+            <span
+              aria-hidden="true"
+              className={`mt-[7px] size-1.5 rounded-full ${tone.dot}`}
+            />
+            <span className="grid min-w-0 gap-0.5">
+              <strong className="truncate text-xs font-semibold">{title}</strong>
+              <small className="truncate text-[11px] text-muted-foreground">
+                <span className={tone.label}>
+                  {operationWords[item.operation]}
+                </span>
+                {scheduled ? `, ${scheduled}` : ""}
+              </small>
             </span>
             <Button
               type="button"
-              variant="outline"
+              variant="ghost"
               size="icon-xs"
-              className="shrink-0 bg-card/80"
+              className="shrink-0 text-muted-foreground hover:text-foreground"
               aria-label={`Отменить ${undoWords[item.operation]}`}
               onClick={(event) => {
                 event.stopPropagation();
@@ -89,7 +98,7 @@ export function HistoryItem({
           showArrow={false}
           className="block max-w-none bg-transparent p-0 text-foreground shadow-none"
         >
-          <Card size="sm" className="w-80 shadow-xl ring-border">
+          <Card size="sm" className="w-80 shadow-lg ring-border">
             <CardHeader className="gap-1.5">
               <Badge
                 variant={item.operation === "delete" ? "destructive" : "secondary"}

@@ -1,6 +1,5 @@
 import { CalendarPlusIcon, ListPlusIcon } from "lucide-react";
 import type { CalendarEntry, Resource } from "../types";
-import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 import {
   Dialog,
@@ -39,9 +38,6 @@ export function DayDialog({
         className="max-h-[calc(100dvh-2rem)] gap-4 overflow-hidden sm:max-w-xl"
       >
         <DialogHeader className="pr-8">
-          <Badge variant="secondary" className="w-fit">
-            День
-          </Badge>
           <DialogTitle className="text-xl capitalize">
             Дела на {label}
           </DialogTitle>
@@ -49,11 +45,11 @@ export function DayDialog({
         <div className="grid gap-2 sm:grid-cols-2">
           <Button variant="outline" onClick={() => onCreate("event")}>
             <CalendarPlusIcon aria-hidden="true" />
-            + Событие
+            Событие
           </Button>
           <Button variant="outline" onClick={() => onCreate("task")}>
             <ListPlusIcon aria-hidden="true" />
-            + Задача
+            Задача
           </Button>
         </div>
         <ScrollArea className="max-h-[55vh]">
@@ -61,7 +57,11 @@ export function DayDialog({
             {entries.map((entry) => (
               <Button
                 variant="outline"
-                className="h-auto w-full justify-start border-l-4 border-l-primary/70 px-3 py-2.5 text-left whitespace-normal"
+                className={`h-auto w-full justify-start border-l-[3px] px-3 py-2.5 text-left whitespace-normal ${
+                  entry.resource === "event"
+                    ? "border-l-chart-2/80"
+                    : "border-l-primary/60"
+                }`}
                 key={`${entry.resource}:${entry.occurrenceKey || entry.id}`}
                 onClick={() => onOpen(entry)}
               >
@@ -69,8 +69,8 @@ export function DayDialog({
               </Button>
             ))}
             {!entries.length && (
-              <p className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
-                На эту дату ничего нет. Добавьте событие или задачу.
+              <p className="py-6 text-center text-sm text-muted-foreground">
+                На этот день пока ничего не запланировано.
               </p>
             )}
           </div>

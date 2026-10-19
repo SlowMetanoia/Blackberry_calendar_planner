@@ -1,8 +1,9 @@
-import { CalendarClockIcon, ListTodoIcon } from "lucide-react";
-import { localDateKey } from "../libs/format";
+import {
+  formatDuration,
+  formatHistoryTime,
+  localDateKey,
+} from "../libs/format";
 import type { CalendarEntry } from "../types";
-import { Button } from "./ui/button";
-import { Card, CardContent } from "./ui/card";
 import {
   Tooltip,
   TooltipContent,
@@ -11,23 +12,69 @@ import {
 } from "./ui/tooltip";
 import { EntryDetails } from "./EntryDetails";
 
-function entryLabel(entry: CalendarEntry): string {
+function dayMonth(value: Date): string {
   return new Intl.DateTimeFormat("ru-RU", {
     day: "numeric",
-    month: "short",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(new Date(entry.startsAt));
+    month: "long",
+  }).format(value);
+}
+
+function dayHeading(date: string): { lead: string; rest: string } {
+  const value = new Date(`${date}T12:00:00`),
+    today = localDateKey(new Date()),
+    tomorrow = localDateKey(new Date(Date.now() + 86_400_000));
+  if (date === today) return { lead: "Сегодня", rest: dayMonth(value) };
+  if (date === tomorrow) return { lead: "Завтра", rest: dayMonth(value) };
+  const weekday = new Intl.DateTimeFormat("ru-RU", { weekday: "short" })
+    .format(value)
+    .replace(".", "");
+  return {
+    lead: weekday.charAt(0).toUpperCase() + weekday.slice(1),
+    rest: dayMonth(value),
+  };
+}
+
+function entryInfo(entry: CalendarEntry): string {
+  const duration = entry.durationMinutes
+      ? formatDuration(entry.durationMinutes)
+      : null,
+    detail =
+      entry.resource === "event"
+        ? [entry.event?.location, duration]
+        : [duration];
+  return [entry.resource === "event" ? "событие" : "задача", ...detail]
+    .filter(Boolean)
+    .join(", ");
+}
+
+export function ScheduleList({
+  entries,
+  onOpen,
+}: {
+  entries: CalendarEntry[];
+  onOpen: (entry: CalendarEntry) => void;
+}) {
+  return (
+    <ul className="grid divide-y divide-border/60">
+      {entries.map((entry) => (
+        <li key={`${entry.resource}:${entry.occurrenceKey || entry.id}`}>
+          <ScheduleItem entry={entry} onOpen={onOpen} />
+        </li>
+      ))}
+    </ul>
+  );
 }
 
 export function ScheduleSection({
   title,
   entries,
   onOpen,
+  overdue = false,
 }: {
   title: string;
   entries: CalendarEntry[];
   onOpen: (entry: CalendarEntry) => void;
+  overdue?: boolean;
 }) {
   if (!entries.length) return null;
   const groups = new Map<string, CalendarEntry[]>();
@@ -36,28 +83,31 @@ export function ScheduleSection({
     groups.set(key, [...(groups.get(key) || []), entry]);
   });
   return (
-    <section className="grid gap-2">
-      <h3 className="text-[11px] font-semibold tracking-[0.08em] text-muted-foreground uppercase">
-        {title}
+    <section className="grid gap-1.5">
+      <h3 className="flex items-baseline gap-1.5 px-2 text-xs font-semibold">
+        <span className={overdue ? "text-destructive" : "text-foreground"}>
+          {title}
+        </span>
+        <span className="text-[11px] font-normal text-muted-foreground">
+          {entries.length}
+        </span>
       </h3>
-      {[...groups.entries()].map(([date, items]) => (
-        <div className="grid gap-1.5" key={date}>
-          <h4 className="px-1 text-[10px] font-medium text-muted-foreground capitalize">
-            {new Intl.DateTimeFormat("ru-RU", {
-              weekday: "short",
-              day: "numeric",
-              month: "short",
-            }).format(new Date(`${date}T12:00:00`))}
-          </h4>
-          {items.map((entry) => (
-            <ScheduleItem
-              entry={entry}
-              key={`${entry.resource}:${entry.occurrenceKey || entry.id}`}
-              onOpen={onOpen}
-            />
-          ))}
-        </div>
-      ))}
+      <div className="grid gap-2.5">
+        {[...groups.entries()].map(([date, items]) => {
+          const heading = dayHeading(date);
+          return (
+            <div className="grid" key={date}>
+              <h4 className="flex items-baseline gap-1.5 px-2 pb-1 text-[11px] leading-none">
+                <span className="font-semibold text-foreground">
+                  {heading.lead}
+                </span>
+                <span className="text-muted-foreground">{heading.rest}</span>
+              </h4>
+              <ScheduleList entries={items} onOpen={onOpen} />
+            </div>
+          );
+        })}
+      </div>
     </section>
   );
 }
@@ -73,30 +123,29 @@ export function ScheduleItem({
     <TooltipProvider delayDuration={80}>
       <Tooltip>
         <TooltipTrigger asChild>
-          <Button
+          <button
             type="button"
-            variant="outline"
-            className="h-auto w-full justify-start gap-2.5 border-l-4 border-l-primary/65 bg-card px-2.5 py-2 text-left whitespace-normal shadow-none"
+            className="group flex w-full items-start gap-2.5 rounded-md px-2 py-2 text-left transition-colors outline-none hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring/50"
             onClick={() => onOpen(entry)}
           >
-            <span className="flex size-7 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
-              {entry.resource === "event" ? (
-                <CalendarClockIcon aria-hidden="true" className="size-3.5" />
-              ) : (
-                <ListTodoIcon aria-hidden="true" className="size-3.5" />
-              )}
+            <span className="w-10 shrink-0 pt-px text-[11px] leading-4 font-medium tabular-nums text-muted-foreground">
+              {entry.startsAt ? formatHistoryTime(entry.startsAt) : "—"}
             </span>
+            <span
+              aria-hidden="true"
+              className={`mt-[5px] size-1.5 shrink-0 rounded-full ${
+                entry.resource === "event" ? "bg-chart-2" : "bg-primary"
+              }`}
+            />
             <span className="grid min-w-0 flex-1 gap-0.5">
               <strong className="truncate text-xs font-semibold">
                 {entry.title}
               </strong>
-              <small className="truncate text-[10px] font-normal text-muted-foreground">
-                {entry.startsAt
-                  ? `${entryLabel(entry)} · ${entry.resource === "task" ? "задача" : "событие"}`
-                  : "Задача без срока"}
+              <small className="truncate text-[11px] font-normal text-muted-foreground">
+                {entryInfo(entry)}
               </small>
             </span>
-          </Button>
+          </button>
         </TooltipTrigger>
         <TooltipContent
           side="left"
@@ -105,11 +154,9 @@ export function ScheduleItem({
           showArrow={false}
           className="block max-w-none bg-transparent p-0 text-foreground shadow-none"
         >
-          <Card size="sm" className="w-80 p-3 shadow-xl ring-border">
-            <CardContent className="px-0">
-              <EntryDetails entry={entry} />
-            </CardContent>
-          </Card>
+          <div className="w-80 rounded-xl bg-popover p-3 shadow-lg ring-1 ring-border">
+            <EntryDetails entry={entry} />
+          </div>
         </TooltipContent>
       </Tooltip>
     </TooltipProvider>

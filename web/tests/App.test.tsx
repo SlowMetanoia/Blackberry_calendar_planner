@@ -142,6 +142,46 @@ describe("planner chat", () => {
     await userEvent.click(screen.getByRole("button", { name: "Войти" }));
     expect(await screen.findByText("Что запланируем?")).toBeInTheDocument();
   });
+  it("switches chat, calendar and history from the sidebar", async () => {
+    localStorage.setItem("planner-token", "token");
+    vi.mocked(api.syncTimeZone).mockResolvedValue({ timezone: "UTC" });
+    vi.mocked(api.getCalendarHistory).mockResolvedValue({
+      items: [operation],
+      total: 1,
+      limit: 100,
+      offset: 0,
+    });
+    render(<App />);
+    const sidebar = await screen.findByRole("navigation", { name: "Разделы" });
+    const chat = within(sidebar).getByRole("button", { name: "Чат" });
+    const calendar = within(sidebar).getByRole("button", { name: "Календарь" });
+    const history = within(sidebar).getByRole("button", {
+      name: "История изменений",
+    });
+    expect(chat).toHaveAttribute("aria-current", "page");
+    expect(
+      screen.getByRole("heading", { name: "Что запланируем?" }),
+    ).toBeInTheDocument();
+
+    await userEvent.click(calendar);
+    expect(calendar).toHaveAttribute("aria-current", "page");
+    expect(chat).not.toHaveAttribute("aria-current");
+    expect(
+      screen.getByRole("heading", { name: "Календарь" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Развернуть календарь" }),
+    ).toBeInTheDocument();
+
+    await userEvent.click(history);
+    expect(history).toHaveAttribute("aria-current", "page");
+    expect(
+      screen.getByRole("heading", { name: "История изменений" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Отменить создание" }),
+    ).toBeInTheDocument();
+  });
   it("shows calendar history in sidebar and sessions in a modal", async () => {
     localStorage.setItem("planner-token", "token");
     vi.mocked(api.syncTimeZone).mockResolvedValue({ timezone: "UTC" });
@@ -165,7 +205,9 @@ describe("planner chat", () => {
       offset: 0,
     });
     render(<App />);
-    expect(await screen.findByText("История изменений")).toBeInTheDocument();
+    expect(
+      await screen.findByRole("button", { name: "История изменений" }),
+    ).toBeInTheDocument();
     expect(screen.getByText("Релиз")).toBeInTheDocument();
     expect(
       screen.getByText(/запланировано на 15 октября 2026/),
@@ -419,13 +461,13 @@ describe("planner chat", () => {
     );
     const dayCell = await waitFor(() => {
       const cell = container.querySelector<HTMLElement>(
-        `.mini-calendar [data-date="${dateKey}"]`,
+        `.planner-calendar [data-date="${dateKey}"]`,
       );
       expect(cell).toHaveClass("calendar-day-occupied");
       return cell!;
     });
     expect(
-      container.querySelector(".mini-calendar .fc-event"),
+      container.querySelector(".planner-calendar .fc-event"),
     ).not.toBeInTheDocument();
     fireEvent.mouseEnter(dayCell);
     expect(await screen.findByRole("tooltip")).toHaveTextContent(
@@ -438,7 +480,7 @@ describe("planner chat", () => {
       within(dayDialog).getByText("Сверить цифры", { exact: false }),
     ).toBeInTheDocument();
     expect(
-      within(dayDialog).getByRole("button", { name: "+ Событие" }),
+      within(dayDialog).getByRole("button", { name: "Событие" }),
     ).toBeInTheDocument();
     await userEvent.click(
       within(dayDialog).getByRole("button", { name: /Подготовить отчёт/ }),

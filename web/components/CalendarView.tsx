@@ -1,10 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import {
-  CalendarDaysIcon,
   ChevronsUpDownIcon,
   Maximize2Icon,
-  XIcon,
 } from "lucide-react";
 import FullCalendar, { type DatesSetInfo } from "@fullcalendar/react";
 import dayGridPlugin from "@fullcalendar/react/daygrid";
@@ -37,7 +35,6 @@ import type {
   Resource,
   Task,
 } from "../types";
-import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 import {
   Dialog,
@@ -52,7 +49,7 @@ import { Skeleton } from "./ui/skeleton";
 import { CalendarItemDialog } from "./CalendarItemDialog";
 import { DayDialog } from "./DayDialog";
 import { DayHoverPreview } from "./DayHoverPreview";
-import { ScheduleItem, ScheduleSection } from "./ScheduleSection";
+import { ScheduleList, ScheduleSection } from "./ScheduleSection";
 
 const horizonOptions = [1, 3, 7, 14, 30];
 
@@ -84,15 +81,11 @@ function legacyOccurrences(
   ];
 }
 
-export function PlannerSidebar({
-  open,
-  onClose,
+export function CalendarView({
   revision,
   onHistoryChanged,
   onError,
 }: {
-  open: boolean;
-  onClose: () => void;
   revision: number;
   onHistoryChanged: () => Promise<void> | void;
   onError: (message: string) => void;
@@ -268,6 +261,20 @@ export function PlannerSidebar({
       ),
     [overviewOccurrences, undatedTasks, upcomingDays],
   );
+  const undatedEntries = useMemo<CalendarEntry[]>(
+    () =>
+      overview.undated.map((task) => ({
+        id: task.id,
+        resource: "task",
+        title: task.title,
+        startsAt: "",
+        durationMinutes: task.estimated_minutes,
+        task,
+      })),
+    [overview.undated],
+  );
+  const overviewTotal =
+    overview.overdue.length + overview.upcoming.length + undatedEntries.length;
 
   const datesSet = useCallback((info: DatesSetInfo) => {
     const range = {
@@ -345,133 +352,117 @@ export function PlannerSidebar({
 
   return (
     <>
-      <aside
-        className={`planner-sidebar ${open ? "open" : ""} gap-2.5 px-3.5 py-5`}
-        aria-label="Календарь и ближайшие дела"
-      >
-        <div className="flex items-start justify-between gap-2 px-1">
-          <div>
-            <Badge variant="secondary" className="w-fit">
-              Планы
-            </Badge>
-            <p className="mt-1.5 font-heading text-lg leading-none font-semibold">
-              Календарь
-            </p>
-          </div>
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            className="sidebar-close"
-            aria-label="Закрыть календарь"
-            onClick={onClose}
-          >
-            <XIcon aria-hidden="true" />
-          </Button>
-        </div>
-
-        <div className="mini-calendar mt-1 rounded-lg bg-card p-1.5 ring-1 ring-border/70">
-          {calendar(false)}
-        </div>
-        <Button variant="outline" className="w-full" onClick={() => setFullOpen(true)}>
-          <Maximize2Icon aria-hidden="true" />
-          Развернуть календарь
-        </Button>
-
-        <div className="mt-1 flex items-center justify-between gap-2 px-1">
-          <div className="flex items-center gap-1.5">
-            <CalendarDaysIcon aria-hidden="true" className="size-3.5 text-muted-foreground" />
-            <p className="text-sm font-semibold">Ближайшие дела</p>
-          </div>
-          <Label htmlFor="upcoming-horizon" className="sr-only">
-            Период ближайших дел
-          </Label>
-          <NativeSelect
-            id="upcoming-horizon"
-            aria-label="Период ближайших дел"
-            className="h-7 w-[84px] text-xs"
-            value={upcomingDays}
-            onChange={(event) => void changeHorizon(Number(event.target.value))}
-          >
-            {horizonOptions.map((value) => (
-              <option value={value} key={value}>
-                {value} дн.
-              </option>
-            ))}
-          </NativeSelect>
-        </div>
-
-        <ScrollArea
-          className="min-h-0 flex-1"
-          viewportClassName="upcoming-list px-0.5 pt-1 pb-4"
-        >
-          {loading && (
-            <div className="grid gap-2 p-1">
-              <Skeleton className="h-11 w-full" />
-              <Skeleton className="h-11 w-full" />
-              <Skeleton className="h-11 w-4/5" />
-              <span className="sr-only">Загружаю…</span>
+      <ScrollArea className="min-h-0 flex-1" viewportClassName="px-4 py-5 sm:px-7">
+        <div className="mx-auto grid w-full max-w-6xl items-start gap-4 lg:grid-cols-[minmax(0,1.6fr)_minmax(320px,1fr)]">
+          <section className="grid gap-2" aria-label="Календарь месяца">
+            <div className="planner-calendar rounded-xl bg-card p-3 ring-1 ring-border/70">
+              {calendar(false)}
             </div>
-          )}
-          <div className="grid gap-4">
-            <ScheduleSection
-              title="Просрочено"
-              entries={overview.overdue}
-              onOpen={(entry) => setEditor({ resource: entry.resource, entry })}
-            />
-            <ScheduleSection
-              title="В ближайшие дни"
-              entries={overview.upcoming}
-              onOpen={(entry) => setEditor({ resource: entry.resource, entry })}
-            />
-            {overview.undated.length > 0 && (
-              <section className="grid gap-2">
-                <h3 className="text-[11px] font-semibold tracking-[0.08em] text-muted-foreground uppercase">
-                  Без срока
-                </h3>
-                <div className="grid gap-1.5">
-                  {overview.undated.map((task) => {
-                    const entry: CalendarEntry = {
-                      id: task.id,
-                      resource: "task",
-                      title: task.title,
-                      startsAt: "",
-                      durationMinutes: task.estimated_minutes,
-                      task,
-                    };
-                    return (
-                      <ScheduleItem
-                        entry={entry}
-                        key={task.id}
-                        onOpen={(item) =>
-                          setEditor({ resource: item.resource, entry: item })
-                        }
-                      />
-                    );
-                  })}
+            <Button
+              variant="ghost"
+              size="sm"
+              className="w-fit justify-self-end text-muted-foreground hover:text-foreground"
+              onClick={() => setFullOpen(true)}
+            >
+              <Maximize2Icon aria-hidden="true" />
+              Развернуть календарь
+            </Button>
+          </section>
+
+          <aside
+            className="grid content-start overflow-hidden rounded-xl bg-card ring-1 ring-border/70"
+            aria-label="Ближайшие дела"
+          >
+            <header className="flex items-center justify-between gap-3 border-b border-border/70 px-4 py-3">
+              <div className="flex min-w-0 items-baseline gap-2">
+                <h2 className="truncate text-sm font-semibold">
+                  Ближайшие дела
+                </h2>
+                {overviewTotal > 0 && !loading && (
+                  <span className="text-[11px] text-muted-foreground">
+                    {overviewTotal}
+                  </span>
+                )}
+              </div>
+              <Label htmlFor="upcoming-horizon" className="sr-only">
+                Период ближайших дел
+              </Label>
+              <span className="w-[84px] shrink-0">
+                <NativeSelect
+                  id="upcoming-horizon"
+                  aria-label="Период ближайших дел"
+                  className="h-7 text-xs"
+                  value={upcomingDays}
+                  onChange={(event) =>
+                    void changeHorizon(Number(event.target.value))
+                  }
+                >
+                  {horizonOptions.map((value) => (
+                    <option value={value} key={value}>
+                      {value} дн.
+                    </option>
+                  ))}
+                </NativeSelect>
+              </span>
+            </header>
+
+            <div className="grid content-start gap-5 px-4 py-4">
+              {loading && (
+                <div className="grid gap-2">
+                  <Skeleton className="h-4 w-24" />
+                  <Skeleton className="h-9 w-full" />
+                  <Skeleton className="h-9 w-full" />
+                  <Skeleton className="h-9 w-4/5" />
+                  <span className="sr-only">Загружаю…</span>
                 </div>
-              </section>
-            )}
-            {overviewCursor && (
-              <Button
-                variant="outline"
-                className="w-full"
-                onClick={() => void loadMoreOverview()}
-              >
-                <ChevronsUpDownIcon aria-hidden="true" />
-                Показать ещё
-              </Button>
-            )}
-            {!loading &&
-              !overview.overdue.length &&
-              !overview.upcoming.length &&
-              !overview.undated.length && (
-                <p className="rounded-lg border border-dashed p-3 text-xs text-muted-foreground">
-                  На выбранный период ничего не запланировано.
+              )}
+              {!loading && !overviewTotal && (
+                <p className="px-2 py-6 text-sm text-muted-foreground">
+                  На этот период ничего не запланировано.
                 </p>
               )}
-          </div>
-        </ScrollArea>
-      </aside>
+              <ScheduleSection
+                title="Просрочено"
+                overdue
+                entries={overview.overdue}
+                onOpen={(entry) => setEditor({ resource: entry.resource, entry })}
+              />
+              <ScheduleSection
+                title="В ближайшие дни"
+                entries={overview.upcoming}
+                onOpen={(entry) => setEditor({ resource: entry.resource, entry })}
+              />
+              {undatedEntries.length > 0 && (
+                <section className="grid gap-1.5">
+                  <h3 className="flex items-baseline gap-1.5 px-2 text-xs font-semibold">
+                    <span>Без срока</span>
+                    <span className="text-[11px] font-normal text-muted-foreground">
+                      {undatedEntries.length}
+                    </span>
+                  </h3>
+                  <ScheduleList
+                    entries={undatedEntries}
+                    onOpen={(entry) =>
+                      setEditor({ resource: entry.resource, entry })
+                    }
+                  />
+                </section>
+              )}
+              {overviewCursor && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="w-fit justify-self-start"
+                  onClick={() => void loadMoreOverview()}
+                >
+                  <ChevronsUpDownIcon aria-hidden="true" />
+                  Показать ещё
+                </Button>
+              )}
+            </div>
+          </aside>
+        </div>
+      </ScrollArea>
 
       {dayHover &&
         createPortal(
@@ -489,10 +480,7 @@ export function PlannerSidebar({
           closeLabel="Закрыть подробный календарь"
           className="h-[min(900px,calc(100dvh-2rem))] w-[min(1500px,calc(100vw-2rem))] grid-rows-[auto_minmax(0,1fr)] gap-3 p-4 sm:max-w-[min(1500px,calc(100vw-2rem))]"
         >
-          <DialogHeader className="gap-1 pr-8">
-            <Badge variant="secondary" className="w-fit">
-              Планы
-            </Badge>
+          <DialogHeader className="pr-8">
             <DialogTitle className="text-xl">Подробный календарь</DialogTitle>
           </DialogHeader>
           <div className="calendar-full min-h-0">{calendar(true)}</div>

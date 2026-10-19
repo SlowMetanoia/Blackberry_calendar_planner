@@ -1,12 +1,10 @@
 import {
   LoaderCircleIcon,
   MessageSquarePlusIcon,
-  SparklesIcon,
 } from "lucide-react";
 import { formatMessageTimestamp } from "../libs/format";
 import type { AgentMessage } from "../types";
 import { Alert, AlertDescription } from "./ui/alert";
-import { Avatar, AvatarFallback } from "./ui/avatar";
 import { Button } from "./ui/button";
 import { Card, CardContent } from "./ui/card";
 import { OperationReceipt } from "./OperationReceipt";
@@ -70,14 +68,9 @@ export function MessageExchange({
       {showBot && (
         <Card
           size="sm"
-          className="bubble bot relative flex max-w-[82%] flex-row items-start gap-3 rounded-bl-sm bg-muted/65 px-4 pt-3.5 pb-7 ring-border/60"
+          className="bubble bot relative max-w-[82%] gap-0 rounded-bl-sm bg-muted/60 px-4 pt-3.5 pb-7 ring-border/60"
         >
-          <Avatar size="sm" className="mt-0.5">
-            <AvatarFallback className="bg-accent text-accent-foreground">
-              <SparklesIcon aria-hidden="true" className="size-3.5" />
-            </AvatarFallback>
-          </Avatar>
-          <CardContent className="grid min-w-0 flex-1 gap-1 px-0">
+          <CardContent className="grid min-w-0 gap-1 px-0">
             {message.reply ? (
               <p className="text-sm leading-relaxed">{message.reply}</p>
             ) : message.input_text && pending.has(message.status) ? (

@@ -19,7 +19,6 @@ import type {
   Resource,
   Weekday,
 } from "../types";
-import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 import { Checkbox } from "./ui/checkbox";
 import {
@@ -243,10 +242,7 @@ export function CalendarItemDialog({
         className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-lg"
       >
         <form className="grid gap-4" onSubmit={submit}>
-          <DialogHeader className="gap-1.5 pr-8">
-            <Badge variant="secondary" className="w-fit">
-              {existing ? "Запись календаря" : "Планирование"}
-            </Badge>
+          <DialogHeader className="pr-8">
             <DialogTitle className="text-xl">
               {existing ? "Редактирование записи" : "Новая запись"}
             </DialogTitle>
