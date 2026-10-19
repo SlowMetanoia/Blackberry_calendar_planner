@@ -15,7 +15,11 @@ function validDate(value: string | Date): Date | null {
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
-function parts(value: Date, timeZone: string, month: "2-digit" | "long" = "2-digit"): ZonedParts {
+function parts(
+  value: Date,
+  timeZone: string,
+  month: "2-digit" | "long" = "2-digit",
+): ZonedParts {
   const values = Object.fromEntries(
     new Intl.DateTimeFormat("ru-RU", {
       timeZone,
@@ -25,7 +29,9 @@ function parts(value: Date, timeZone: string, month: "2-digit" | "long" = "2-dig
       hour: "2-digit",
       minute: "2-digit",
       hourCycle: "h23",
-    }).formatToParts(value).map(part => [part.type, part.value]),
+    })
+      .formatToParts(value)
+      .map((part) => [part.type, part.value]),
   );
   return values as ZonedParts;
 }
@@ -50,35 +56,57 @@ export function formatMessageTimestamp(
     : `${valueParts.day}.${valueParts.month}.${valueParts.year}, ${time}`;
 }
 
-export function formatSessionTimestamp(value:string,timeZone:string=browserTimeZone()):string {
-  const date=validDate(value);
-  if(!date) return "";
-  const valueParts=parts(date,timeZone);
+export function formatSessionTimestamp(
+  value: string,
+  timeZone: string = browserTimeZone(),
+): string {
+  const date = validDate(value);
+  if (!date) return "";
+  const valueParts = parts(date, timeZone);
   return `${valueParts.day}.${valueParts.month}.${valueParts.year}, ${valueParts.hour}:${valueParts.minute}`;
 }
 
-export function historyDateKey(value: string, timeZone: string = browserTimeZone()): string {
+export function historyDateKey(
+  value: string | Date,
+  timeZone: string = browserTimeZone(),
+): string {
   const date = validDate(value);
   if (!date) return "";
   const valueParts = parts(date, timeZone);
   return `${valueParts.year}-${valueParts.month}-${valueParts.day}`;
 }
 
-export function formatHistoryDate(value: string, timeZone: string = browserTimeZone()): string {
+export function localDateKey(
+  value: string | Date,
+  timeZone: string = browserTimeZone(),
+): string {
+  return historyDateKey(value, timeZone);
+}
+
+export function formatHistoryDate(
+  value: string,
+  timeZone: string = browserTimeZone(),
+): string {
   const date = validDate(value);
   if (!date) return "";
   const valueParts = parts(date, timeZone, "long");
   return `${Number(valueParts.day)} ${valueParts.month} ${valueParts.year}`;
 }
 
-export function formatHistoryTime(value: string, timeZone: string = browserTimeZone()): string {
+export function formatHistoryTime(
+  value: string,
+  timeZone: string = browserTimeZone(),
+): string {
   const date = validDate(value);
   if (!date) return "";
   const valueParts = parts(date, timeZone);
   return `${valueParts.hour}:${valueParts.minute}`;
 }
 
-export function formatDateTime(value: string, timeZone: string = browserTimeZone()): string {
+export function formatDateTime(
+  value: string,
+  timeZone: string = browserTimeZone(),
+): string {
   const date = validDate(value);
   if (!date) return "";
   const valueParts = parts(date, timeZone, "long");
@@ -98,7 +126,9 @@ export function formatSchedule(
   const startParts = parts(start, timeZone);
   const endParts = parts(end, timeZone);
   const endTime = `${endParts.hour}:${endParts.minute}`;
+
   if (sameLocalDay(start, end, timeZone)) return `${formattedStart}–${endTime}`;
+
   return `${formattedStart}–${formatDateTime(end.toISOString(), timeZone)}`;
 }
 
@@ -113,11 +143,15 @@ function plural(value: number, one: string, few: string, many: string): string {
 
 export function formatDuration(value: number): string {
   if (!Number.isFinite(value) || value < 1) return "";
+
   const total = Math.round(value);
   const hours = Math.floor(total / 60);
   const minutes = total % 60;
   const result: string[] = [];
+
   if (hours) result.push(`${hours} ${plural(hours, "час", "часа", "часов")}`);
-  if (minutes) result.push(`${minutes} ${plural(minutes, "минута", "минуты", "минут")}`);
+  if (minutes)
+    result.push(`${minutes} ${plural(minutes, "минута", "минуты", "минут")}`);
+
   return result.join(" ");
 }
