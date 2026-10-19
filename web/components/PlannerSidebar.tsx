@@ -1,5 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
+import {
+  CalendarDaysIcon,
+  ChevronsUpDownIcon,
+  Maximize2Icon,
+  XIcon,
+} from "lucide-react";
 import FullCalendar, { type DatesSetInfo } from "@fullcalendar/react";
 import dayGridPlugin from "@fullcalendar/react/daygrid";
 import interactionPlugin from "@fullcalendar/react/interaction";
@@ -31,6 +37,18 @@ import type {
   Resource,
   Task,
 } from "../types";
+import { Badge } from "./ui/badge";
+import { Button } from "./ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "./ui/dialog";
+import { Label } from "./ui/label";
+import { NativeSelect } from "./ui/native-select";
+import { ScrollArea } from "./ui/scroll-area";
+import { Skeleton } from "./ui/skeleton";
 import { CalendarItemDialog } from "./CalendarItemDialog";
 import { DayDialog } from "./DayDialog";
 import { DayHoverPreview } from "./DayHoverPreview";
@@ -328,99 +346,133 @@ export function PlannerSidebar({
   return (
     <>
       <aside
-        className={`planner-sidebar ${open ? "open" : ""}`}
+        className={`planner-sidebar ${open ? "open" : ""} gap-2.5 px-3.5 py-5`}
         aria-label="Календарь и ближайшие дела"
       >
-        <div className="sidebar-head">
+        <div className="flex items-start justify-between gap-2 px-1">
           <div>
-            <div className="eyebrow">Планы</div>
-            <b>Календарь</b>
+            <Badge variant="secondary" className="w-fit">
+              Планы
+            </Badge>
+            <p className="mt-1.5 font-heading text-lg leading-none font-semibold">
+              Календарь
+            </p>
           </div>
-          <button
+          <Button
+            variant="ghost"
+            size="icon-sm"
             className="sidebar-close"
             aria-label="Закрыть календарь"
             onClick={onClose}
           >
-            ×
-          </button>
+            <XIcon aria-hidden="true" />
+          </Button>
         </div>
-        <div className="mini-calendar">{calendar(false)}</div>
-        <button className="calendar-expand" onClick={() => setFullOpen(true)}>
+
+        <div className="mini-calendar mt-1 rounded-lg bg-card p-1.5 ring-1 ring-border/70">
+          {calendar(false)}
+        </div>
+        <Button variant="outline" className="w-full" onClick={() => setFullOpen(true)}>
+          <Maximize2Icon aria-hidden="true" />
           Развернуть календарь
-        </button>
-        <div className="upcoming-head">
-          <b>Ближайшие дела</b>
-          <label>
-            <span className="sr-only">Период ближайших дел</span>
-            <select
-              aria-label="Период ближайших дел"
-              value={upcomingDays}
-              onChange={(event) =>
-                void changeHorizon(Number(event.target.value))
-              }
-            >
-              {horizonOptions.map((value) => (
-                <option value={value} key={value}>
-                  {value} дн.
-                </option>
-              ))}
-            </select>
-          </label>
+        </Button>
+
+        <div className="mt-1 flex items-center justify-between gap-2 px-1">
+          <div className="flex items-center gap-1.5">
+            <CalendarDaysIcon aria-hidden="true" className="size-3.5 text-muted-foreground" />
+            <p className="text-sm font-semibold">Ближайшие дела</p>
+          </div>
+          <Label htmlFor="upcoming-horizon" className="sr-only">
+            Период ближайших дел
+          </Label>
+          <NativeSelect
+            id="upcoming-horizon"
+            aria-label="Период ближайших дел"
+            className="h-7 w-[84px] text-xs"
+            value={upcomingDays}
+            onChange={(event) => void changeHorizon(Number(event.target.value))}
+          >
+            {horizonOptions.map((value) => (
+              <option value={value} key={value}>
+                {value} дн.
+              </option>
+            ))}
+          </NativeSelect>
         </div>
-        <div className="upcoming-list">
-          {loading && <p className="sidebar-state">Загружаю…</p>}
-          <ScheduleSection
-            title="Просрочено"
-            entries={overview.overdue}
-            onOpen={(entry) => setEditor({ resource: entry.resource, entry })}
-          />
-          <ScheduleSection
-            title="В ближайшие дни"
-            entries={overview.upcoming}
-            onOpen={(entry) => setEditor({ resource: entry.resource, entry })}
-          />
-          {overview.undated.length > 0 && (
-            <section className="schedule-section">
-              <h3>Без срока</h3>
-              {overview.undated.map((task) => {
-                const entry: CalendarEntry = {
-                  id: task.id,
-                  resource: "task",
-                  title: task.title,
-                  startsAt: "",
-                  durationMinutes: task.estimated_minutes,
-                  task,
-                };
-                return (
-                  <ScheduleItem
-                    entry={entry}
-                    key={task.id}
-                    onOpen={(item) =>
-                      setEditor({ resource: item.resource, entry: item })
-                    }
-                  />
-                );
-              })}
-            </section>
+
+        <ScrollArea
+          className="min-h-0 flex-1"
+          viewportClassName="upcoming-list px-0.5 pt-1 pb-4"
+        >
+          {loading && (
+            <div className="grid gap-2 p-1">
+              <Skeleton className="h-11 w-full" />
+              <Skeleton className="h-11 w-full" />
+              <Skeleton className="h-11 w-4/5" />
+              <span className="sr-only">Загружаю…</span>
+            </div>
           )}
-          {overviewCursor && (
-            <button
-              className="calendar-expand"
-              onClick={() => void loadMoreOverview()}
-            >
-              Показать ещё
-            </button>
-          )}
-          {!loading &&
-            !overview.overdue.length &&
-            !overview.upcoming.length &&
-            !overview.undated.length && (
-              <p className="sidebar-state">
-                На выбранный период ничего не запланировано.
-              </p>
+          <div className="grid gap-4">
+            <ScheduleSection
+              title="Просрочено"
+              entries={overview.overdue}
+              onOpen={(entry) => setEditor({ resource: entry.resource, entry })}
+            />
+            <ScheduleSection
+              title="В ближайшие дни"
+              entries={overview.upcoming}
+              onOpen={(entry) => setEditor({ resource: entry.resource, entry })}
+            />
+            {overview.undated.length > 0 && (
+              <section className="grid gap-2">
+                <h3 className="text-[11px] font-semibold tracking-[0.08em] text-muted-foreground uppercase">
+                  Без срока
+                </h3>
+                <div className="grid gap-1.5">
+                  {overview.undated.map((task) => {
+                    const entry: CalendarEntry = {
+                      id: task.id,
+                      resource: "task",
+                      title: task.title,
+                      startsAt: "",
+                      durationMinutes: task.estimated_minutes,
+                      task,
+                    };
+                    return (
+                      <ScheduleItem
+                        entry={entry}
+                        key={task.id}
+                        onOpen={(item) =>
+                          setEditor({ resource: item.resource, entry: item })
+                        }
+                      />
+                    );
+                  })}
+                </div>
+              </section>
             )}
-        </div>
+            {overviewCursor && (
+              <Button
+                variant="outline"
+                className="w-full"
+                onClick={() => void loadMoreOverview()}
+              >
+                <ChevronsUpDownIcon aria-hidden="true" />
+                Показать ещё
+              </Button>
+            )}
+            {!loading &&
+              !overview.overdue.length &&
+              !overview.upcoming.length &&
+              !overview.undated.length && (
+                <p className="rounded-lg border border-dashed p-3 text-xs text-muted-foreground">
+                  На выбранный период ничего не запланировано.
+                </p>
+              )}
+          </div>
+        </ScrollArea>
       </aside>
+
       {dayHover &&
         createPortal(
           <DayHoverPreview
@@ -431,42 +483,29 @@ export function PlannerSidebar({
           />,
           document.body,
         )}
-      {fullOpen && (
-        <div
-          className="calendar-modal-scrim"
-          role="presentation"
-          onMouseDown={() => setFullOpen(false)}
+
+      <Dialog open={fullOpen} onOpenChange={setFullOpen}>
+        <DialogContent
+          closeLabel="Закрыть подробный календарь"
+          className="h-[min(900px,calc(100dvh-2rem))] w-[min(1500px,calc(100vw-2rem))] grid-rows-[auto_minmax(0,1fr)] gap-3 p-4 sm:max-w-[min(1500px,calc(100vw-2rem))]"
         >
-          <section
-            className="calendar-modal"
-            role="dialog"
-            aria-modal="true"
-            aria-label="Подробный календарь"
-            onMouseDown={(event) => event.stopPropagation()}
-          >
-            <div className="calendar-modal-head">
-              <div>
-                <div className="eyebrow">Планы</div>
-                <h2>Календарь</h2>
-              </div>
-              <button
-                aria-label="Закрыть подробный календарь"
-                onClick={() => setFullOpen(false)}
-              >
-                ×
-              </button>
-            </div>
-            <div className="calendar-full">{calendar(true)}</div>
-          </section>
-        </div>
-      )}
+          <DialogHeader className="gap-1 pr-8">
+            <Badge variant="secondary" className="w-fit">
+              Планы
+            </Badge>
+            <DialogTitle className="text-xl">Подробный календарь</DialogTitle>
+          </DialogHeader>
+          <div className="calendar-full min-h-0">{calendar(true)}</div>
+        </DialogContent>
+      </Dialog>
+
       {dayOpen && (
         <DayDialog
           date={dayOpen}
           entries={selectedEntries}
           onClose={() => setDayOpen(null)}
           onOpen={(entry) => setEditor({ resource: entry.resource, entry })}
-          onCreate={(resource) => setEditor({ resource, date: dayOpen })}
+          onCreate={(resource: Resource) => setEditor({ resource, date: dayOpen })}
         />
       )}
       {editor && (

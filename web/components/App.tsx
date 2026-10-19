@@ -7,6 +7,18 @@ import {
   useState,
 } from "react";
 import {
+  ArrowUpIcon,
+  CalendarDaysIcon,
+  HistoryIcon,
+  LogOutIcon,
+  MenuIcon,
+  MicIcon,
+  PlusIcon,
+  SparklesIcon,
+  SquareIcon,
+  XIcon,
+} from "lucide-react";
+import {
   AUTH_EXPIRED_EVENT,
   authenticate,
   clearStoredToken,
@@ -38,6 +50,29 @@ import type {
   ConversationSummary,
   OpenAirStatus,
 } from "../types";
+import { Alert, AlertAction, AlertDescription } from "./ui/alert";
+import { Badge } from "./ui/badge";
+import { Button } from "./ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "./ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "./ui/dialog";
+import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "./ui/empty";
+import { Input } from "./ui/input";
+import { Label } from "./ui/label";
+import { NativeSelect } from "./ui/native-select";
+import { ScrollArea } from "./ui/scroll-area";
+import { Separator } from "./ui/separator";
 import { HistoryItem } from "./HistoryItem";
 import { MessageExchange } from "./MessageExchange";
 import { PlannerSidebar } from "./PlannerSidebar";
@@ -75,7 +110,7 @@ export default function App() {
   const recorder = useRef<MediaRecorder | null>(null),
     chunks = useRef<Blob[]>([]),
     selectionVersion = useRef(0),
-    chat = useRef<HTMLElement | null>(null),
+    chat = useRef<HTMLDivElement | null>(null),
     conversationRef = useRef<string | null>(null),
     openAirCapture = useRef<OpenAirCapture | null>(null),
     openAirActive = useRef(false),
@@ -346,40 +381,68 @@ export default function App() {
 
   if (!token)
     return (
-      <main className="auth-shell">
-        <section className="auth-card">
-          <div className="brand">День за днём</div>
-          <h1>{register ? "Создать аккаунт" : "Войти в ежедневник"}</h1>
-          <p>Задачи и встречи — просто скажите, что нужно.</p>
-          <form onSubmit={submitCredentials}>
-            <label>
-              Email
-              <input
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                required
-              />
-            </label>
-            <label>
-              Пароль
-              <input
-                type="password"
-                minLength={8}
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-              />
-            </label>
-            <button className="primary">
-              {register ? "Зарегистрироваться" : "Войти"}
-            </button>
-          </form>
-          <button className="link" onClick={() => setRegister(!register)}>
-            {register ? "Уже есть аккаунт" : "Нет аккаунта? Создать"}
-          </button>
-          {error && <div className="error">{error}</div>}
-        </section>
+      <main className="grid min-h-dvh place-items-center bg-[radial-gradient(circle_at_18%_20%,color-mix(in_oklab,var(--accent)_62%,transparent),transparent_38%),radial-gradient(circle_at_82%_78%,color-mix(in_oklab,var(--primary)_18%,transparent),transparent_42%)] p-5">
+        <div className="w-full max-w-md">
+          <Card className="gap-0 overflow-visible shadow-2xl ring-border/80">
+            <CardHeader className="gap-2 p-6 pb-0 sm:p-7 sm:pb-0">
+              <Badge variant="secondary" className="w-fit">
+                День за днём
+              </Badge>
+              <CardTitle asChild>
+                <h1 className="font-heading text-3xl font-semibold tracking-tight sm:text-4xl">
+                  {register ? "Создать аккаунт" : "Войти в ежедневник"}
+                </h1>
+              </CardTitle>
+              <CardDescription>
+                Задачи и встречи — просто скажите, что нужно.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="grid gap-4 p-6 pt-6 sm:p-7 sm:pt-6">
+              <form className="grid gap-4" onSubmit={submitCredentials}>
+                <div className="grid gap-1.5">
+                  <Label htmlFor="auth-email">Email</Label>
+                  <Input
+                    id="auth-email"
+                    type="email"
+                    autoComplete="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    required
+                  />
+                </div>
+                <div className="grid gap-1.5">
+                  <Label htmlFor="auth-password">Пароль</Label>
+                  <Input
+                    id="auth-password"
+                    type="password"
+                    autoComplete={
+                      register ? "new-password" : "current-password"
+                    }
+                    minLength={8}
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    required
+                  />
+                </div>
+                <Button className="w-full" size="lg">
+                  {register ? "Зарегистрироваться" : "Войти"}
+                </Button>
+              </form>
+              <Button
+                variant="link"
+                className="mx-auto h-auto w-fit px-0 text-muted-foreground"
+                onClick={() => setRegister(!register)}
+              >
+                {register ? "Уже есть аккаунт" : "Нет аккаунта? Создать"}
+              </Button>
+              {error && (
+                <Alert variant="destructive">
+                  <AlertDescription>{error}</AlertDescription>
+                </Alert>
+              )}
+            </CardContent>
+          </Card>
+        </div>
       </main>
     );
 
@@ -394,86 +457,134 @@ export default function App() {
         onClick={() => setPlannerOpen(false)}
       />
       <aside
-        className={`session-sidebar operation-sidebar ${sidebarOpen ? "open" : ""}`}
+        className={`session-sidebar operation-sidebar ${sidebarOpen ? "open" : ""} gap-3 px-3 py-5`}
       >
-        <div className="sidebar-head">
+        <div className="flex items-start justify-between gap-2 px-1">
           <div>
-            <div className="eyebrow">Календарь</div>
-            <b>История изменений</b>
+            <Badge variant="secondary" className="w-fit">
+              Календарь
+            </Badge>
+            <p className="mt-1.5 font-heading text-lg leading-none font-semibold">
+              История изменений
+            </p>
           </div>
-          <button
+          <Button
             className="sidebar-close"
+            variant="ghost"
+            size="icon-sm"
             aria-label="Закрыть историю"
             onClick={() => setSidebarOpen(false)}
           >
-            ×
-          </button>
+            <XIcon aria-hidden="true" />
+          </Button>
         </div>
-        <nav
-          className="operation-list"
-          aria-label="История изменений календаря"
+        <Separator />
+        <ScrollArea
+          className="min-h-0 flex-1"
+          viewportClassName="operation-list px-1 py-0.5"
         >
-          {history.map((item, index) => {
-            const showDate =
-              index === 0 ||
-              historyDateKey(item.created_at) !==
-                historyDateKey(history[index - 1].created_at);
-            return (
-              <Fragment key={item.id}>
-                {showDate && (
-                  <div className="history-date">
-                    <span>{formatHistoryDate(item.created_at)}</span>
-                  </div>
-                )}
-                <HistoryItem item={item} undo={undo} />
-              </Fragment>
-            );
-          })}
-          {!history.length && (
-            <p className="sessions-empty">
-              Изменения календаря появятся здесь.
-            </p>
-          )}
-        </nav>
-      </aside>
-      <section className="workspace">
-        <header>
-          <button
-            className="sessions-toggle"
-            aria-label="Открыть историю изменений"
-            onClick={() => setSidebarOpen(true)}
+          <nav
+            className="flex flex-col"
+            aria-label="История изменений календаря"
           >
-            ☰
-          </button>
-          <div>
-            <div className="eyebrow">Умный ежедневник</div>
-            <h1>Что запланируем?</h1>
+            {history.map((item, index) => {
+              const showDate =
+                index === 0 ||
+                historyDateKey(item.created_at) !==
+                  historyDateKey(history[index - 1].created_at);
+              return (
+                <Fragment key={item.id}>
+                  {showDate && (
+                    <div className="my-2 flex items-center gap-2 text-[10px] whitespace-nowrap text-muted-foreground first:mt-0">
+                      <span>{formatHistoryDate(item.created_at)}</span>
+                      <Separator className="flex-1" />
+                    </div>
+                  )}
+                  <HistoryItem item={item} undo={undo} />
+                </Fragment>
+              );
+            })}
+            {!history.length && (
+              <p className="p-2 text-xs leading-relaxed text-muted-foreground">
+                Изменения календаря появятся здесь.
+              </p>
+            )}
+          </nav>
+        </ScrollArea>
+        <Separator />
+        <p className="px-1 text-[10px] leading-relaxed text-muted-foreground">
+          Каждая операция сохраняется и может быть отменена.
+        </p>
+      </aside>
+
+      <section className="workspace">
+        <header className="flex items-start justify-between gap-3 border-b bg-background px-4 py-4 sm:px-7">
+          <div className="flex min-w-0 items-start gap-1.5">
+            <Button
+              className="sessions-toggle shrink-0"
+              variant="ghost"
+              size="icon-sm"
+              aria-label="Открыть историю изменений"
+              onClick={() => setSidebarOpen(true)}
+            >
+              <MenuIcon aria-hidden="true" />
+            </Button>
+            <div className="min-w-0">
+              <Badge variant="outline" className="w-fit">
+                Умный ежедневник
+              </Badge>
+              <h1 className="mt-1.5 font-heading text-3xl font-semibold tracking-tight sm:text-4xl">
+                Что запланируем?
+              </h1>
+            </div>
           </div>
-          <div className="header-actions">
-            <button
-              className="quiet planner-toggle"
+          <div className="flex max-w-[60%] flex-wrap items-center justify-end gap-1">
+            <Button
+              className="planner-toggle"
+              variant="ghost"
+              size="sm"
               onClick={() => setPlannerOpen(true)}
             >
+              <CalendarDaysIcon aria-hidden="true" />
               Планы
-            </button>
-            <button className="quiet" onClick={startNewConversation}>
+            </Button>
+            <Button variant="ghost" size="sm" onClick={startNewConversation}>
+              <PlusIcon aria-hidden="true" />
               Новый диалог
-            </button>
-            <button className="quiet" onClick={() => setSessionsOpen(true)}>
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setSessionsOpen(true)}
+            >
+              <HistoryIcon aria-hidden="true" />
               История сессий
-            </button>
-            <button className="quiet" onClick={() => void logout()}>
+            </Button>
+            <Button variant="ghost" size="sm" onClick={() => void logout()}>
+              <LogOutIcon aria-hidden="true" />
               Выйти
-            </button>
+            </Button>
           </div>
         </header>
-        <section className="chat" ref={chat} aria-live="polite">
+
+        <ScrollArea
+          className="min-h-0"
+          viewportClassName="chat px-4 py-6 sm:px-8"
+          viewportRef={chat}
+          aria-live="polite"
+        >
           {!messages.length && (
-            <div className="empty">
-              <span>✦</span>
-              <h2>Начните с простой просьбы</h2>
-              <p>«Покажи задачи на сегодня» или «Напомни подготовить отчёт»</p>
-            </div>
+            <Empty className="mx-auto my-[10vh] max-w-xl border-0">
+              <EmptyMedia variant="icon">
+                <SparklesIcon aria-hidden="true" />
+              </EmptyMedia>
+              <EmptyHeader>
+                <EmptyTitle>Начните с простой просьбы</EmptyTitle>
+                <EmptyDescription>
+                  «Покажи задачи на сегодня» или «Напомни подготовить отчёт»
+                </EmptyDescription>
+              </EmptyHeader>
+            </Empty>
           )}
           {messages.map((message) => (
             <MessageExchange
@@ -482,47 +593,76 @@ export default function App() {
               startNewConversation={startNewConversation}
             />
           ))}
-        </section>
+        </ScrollArea>
+
         {error && (
-          <div className="toast">
-            {error}
-            <button onClick={() => setError("")}>×</button>
-          </div>
+          <Alert
+            variant="destructive"
+            className="fixed top-4 left-1/2 z-[120] w-auto max-w-[calc(100vw-2rem)] -translate-x-1/2 bg-popover shadow-xl"
+          >
+            <AlertDescription>{error}</AlertDescription>
+            <AlertAction>
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                aria-label="Закрыть уведомление"
+                onClick={() => setError("")}
+              >
+                <XIcon aria-hidden="true" />
+              </Button>
+            </AlertAction>
+          </Alert>
         )}
-        <footer>
-          <form className="composer" onSubmit={sendText}>
-            <input
+
+        <footer className="border-t bg-muted/30 px-4 py-3 sm:px-6">
+          <form className="flex items-center gap-2" onSubmit={sendText}>
+            <Input
               aria-label="Сообщение"
               placeholder="Напишите задачу или вопрос…"
+              className="h-11 flex-1 bg-card"
               value={text}
               onChange={(e) => setText(e.target.value)}
             />
-            <button className="send" aria-label="Отправить">
-              ↑
-            </button>
-            <button
+            <Button
+              type="submit"
+              size="icon-lg"
+              aria-label="Отправить"
+              className="shrink-0"
+            >
+              <ArrowUpIcon aria-hidden="true" />
+            </Button>
+            <Button
               type="button"
-              className={`open-air-toggle ${openAirEnabled ? "active" : ""}`}
+              variant={openAirEnabled ? "default" : "outline"}
+              size="lg"
+              className="shrink-0"
               aria-label={`${openAirEnabled ? "Выключить" : "Включить"} open-air режим Ivory`}
               aria-pressed={openAirEnabled}
               onClick={() => void toggleOpenAir()}
             >
+              <SparklesIcon aria-hidden="true" />
               Ivory
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
+              variant={recording ? "destructive" : "secondary"}
+              size="icon-lg"
+              className="mic shrink-0 touch-none"
               disabled={openAirEnabled}
-              className={`mic ${recording ? "recording" : ""}`}
               aria-label="Удерживайте для записи"
               onPointerDown={startRecording}
               onPointerUp={stopRecording}
               onPointerCancel={stopRecording}
             >
-              {recording ? "■" : "●"}
-            </button>
+              {recording ? (
+                <SquareIcon aria-hidden="true" />
+              ) : (
+                <MicIcon aria-hidden="true" />
+              )}
+            </Button>
           </form>
-          <div className="voice-footer">
-            <small>
+          <div className="mt-2 flex min-h-5 flex-wrap items-center justify-end gap-3">
+            <small className="text-[11px] text-muted-foreground">
               {openAirEnabled
                 ? openAirLabels[openAirStatus]
                 : recording
@@ -530,10 +670,17 @@ export default function App() {
                   : "Удерживайте красную кнопку для записи"}
             </small>
             {openAirEnabled && (
-              <label className="open-air-setting">
-                Пауза{" "}
-                <select
+              <>
+                <Label
+                  htmlFor="open-air-silence"
+                  className="text-[11px] text-muted-foreground"
+                >
+                  Пауза
+                </Label>
+                <NativeSelect
+                  id="open-air-silence"
                   aria-label="Пауза перед отправкой"
+                  className="h-7 w-[76px] text-xs"
                   value={openAirSilenceMs}
                   onChange={(event) =>
                     void changeOpenAirSilence(Number(event.target.value))
@@ -544,12 +691,13 @@ export default function App() {
                   <option value={2000}>2 с</option>
                   <option value={3000}>3 с</option>
                   <option value={5000}>5 с</option>
-                </select>
-              </label>
+                </NativeSelect>
+              </>
             )}
           </div>
         </footer>
       </section>
+
       <PlannerSidebar
         open={plannerOpen}
         onClose={() => setPlannerOpen(false)}
@@ -560,54 +708,49 @@ export default function App() {
         }}
         onError={setError}
       />
-      {sessionsOpen && (
-        <div
-          className="modal-scrim"
-          role="presentation"
-          onMouseDown={() => setSessionsOpen(false)}
+
+      <Dialog open={sessionsOpen} onOpenChange={setSessionsOpen}>
+        <DialogContent
+          closeLabel="Закрыть историю сессий"
+          className="sm:max-w-lg"
         >
-          <section
-            className="sessions-modal"
-            role="dialog"
-            aria-modal="true"
-            aria-label="История сессий"
-            onMouseDown={(e) => e.stopPropagation()}
-          >
-            <div className="sidebar-head">
-              <div>
-                <div className="eyebrow">Диалоги</div>
-                <h2>История сессий</h2>
-              </div>
-              <button
-                className="sidebar-close"
-                aria-label="Закрыть историю сессий"
-                onClick={() => setSessionsOpen(false)}
-              >
-                ×
-              </button>
-            </div>
-            <nav className="session-list">
+          <DialogHeader className="gap-1.5 pr-8">
+            <Badge variant="secondary" className="w-fit">
+              Диалоги
+            </Badge>
+            <DialogTitle className="text-xl">История сессий</DialogTitle>
+            <DialogDescription>
+              Вернитесь к прошлому разговору или начните новый.
+            </DialogDescription>
+          </DialogHeader>
+          <ScrollArea className="max-h-[55vh]">
+            <div className="grid gap-1.5 pr-2">
               {sessions.map((session) => (
-                <button
+                <Button
                   key={session.id}
-                  className={`session-item ${conversation === session.id ? "active" : ""}`}
+                  variant={conversation === session.id ? "secondary" : "ghost"}
+                  className="h-auto w-full justify-start px-3 py-2.5 text-left whitespace-normal"
                   onClick={() => void openConversation(session.id)}
                 >
-                  <span>{session.preview}</span>
-                  <time>
-                    {formatSessionTimestamp(session.last_activity_at)}
-                  </time>
-                </button>
+                  <span className="grid min-w-0 flex-1 gap-1">
+                    <span className="truncate text-sm font-medium">
+                      {session.preview}
+                    </span>
+                    <time className="text-[11px] font-normal text-muted-foreground">
+                      {formatSessionTimestamp(session.last_activity_at)}
+                    </time>
+                  </span>
+                </Button>
               ))}
               {!sessions.length && (
-                <p className="sessions-empty">
+                <p className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
                   Здесь появятся прошлые диалоги.
                 </p>
               )}
-            </nav>
-          </section>
-        </div>
-      )}
+            </div>
+          </ScrollArea>
+        </DialogContent>
+      </Dialog>
     </main>
   );
 }

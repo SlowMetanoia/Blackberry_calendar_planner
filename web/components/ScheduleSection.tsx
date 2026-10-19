@@ -1,7 +1,14 @@
-import { useState } from "react";
-import { createPortal } from "react-dom";
+import { CalendarClockIcon, ListTodoIcon } from "lucide-react";
 import { localDateKey } from "../libs/format";
-import type { CalendarEntry, PreviewAnchor } from "../types";
+import type { CalendarEntry } from "../types";
+import { Button } from "./ui/button";
+import { Card, CardContent } from "./ui/card";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "./ui/tooltip";
 import { EntryDetails } from "./EntryDetails";
 
 function entryLabel(entry: CalendarEntry): string {
@@ -29,11 +36,13 @@ export function ScheduleSection({
     groups.set(key, [...(groups.get(key) || []), entry]);
   });
   return (
-    <section className="schedule-section">
-      <h3>{title}</h3>
+    <section className="grid gap-2">
+      <h3 className="text-[11px] font-semibold tracking-[0.08em] text-muted-foreground uppercase">
+        {title}
+      </h3>
       {[...groups.entries()].map(([date, items]) => (
-        <div className="schedule-day" key={date}>
-          <h4>
+        <div className="grid gap-1.5" key={date}>
+          <h4 className="px-1 text-[10px] font-medium text-muted-foreground capitalize">
             {new Intl.DateTimeFormat("ru-RU", {
               weekday: "short",
               day: "numeric",
@@ -60,49 +69,49 @@ export function ScheduleItem({
   entry: CalendarEntry;
   onOpen: (entry: CalendarEntry) => void;
 }) {
-  const [preview, setPreview] = useState<PreviewAnchor | null>(null),
-    previewId = `schedule-preview-${entry.resource}-${entry.occurrenceKey || entry.id}`;
-  const show = (element: HTMLElement) => {
-    const rect = element.getBoundingClientRect(),
-      width = 310;
-    setPreview({
-      x:
-        rect.left > width + 16
-          ? rect.left - width - 10
-          : Math.min(rect.right + 10, window.innerWidth - width - 8),
-      y: Math.max(8, Math.min(rect.top, window.innerHeight - 260)),
-    });
-  };
   return (
-    <>
-      <button
-        className={`schedule-item ${entry.resource}`}
-        aria-describedby={preview ? previewId : undefined}
-        onMouseEnter={(event) => show(event.currentTarget)}
-        onMouseLeave={() => setPreview(null)}
-        onFocus={(event) => show(event.currentTarget)}
-        onBlur={() => setPreview(null)}
-        onClick={() => onOpen(entry)}
-      >
-        <strong>{entry.title}</strong>
-        <small>
-          {entry.startsAt
-            ? `${entryLabel(entry)} · ${entry.resource === "task" ? "задача" : "событие"}`
-            : "Задача без срока"}
-        </small>
-      </button>
-      {preview &&
-        createPortal(
-          <div
-            id={previewId}
-            className="schedule-preview"
-            role="tooltip"
-            style={{ left: preview.x, top: preview.y }}
+    <TooltipProvider delayDuration={80}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            type="button"
+            variant="outline"
+            className="h-auto w-full justify-start gap-2.5 border-l-4 border-l-primary/65 bg-card px-2.5 py-2 text-left whitespace-normal shadow-none"
+            onClick={() => onOpen(entry)}
           >
-            <EntryDetails entry={entry} />
-          </div>,
-          document.body,
-        )}
-    </>
+            <span className="flex size-7 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
+              {entry.resource === "event" ? (
+                <CalendarClockIcon aria-hidden="true" className="size-3.5" />
+              ) : (
+                <ListTodoIcon aria-hidden="true" className="size-3.5" />
+              )}
+            </span>
+            <span className="grid min-w-0 flex-1 gap-0.5">
+              <strong className="truncate text-xs font-semibold">
+                {entry.title}
+              </strong>
+              <small className="truncate text-[10px] font-normal text-muted-foreground">
+                {entry.startsAt
+                  ? `${entryLabel(entry)} · ${entry.resource === "task" ? "задача" : "событие"}`
+                  : "Задача без срока"}
+              </small>
+            </span>
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent
+          side="left"
+          align="start"
+          sideOffset={10}
+          showArrow={false}
+          className="block max-w-none bg-transparent p-0 text-foreground shadow-none"
+        >
+          <Card size="sm" className="w-80 p-3 shadow-xl ring-border">
+            <CardContent className="px-0">
+              <EntryDetails entry={entry} />
+            </CardContent>
+          </Card>
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
   );
 }

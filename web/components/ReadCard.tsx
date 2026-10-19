@@ -5,6 +5,13 @@ import {
 } from "../libs/calendar-view";
 import { browserTimeZone } from "../libs/format";
 import type { DisplayItem } from "../types";
+import { Badge } from "./ui/badge";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "./ui/card";
 import { Metadata } from "./Metadata";
 
 export function ReadCard({
@@ -15,12 +22,18 @@ export function ReadCard({
   timeZone?: string;
 }) {
   return (
-    <article className="read-card">
-      <span className="read-kind">
-        {resourceHeadings[read.resource] || read.resource}
-      </span>
-      <strong>{stringField(read.data, "title") || read.id}</strong>
-      <Metadata items={resourceMetadata(read.resource, read.data, timeZone)} />
-    </article>
+    <Card size="sm" className="mt-3 gap-2.5 shadow-none ring-border/70">
+      <CardHeader className="gap-1.5">
+        <Badge variant="secondary" className="w-fit">
+          {resourceHeadings[read.resource] || read.resource}
+        </Badge>
+        <CardTitle className="text-sm">
+          {stringField(read.data, "title") || read.id}
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        <Metadata items={resourceMetadata(read.resource, read.data, timeZone)} />
+      </CardContent>
+    </Card>
   );
 }

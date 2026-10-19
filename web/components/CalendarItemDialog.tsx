@@ -1,4 +1,5 @@
 import { FormEvent, useState } from "react";
+import { RepeatIcon, Trash2Icon } from "lucide-react";
 import {
   createEvent,
   createTask,
@@ -18,6 +19,20 @@ import type {
   Resource,
   Weekday,
 } from "../types";
+import { Badge } from "./ui/badge";
+import { Button } from "./ui/button";
+import { Checkbox } from "./ui/checkbox";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "./ui/dialog";
+import { Input } from "./ui/input";
+import { Label } from "./ui/label";
+import { NativeSelect } from "./ui/native-select";
+import { Tabs, TabsList, TabsTrigger } from "./ui/tabs";
+import { Textarea } from "./ui/textarea";
 
 function toLocalInput(value: string | null | undefined): string {
   if (!value) return "";
@@ -133,10 +148,7 @@ export function CalendarItemDialog({
       const minutes = duration ? Number(duration) : null,
         key = state.entry?.occurrenceKey,
         instance = Boolean(
-          existing &&
-            key &&
-            scope === "occurrence" &&
-            state.entry?.recurring,
+          existing && key && scope === "occurrence" && state.entry?.recurring,
         ),
         boundary = state.entry?.recurring ? key : undefined,
         includeRecurrence =
@@ -220,291 +232,342 @@ export function CalendarItemDialog({
   };
 
   return (
-    <div
-      className="item-dialog-scrim"
-      role="presentation"
-      onMouseDown={onClose}
+    <Dialog
+      open
+      onOpenChange={(open) => {
+        if (!open) onClose();
+      }}
     >
-      <form
-        className="item-dialog"
-        role="dialog"
-        aria-modal="true"
-        aria-label={existing ? "Редактирование записи" : "Новая запись"}
-        onMouseDown={(event) => event.stopPropagation()}
-        onSubmit={submit}
+      <DialogContent
+        closeLabel="Закрыть форму"
+        className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-lg"
       >
-        <div className="item-dialog-head">
-          <h2>{existing ? "Изменить запись" : "Новая запись"}</h2>
-          <button type="button" aria-label="Закрыть форму" onClick={onClose}>
-            ×
-          </button>
-        </div>
-        {!existing && (
-          <label>
-            Тип
-            <select
-              value={resource}
-              onChange={(event) => setResource(event.target.value as Resource)}
-            >
-              <option value="event">Событие</option>
-              <option value="task">Задача</option>
-            </select>
-          </label>
-        )}
-        {existing && state.entry?.recurring && (
-          <label>
-            Изменить
-            <select
-              value={scope}
-              onChange={(event) =>
-                setScope(event.target.value as "occurrence" | "series")
-              }
-            >
-              <option value="occurrence">Только этот повтор</option>
-              <option value="series">Этот и будущие повторы</option>
-            </select>
-          </label>
-        )}
-        <label>
-          Название
-          <input
-            required
-            maxLength={500}
-            value={title}
-            onChange={(event) => setTitle(event.target.value)}
-          />
-        </label>
-        <label>
-          {resource === "event" ? "Начало" : "Дедлайн"}
-          <input
-            type="datetime-local"
-            required={resource === "event" || repeat !== "none"}
-            value={when}
-            onChange={(event) => setWhen(event.target.value)}
-          />
-        </label>
-        <label>
-          Повторять
-          <select
-            value={repeat}
-            disabled={scope === "occurrence" && Boolean(state.entry?.recurring)}
-            onChange={(event) =>
-              setRepeat(event.target.value as typeof repeat)
-            }
-          >
-            <option value="none">Не повторять</option>
-            <option value="daily">Каждый день</option>
-            <option value="weekly">Каждую неделю</option>
-            <option value="monthly">Каждый месяц</option>
-            <option value="yearly">Каждый год</option>
-          </select>
-        </label>
-        {repeat !== "none" && scope === "series" && (
-          <fieldset className="recurrence-fields">
-            <label>
-              Интервал
-              <input
-                type="number"
-                min="1"
-                required
-                value={interval}
-                onChange={(event) => setInterval(Number(event.target.value))}
-              />
-            </label>
-            {repeat === "weekly" && (
-              <div className="weekday-picker">
-                {(Object.keys(weekdayLabels) as Weekday[]).map((day) => (
-                  <label key={day}>
-                    <input
-                      type="checkbox"
-                      checked={weekdays.includes(day)}
-                      onChange={() =>
-                        setWeekdays((value) =>
-                          value.includes(day)
-                            ? value.filter((item) => item !== day)
-                            : [...value, day],
-                        )
-                      }
-                    />
-                    {weekdayLabels[day]}
-                  </label>
-                ))}
-              </div>
-            )}
-            {repeat === "monthly" && (
-              <>
-                <label>
-                  Правило месяца
-                  <select
-                    value={monthlyKind}
-                    onChange={(event) =>
-                      setMonthlyKind(
-                        event.target.value as typeof monthlyKind,
-                      )
-                    }
-                  >
-                    <option value="day_of_month">Число месяца</option>
-                    <option value="nth_weekday">День недели по счёту</option>
-                    <option value="last_day">Последний день</option>
-                  </select>
-                </label>
-                {monthlyKind === "day_of_month" && (
-                  <label>
-                    Число
-                    <input
-                      type="number"
-                      min="1"
-                      max="31"
-                      value={monthDay}
-                      onChange={(event) =>
-                        setMonthDay(Number(event.target.value))
-                      }
-                    />
-                  </label>
-                )}
-                {monthlyKind === "nth_weekday" && (
-                  <div className="recurrence-row">
-                    <label>
-                      Номер
-                      <select
-                        value={ordinal}
-                        onChange={(event) =>
-                          setOrdinal(Number(event.target.value))
-                        }
-                      >
-                        <option value="1">Первый</option>
-                        <option value="2">Второй</option>
-                        <option value="3">Третий</option>
-                        <option value="4">Четвёртый</option>
-                        <option value="-1">Последний</option>
-                      </select>
-                    </label>
-                    <label>
-                      День
-                      <select
-                        value={monthWeekday}
-                        onChange={(event) =>
-                          setMonthWeekday(event.target.value as Weekday)
-                        }
-                      >
-                        {Object.entries(weekdayLabels).map(([value, label]) => (
-                          <option value={value} key={value}>
-                            {label}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                  </div>
-                )}
-              </>
-            )}
-            <label>
-              Окончание
-              <select
-                value={endKind}
+        <form className="grid gap-4" onSubmit={submit}>
+          <DialogHeader className="gap-1.5 pr-8">
+            <Badge variant="secondary" className="w-fit">
+              {existing ? "Запись календаря" : "Планирование"}
+            </Badge>
+            <DialogTitle className="text-xl">
+              {existing ? "Редактирование записи" : "Новая запись"}
+            </DialogTitle>
+          </DialogHeader>
+
+          {!existing && (
+            <div className="grid gap-1.5">
+              <Label>Тип</Label>
+              <Tabs
+                value={resource}
+                onValueChange={(value) => setResource(value as Resource)}
+              >
+                <TabsList className="w-full">
+                  <TabsTrigger value="event">Событие</TabsTrigger>
+                  <TabsTrigger value="task">Задача</TabsTrigger>
+                </TabsList>
+              </Tabs>
+            </div>
+          )}
+
+          {existing && state.entry?.recurring && (
+            <div className="grid gap-1.5">
+              <Label htmlFor="calendar-scope">Изменить</Label>
+              <NativeSelect
+                id="calendar-scope"
+                value={scope}
                 onChange={(event) =>
-                  setEndKind(event.target.value as typeof endKind)
+                  setScope(event.target.value as "occurrence" | "series")
                 }
               >
-                <option value="never">Никогда</option>
-                <option value="until">До даты</option>
-                <option value="count">После числа повторов</option>
-              </select>
-            </label>
-            {endKind === "until" && (
-              <label>
-                Последняя дата
-                <input
-                  type="date"
-                  required
-                  value={until}
-                  onChange={(event) => setUntil(event.target.value)}
-                />
-              </label>
-            )}
-            {endKind === "count" && (
-              <label>
-                Количество
-                <input
+                <option value="occurrence">Только этот повтор</option>
+                <option value="series">Этот и будущие повторы</option>
+              </NativeSelect>
+            </div>
+          )}
+
+          <div className="grid gap-1.5">
+            <Label htmlFor="calendar-title">Название</Label>
+            <Input
+              id="calendar-title"
+              required
+              maxLength={500}
+              value={title}
+              onChange={(event) => setTitle(event.target.value)}
+            />
+          </div>
+
+          <div className="grid gap-1.5">
+            <Label htmlFor="calendar-when">
+              {resource === "event" ? "Начало" : "Дедлайн"}
+            </Label>
+            <Input
+              id="calendar-when"
+              type="datetime-local"
+              required={resource === "event" || repeat !== "none"}
+              value={when}
+              onChange={(event) => setWhen(event.target.value)}
+            />
+          </div>
+
+          <div className="grid gap-1.5">
+            <Label htmlFor="calendar-repeat">Повторять</Label>
+            <NativeSelect
+              id="calendar-repeat"
+              value={repeat}
+              disabled={scope === "occurrence" && Boolean(state.entry?.recurring)}
+              onChange={(event) =>
+                setRepeat(event.target.value as typeof repeat)
+              }
+            >
+              <option value="none">Не повторять</option>
+              <option value="daily">Каждый день</option>
+              <option value="weekly">Каждую неделю</option>
+              <option value="monthly">Каждый месяц</option>
+              <option value="yearly">Каждый год</option>
+            </NativeSelect>
+          </div>
+
+          {repeat !== "none" && scope === "series" && (
+            <div className="grid gap-3 rounded-lg border bg-muted/30 p-3">
+              <div className="flex items-center gap-2 text-sm font-medium">
+                <RepeatIcon aria-hidden="true" className="size-4 text-muted-foreground" />
+                Настройки повтора
+              </div>
+              <div className="grid gap-1.5">
+                <Label htmlFor="calendar-interval">Интервал</Label>
+                <Input
+                  id="calendar-interval"
                   type="number"
                   min="1"
                   required
-                  value={count}
-                  onChange={(event) => setCount(Number(event.target.value))}
+                  value={interval}
+                  onChange={(event) => setInterval(Number(event.target.value))}
                 />
-              </label>
-            )}
-            <label>
-              Часовой пояс
-              <input
-                required
-                value={recurrenceTimezone}
-                onChange={(event) => setRecurrenceTimezone(event.target.value)}
-              />
-            </label>
-          </fieldset>
-        )}
-        <label>
-          {resource === "event" ? "Длительность, минут" : "Оценка, минут"}
-          <input
-            type="number"
-            min="1"
-            value={duration}
-            onChange={(event) => setDuration(event.target.value)}
-          />
-        </label>
-        {resource === "event" && (
-          <label>
-            Место
-            <input
-              maxLength={500}
-              value={location}
-              onChange={(event) => setLocation(event.target.value)}
-            />
-          </label>
-        )}
-        {resource === "task" && (
-          <label>
-            Статус
-            <select
-              value={status}
-              onChange={(event) =>
-                setStatus(event.target.value as "open" | "completed")
-              }
-            >
-              <option value="open">Открыта</option>
-              <option value="completed">Выполнена</option>
-            </select>
-          </label>
-        )}
-        <label>
-          Описание
-          <textarea
-            maxLength={10000}
-            value={description}
-            onChange={(event) => setDescription(event.target.value)}
-          />
-        </label>
-        <div className="item-dialog-actions">
-          {existing && (
-            <button
-              className="danger"
-              type="button"
-              disabled={saving}
-              onClick={() => void remove()}
-            >
-              Удалить
-            </button>
+              </div>
+              {repeat === "weekly" && (
+                <div className="grid gap-1.5">
+                  <Label>Дни недели</Label>
+                  <div className="flex flex-wrap gap-1.5">
+                    {(Object.keys(weekdayLabels) as Weekday[]).map((day) => (
+                      <Label
+                        key={day}
+                        className="cursor-pointer gap-1.5 rounded-md border bg-card px-2 py-1 text-xs font-normal has-data-[state=checked]:border-primary/50 has-data-[state=checked]:bg-primary/5"
+                      >
+                        <Checkbox
+                          checked={weekdays.includes(day)}
+                          onCheckedChange={() =>
+                            setWeekdays((value) =>
+                              value.includes(day)
+                                ? value.filter((item) => item !== day)
+                                : [...value, day],
+                            )
+                          }
+                        />
+                        {weekdayLabels[day]}
+                      </Label>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {repeat === "monthly" && (
+                <>
+                  <div className="grid gap-1.5">
+                    <Label htmlFor="calendar-monthly-kind">
+                      Правило месяца
+                    </Label>
+                    <NativeSelect
+                      id="calendar-monthly-kind"
+                      value={monthlyKind}
+                      onChange={(event) =>
+                        setMonthlyKind(
+                          event.target.value as typeof monthlyKind,
+                        )
+                      }
+                    >
+                      <option value="day_of_month">Число месяца</option>
+                      <option value="nth_weekday">День недели по счёту</option>
+                      <option value="last_day">Последний день</option>
+                    </NativeSelect>
+                  </div>
+                  {monthlyKind === "day_of_month" && (
+                    <div className="grid gap-1.5">
+                      <Label htmlFor="calendar-month-day">Число</Label>
+                      <Input
+                        id="calendar-month-day"
+                        type="number"
+                        min="1"
+                        max="31"
+                        value={monthDay}
+                        onChange={(event) =>
+                          setMonthDay(Number(event.target.value))
+                        }
+                      />
+                    </div>
+                  )}
+                  {monthlyKind === "nth_weekday" && (
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="grid gap-1.5">
+                        <Label htmlFor="calendar-ordinal">Номер</Label>
+                        <NativeSelect
+                          id="calendar-ordinal"
+                          value={ordinal}
+                          onChange={(event) =>
+                            setOrdinal(Number(event.target.value))
+                          }
+                        >
+                          <option value="1">Первый</option>
+                          <option value="2">Второй</option>
+                          <option value="3">Третий</option>
+                          <option value="4">Четвёртый</option>
+                          <option value="-1">Последний</option>
+                        </NativeSelect>
+                      </div>
+                      <div className="grid gap-1.5">
+                        <Label htmlFor="calendar-month-weekday">День</Label>
+                        <NativeSelect
+                          id="calendar-month-weekday"
+                          value={monthWeekday}
+                          onChange={(event) =>
+                            setMonthWeekday(event.target.value as Weekday)
+                          }
+                        >
+                          {Object.entries(weekdayLabels).map(
+                            ([value, label]) => (
+                              <option value={value} key={value}>
+                                {label}
+                              </option>
+                            ),
+                          )}
+                        </NativeSelect>
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
+              <div className="grid gap-1.5">
+                <Label htmlFor="calendar-end-kind">Окончание</Label>
+                <NativeSelect
+                  id="calendar-end-kind"
+                  value={endKind}
+                  onChange={(event) =>
+                    setEndKind(event.target.value as typeof endKind)
+                  }
+                >
+                  <option value="never">Никогда</option>
+                  <option value="until">До даты</option>
+                  <option value="count">После числа повторов</option>
+                </NativeSelect>
+              </div>
+              {endKind === "until" && (
+                <div className="grid gap-1.5">
+                  <Label htmlFor="calendar-until">Последняя дата</Label>
+                  <Input
+                    id="calendar-until"
+                    type="date"
+                    required
+                    value={until}
+                    onChange={(event) => setUntil(event.target.value)}
+                  />
+                </div>
+              )}
+              {endKind === "count" && (
+                <div className="grid gap-1.5">
+                  <Label htmlFor="calendar-count">Количество</Label>
+                  <Input
+                    id="calendar-count"
+                    type="number"
+                    min="1"
+                    required
+                    value={count}
+                    onChange={(event) => setCount(Number(event.target.value))}
+                  />
+                </div>
+              )}
+              <div className="grid gap-1.5">
+                <Label htmlFor="calendar-timezone">Часовой пояс</Label>
+                <Input
+                  id="calendar-timezone"
+                  required
+                  value={recurrenceTimezone}
+                  onChange={(event) =>
+                    setRecurrenceTimezone(event.target.value)
+                  }
+                />
+              </div>
+            </div>
           )}
-          <span />
-          <button type="button" onClick={onClose}>
-            Отмена
-          </button>
-          <button className="primary" disabled={saving}>
-            {saving ? "Сохраняю…" : "Сохранить"}
-          </button>
-        </div>
-      </form>
-    </div>
+
+          <div className="grid gap-1.5">
+            <Label htmlFor="calendar-duration">
+              {resource === "event" ? "Длительность, минут" : "Оценка, минут"}
+            </Label>
+            <Input
+              id="calendar-duration"
+              type="number"
+              min="1"
+              value={duration}
+              onChange={(event) => setDuration(event.target.value)}
+            />
+          </div>
+
+          {resource === "event" && (
+            <div className="grid gap-1.5">
+              <Label htmlFor="calendar-location">Место</Label>
+              <Input
+                id="calendar-location"
+                maxLength={500}
+                value={location}
+                onChange={(event) => setLocation(event.target.value)}
+              />
+            </div>
+          )}
+
+          {resource === "task" && (
+            <div className="grid gap-1.5">
+              <Label htmlFor="calendar-status">Статус</Label>
+              <NativeSelect
+                id="calendar-status"
+                value={status}
+                onChange={(event) =>
+                  setStatus(event.target.value as "open" | "completed")
+                }
+              >
+                <option value="open">Открыта</option>
+                <option value="completed">Выполнена</option>
+              </NativeSelect>
+            </div>
+          )}
+
+          <div className="grid gap-1.5">
+            <Label htmlFor="calendar-description">Описание</Label>
+            <Textarea
+              id="calendar-description"
+              maxLength={10000}
+              value={description}
+              onChange={(event) => setDescription(event.target.value)}
+            />
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2 border-t pt-3">
+            {existing && (
+              <Button
+                variant="destructive"
+                type="button"
+                disabled={saving}
+                onClick={() => void remove()}
+              >
+                <Trash2Icon aria-hidden="true" />
+                Удалить
+              </Button>
+            )}
+            <span className="flex-1" />
+            <Button type="button" variant="outline" onClick={onClose}>
+              Отмена
+            </Button>
+            <Button type="submit" disabled={saving}>
+              {saving ? "Сохраняю…" : "Сохранить"}
+            </Button>
+          </div>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }
