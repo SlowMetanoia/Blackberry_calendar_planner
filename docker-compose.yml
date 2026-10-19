@@ -7,7 +7,7 @@ services:
   api:
     build: .
     command: uvicorn planner.main:app --host 0.0.0.0 --port 8000
-    env_file: ${ENV_FILE:-.env.example}
+    env_file: ${ENV_FILE:-.env}
     ports: ["${API_PORT:-8000}:8000"]
     volumes: ["audio_data:/tmp/planner-audio"]
     extra_hosts: ["host.docker.internal:host-gateway"]
@@ -23,7 +23,7 @@ services:
   worker:
     build: .
     command: arq planner.worker.WorkerSettings
-    env_file: ${ENV_FILE:-.env.example}
+    env_file: ${ENV_FILE:-.env}
     volumes: ["audio_data:/tmp/planner-audio"]
     extra_hosts: ["host.docker.internal:host-gateway"]
     depends_on:
@@ -48,7 +48,7 @@ services:
   indexer:
     build: .
     command: arq planner.search_worker.SearchWorkerSettings
-    env_file: ${ENV_FILE:-.env.example}
+    env_file: ${ENV_FILE:-.env}
     extra_hosts: ["host.docker.internal:host-gateway"]
     depends_on:
       postgres: { condition: service_healthy }
@@ -56,7 +56,7 @@ services:
   migrate:
     build: .
     command: alembic upgrade head
-    env_file: ${ENV_FILE:-.env.example}
+    env_file: ${ENV_FILE:-.env}
     profiles: ["release"]
     depends_on:
       postgres: { condition: service_healthy }
