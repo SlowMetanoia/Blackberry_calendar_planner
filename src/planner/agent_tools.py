@@ -2,7 +2,6 @@ import json
 import uuid
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
-from datetime import time
 from typing import Any, Literal, Protocol
 
 from pydantic import Field
@@ -17,15 +16,6 @@ from .services import EventService, TaskService
 class ToolRuntimeContext(Protocol):
     session: Any
     owner_id: uuid.UUID
-
-
-@dataclass(frozen=True)
-class SchedulingPolicy:
-    """Future user-configurable constraints supplied to scheduling tools."""
-
-    search_horizon_days: int = 30
-    daytime_starts_at: time = time(11, 0)
-    daytime_ends_at: time = time(18, 0)
 
 
 class ListResourcesArgs(StrictInput):

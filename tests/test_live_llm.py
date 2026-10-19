@@ -30,7 +30,7 @@ async def test_live_qwen_completes_read_observe_terminal_round_trip() -> None:
     messages = [
         {
             "role": "system",
-            "content": build_system_prompt(local_now, "Europe/Moscow"),
+            "content": await build_system_prompt(local_now, "Europe/Moscow"),
         },
         {"role": "user", "content": "покажи задачи"},
     ]
@@ -108,7 +108,7 @@ async def test_live_qwen_uses_terminal_commit_for_create() -> None:
         [
             {
                 "role": "system",
-                "content": build_system_prompt(local_now, "Europe/Moscow"),
+                "content": await build_system_prompt(local_now, "Europe/Moscow"),
             },
             {"role": "user", "content": "создай задачу Купить молоко"},
         ],
@@ -131,7 +131,7 @@ async def test_live_qwen_uses_hybrid_search_for_approximate_reference() -> None:
         [
             {
                 "role": "system",
-                "content": build_system_prompt(local_now, "Europe/Moscow"),
+                "content": await build_system_prompt(local_now, "Europe/Moscow"),
             },
             {
                 "role": "user",

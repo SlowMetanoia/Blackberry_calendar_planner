@@ -5,6 +5,7 @@ RUN mkdir -p src/planner && touch src/planner/__init__.py
 RUN pip install --no-cache-dir .
 RUN rm -rf src
 COPY src ./src
+COPY prompts ./prompts
 COPY alembic.ini .
 COPY migrations ./migrations
 ENV PYTHONPATH=/app/src

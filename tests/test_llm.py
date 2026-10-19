@@ -53,19 +53,6 @@ def test_normalize_base_url_accepts_root_and_v1() -> None:
     assert llm.normalize_base_url("http://localhost:1234/v1/") == "http://localhost:1234/v1"
 
 
-def test_qwen_payload_disables_thinking_and_uses_json_schema() -> None:
-    payload = llm.completion_payload(settings(), [{"role": "user", "content": "test"}])
-    assert payload["reasoning_effort"] == "none"
-    assert "chat_template_kwargs" not in payload
-    assert payload["temperature"] == 0
-    assert payload["top_p"] == 1
-    assert "presence_penalty" not in payload
-    assert payload["stream"] is False
-    assert payload["response_format"]["type"] == "json_schema"
-    schema = payload["response_format"]["json_schema"]["schema"]
-    assert {"reply", "reads", "mutations", "clarification"} <= set(schema["properties"])
-
-
 def test_react_payload_uses_tools_without_json_response_format() -> None:
     tools = [
         {

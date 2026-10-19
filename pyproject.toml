@@ -15,6 +15,7 @@ dependencies = [
   "pgvector>=0.3,<1",
   "pydantic-settings>=2.6,<3",
   "python-multipart>=0.0.12,<1",
+  "pyyaml>=6,<7",
   "redis>=5,<6",
   "sqlalchemy[asyncio]>=2.0,<3",
   "uvicorn[standard]>=0.32,<1",
@@ -26,6 +27,7 @@ test = [
   "pytest-asyncio>=0.24",
   "aiosqlite>=0.20",
   "ruff>=0.9,<1",
+  "tzdata>=2024.1; sys_platform == 'win32'",
 ]
 
 [tool.pytest.ini_options]
