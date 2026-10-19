@@ -37,6 +37,7 @@ from .llm import (
     react_completion_payload,
 )
 from .models import AgentMessage, CalendarOperation, User
+from .occurrences import OccurrenceService
 from .prompts_manager import get_prompts_manager
 from .search import SearchIndexUnavailable
 from .services import EventService, TaskService
@@ -315,8 +316,25 @@ async def _referenced_resource_context(
         data = {
             column.name: getattr(row, column.name)
             for column in row.__table__.columns
-            if column.name != "owner_id"
+            if column.name not in {"owner_id", "recurrence_version_id"}
+            and not (
+                column.name in {"recurrence", "recurrence_timezone"}
+                and getattr(row, column.name) is None
+            )
         }
+        if getattr(row, "recurrence", None) is not None:
+            occurrence_page = await OccurrenceService.preview(
+                context.session,
+                user,
+                resource=resource,
+                series_id=ident,
+                limit=5,
+            )
+            data["occurrence_dates"] = [
+                item.scheduled_at.isoformat() for item in occurrence_page.items
+            ]
+            data["occurrence_total"] = occurrence_page.total
+            data["occurrence_has_more"] = occurrence_page.has_more
         resources.append(
             json.loads(
                 json.dumps({"resource": resource, "id": str(row.id), "data": data}, default=str)
@@ -828,8 +846,25 @@ async def _selected_display_items(state: AgentState) -> list[dict[str, Any]]:
         data = {
             column.name: getattr(row, column.name)
             for column in row.__table__.columns
-            if column.name != "owner_id"
+            if column.name not in {"owner_id", "recurrence_version_id"}
+            and not (
+                column.name in {"recurrence", "recurrence_timezone"}
+                and getattr(row, column.name) is None
+            )
         }
+        if getattr(row, "recurrence", None) is not None:
+            occurrence_page = await OccurrenceService.preview(
+                context.session,
+                user,
+                resource=resource,
+                series_id=ident,
+                limit=5,
+            )
+            data["occurrence_dates"] = [
+                item.scheduled_at.isoformat() for item in occurrence_page.items
+            ]
+            data["occurrence_total"] = occurrence_page.total
+            data["occurrence_has_more"] = occurrence_page.has_more
         items.append(
             json.loads(
                 json.dumps(

@@ -26,12 +26,15 @@ from .config import get_settings
 from .db import Base, engine, get_session
 from .llm import verify_llm_connection
 from .models import AgentMessage, CalendarOperation, Conversation, Event, MessageStatus, Task, User
+from .occurrences import OccurrenceService, occurrence_dict, parse_occurrence_key
 from .schemas import (
     AgentInput,
     AgentMessageResponse,
     AuthRequest,
+    CalendarOccurrenceResponse,
     CalendarOperationResponse,
     ConversationSummary,
+    CursorPage,
     EventCreate,
     EventResponse,
     EventUpdate,
@@ -317,6 +320,7 @@ async def get_task(
 async def update_task(
     task_id: uuid.UUID,
     data: TaskUpdate,
+    effective_from_occurrence_key: str | None = None,
     user: User = Depends(current_user),
     session: AsyncSession = Depends(get_session),
 ) -> Task:
@@ -324,7 +328,15 @@ async def update_task(
         await CalendarCommandService.execute(
             session,
             user,
-            [CalendarMutation("update", "task", data.model_dump(exclude_unset=True), task_id)],
+            [
+                CalendarMutation(
+                    "update",
+                    "task",
+                    data.model_dump(exclude_unset=True),
+                    task_id,
+                    effective_from_occurrence_key=effective_from_occurrence_key,
+                )
+            ],
             origin="rest",
         )
     except CalendarTargetNotFound:
@@ -408,6 +420,7 @@ async def get_event(
 async def update_event(
     event_id: uuid.UUID,
     data: EventUpdate,
+    effective_from_occurrence_key: str | None = None,
     user: User = Depends(current_user),
     session: AsyncSession = Depends(get_session),
 ) -> Event:
@@ -415,7 +428,15 @@ async def update_event(
         await CalendarCommandService.execute(
             session,
             user,
-            [CalendarMutation("update", "event", data.model_dump(exclude_unset=True), event_id)],
+            [
+                CalendarMutation(
+                    "update",
+                    "event",
+                    data.model_dump(exclude_unset=True),
+                    event_id,
+                    effective_from_occurrence_key=effective_from_occurrence_key,
+                )
+            ],
             origin="rest",
         )
     except CalendarTargetNotFound:
@@ -439,6 +460,172 @@ async def delete_event(
         raise HTTPException(404, "Event not found")
     await session.commit()
     await _schedule_index(user.id)
+
+
+@app.get("/calendar/occurrences", response_model=CursorPage[CalendarOccurrenceResponse])
+async def list_calendar_occurrences(
+    resource: Literal["all", "task", "event"] = "all",
+    series_id: uuid.UUID | None = None,
+    from_datetime: datetime | None = Query(default=None, alias="from"),
+    to_datetime: datetime | None = Query(default=None, alias="to"),
+    status: Literal["open", "completed"] | None = None,
+    limit: int = Query(100, ge=1, le=100),
+    cursor: str | None = Query(default=None, max_length=4096),
+    user: User = Depends(current_user),
+    session: AsyncSession = Depends(get_session),
+) -> CursorPage[CalendarOccurrenceResponse]:
+    if (
+        from_datetime
+        and to_datetime
+        and normalize_datetime(from_datetime, user) >= normalize_datetime(to_datetime, user)
+    ):
+        raise HTTPException(422, "from must be earlier than to")
+    try:
+        page = await OccurrenceService.page(
+            session,
+            user,
+            resource=resource,
+            series_id=series_id,
+            from_datetime=from_datetime,
+            to_datetime=to_datetime,
+            status=status,
+            limit=limit,
+            cursor=cursor,
+        )
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    return CursorPage(
+        items=[
+            CalendarOccurrenceResponse.model_validate(occurrence_dict(item)) for item in page.items
+        ],
+        total=page.total,
+        has_more=page.has_more,
+        next_cursor=page.next_cursor,
+    )
+
+
+async def _update_occurrence(
+    resource: Literal["task", "event"],
+    target_id: uuid.UUID,
+    occurrence_key: str,
+    payload: dict,
+    user: User,
+    session: AsyncSession,
+) -> CalendarOccurrenceResponse:
+    if {"recurrence", "recurrence_timezone"} & payload.keys():
+        raise HTTPException(422, "recurrence can only be changed for a series")
+    try:
+        operation = (
+            await CalendarCommandService.execute(
+                session,
+                user,
+                [
+                    CalendarMutation(
+                        "update",
+                        resource,
+                        payload,
+                        target_id,
+                        scope="occurrence",
+                        occurrence_key=occurrence_key,
+                    )
+                ],
+                origin="rest",
+            )
+        )[0]
+    except CalendarTargetNotFound as exc:
+        raise HTTPException(404, "Calendar occurrence not found") from exc
+    await session.commit()
+    await _schedule_index(user.id)
+    data = operation.after_state or {}
+    schedule_field = "deadline" if resource == "task" else "starts_at"
+    scheduled_at = data[schedule_field]
+    return CalendarOccurrenceResponse(
+        resource=resource,
+        series_id=target_id,
+        occurrence_key=occurrence_key,
+        original_at=parse_occurrence_key(occurrence_key)[1],
+        scheduled_at=scheduled_at,
+        recurring=True,
+        data=data,
+    )
+
+
+async def _delete_occurrence(
+    resource: Literal["task", "event"],
+    target_id: uuid.UUID,
+    occurrence_key: str,
+    user: User,
+    session: AsyncSession,
+) -> None:
+    try:
+        await CalendarCommandService.execute(
+            session,
+            user,
+            [
+                CalendarMutation(
+                    "delete",
+                    resource,
+                    {},
+                    target_id,
+                    scope="occurrence",
+                    occurrence_key=occurrence_key,
+                )
+            ],
+            origin="rest",
+        )
+    except CalendarTargetNotFound as exc:
+        raise HTTPException(404, "Calendar occurrence not found") from exc
+    await session.commit()
+
+
+@app.patch(
+    "/tasks/{task_id}/occurrences/{occurrence_key}", response_model=CalendarOccurrenceResponse
+)
+async def update_task_occurrence(
+    task_id: uuid.UUID,
+    occurrence_key: str,
+    data: TaskUpdate,
+    user: User = Depends(current_user),
+    session: AsyncSession = Depends(get_session),
+) -> CalendarOccurrenceResponse:
+    return await _update_occurrence(
+        "task", task_id, occurrence_key, data.model_dump(exclude_unset=True), user, session
+    )
+
+
+@app.delete("/tasks/{task_id}/occurrences/{occurrence_key}", status_code=204)
+async def delete_task_occurrence(
+    task_id: uuid.UUID,
+    occurrence_key: str,
+    user: User = Depends(current_user),
+    session: AsyncSession = Depends(get_session),
+) -> None:
+    await _delete_occurrence("task", task_id, occurrence_key, user, session)
+
+
+@app.patch(
+    "/events/{event_id}/occurrences/{occurrence_key}", response_model=CalendarOccurrenceResponse
+)
+async def update_event_occurrence(
+    event_id: uuid.UUID,
+    occurrence_key: str,
+    data: EventUpdate,
+    user: User = Depends(current_user),
+    session: AsyncSession = Depends(get_session),
+) -> CalendarOccurrenceResponse:
+    return await _update_occurrence(
+        "event", event_id, occurrence_key, data.model_dump(exclude_unset=True), user, session
+    )
+
+
+@app.delete("/events/{event_id}/occurrences/{occurrence_key}", status_code=204)
+async def delete_event_occurrence(
+    event_id: uuid.UUID,
+    occurrence_key: str,
+    user: User = Depends(current_user),
+    session: AsyncSession = Depends(get_session),
+) -> None:
+    await _delete_occurrence("event", event_id, occurrence_key, user, session)
 
 
 @app.get("/calendar/history", response_model=Page[CalendarOperationResponse])

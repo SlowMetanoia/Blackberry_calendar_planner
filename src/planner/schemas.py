@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from typing import Generic, Literal, TypeVar
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -81,12 +81,77 @@ class UserPreferencesUpdate(StrictInput):
         return self
 
 
+class RecurrenceEnd(StrictInput):
+    kind: Literal["never", "until", "count"] = "never"
+    until: date | None = None
+    count: int | None = Field(default=None, strict=True, ge=1, le=10_000)
+
+    @model_validator(mode="after")
+    def valid_end(self):
+        if self.kind == "until" and self.until is None:
+            raise ValueError("until is required for an until recurrence")
+        if self.kind == "count" and self.count is None:
+            raise ValueError("count is required for a count recurrence")
+        if self.kind != "until" and self.until is not None:
+            raise ValueError("until is only valid for an until recurrence")
+        if self.kind != "count" and self.count is not None:
+            raise ValueError("count is only valid for a count recurrence")
+        return self
+
+
+class MonthlyPattern(StrictInput):
+    kind: Literal["day_of_month", "nth_weekday", "last_day"]
+    day: int | None = Field(default=None, strict=True, ge=1, le=31)
+    ordinal: int | None = Field(default=None, strict=True)
+    weekday: Literal["MO", "TU", "WE", "TH", "FR", "SA", "SU"] | None = None
+
+    @model_validator(mode="after")
+    def valid_pattern(self):
+        if self.kind == "day_of_month" and self.day is None:
+            raise ValueError("day is required for a day-of-month recurrence")
+        if self.kind == "nth_weekday" and (
+            self.ordinal not in {1, 2, 3, 4, -1} or self.weekday is None
+        ):
+            raise ValueError("nth-weekday recurrence requires ordinal and weekday")
+        return self
+
+
+class RecurrenceRule(StrictInput):
+    frequency: Literal["daily", "weekly", "monthly", "yearly"]
+    interval: int = Field(default=1, strict=True, ge=1, le=MAX_INTEGER)
+    weekdays: list[Literal["MO", "TU", "WE", "TH", "FR", "SA", "SU"]] | None = None
+    monthly: MonthlyPattern | None = None
+    end: RecurrenceEnd = Field(default_factory=RecurrenceEnd)
+
+    @model_validator(mode="after")
+    def valid_rule(self):
+        if self.frequency == "weekly" and self.weekdays is not None and not self.weekdays:
+            raise ValueError("weekdays cannot be empty")
+        if self.frequency != "weekly" and self.weekdays is not None:
+            raise ValueError("weekdays are only valid for weekly recurrence")
+        if self.frequency != "monthly" and self.monthly is not None:
+            raise ValueError("monthly pattern is only valid for monthly recurrence")
+        return self
+
+
 class TaskCreate(StrictInput):
     title: str = Field(min_length=1, max_length=500)
     description: str | None = Field(default=None, max_length=MAX_TEXT_LENGTH)
     deadline: datetime | None = None
     estimated_minutes: int | None = Field(default=None, strict=True, ge=1, le=MAX_INTEGER)
     status: Literal["open", "completed"] = "open"
+    recurrence: RecurrenceRule | None = None
+    recurrence_timezone: str | None = Field(default=None, min_length=1, max_length=64)
+
+    @model_validator(mode="after")
+    def valid_recurrence(self):
+        if self.recurrence is not None and self.deadline is None:
+            raise ValueError("a recurring task requires a deadline")
+        if self.recurrence is None and self.recurrence_timezone is not None:
+            raise ValueError("recurrence_timezone requires recurrence")
+        if self.recurrence_timezone is not None:
+            TimezoneValue(timezone=self.recurrence_timezone)
+        return self
 
 
 class TaskUpdate(StrictInput):
@@ -95,6 +160,8 @@ class TaskUpdate(StrictInput):
     deadline: datetime | None = None
     estimated_minutes: int | None = Field(default=None, strict=True, ge=1, le=MAX_INTEGER)
     status: Literal["open", "completed"] | None = None
+    recurrence: RecurrenceRule | None = None
+    recurrence_timezone: str | None = Field(default=None, min_length=1, max_length=64)
 
     @model_validator(mode="after")
     def valid_update(self):
@@ -103,6 +170,8 @@ class TaskUpdate(StrictInput):
         for field in {"title", "status"} & self.model_fields_set:
             if getattr(self, field) is None:
                 raise ValueError(f"{field} cannot be null")
+        if self.recurrence_timezone is not None:
+            TimezoneValue(timezone=self.recurrence_timezone)
         return self
 
 
@@ -112,6 +181,16 @@ class EventCreate(StrictInput):
     starts_at: datetime
     duration_minutes: int | None = Field(default=None, strict=True, ge=1, le=MAX_INTEGER)
     location: str | None = Field(default=None, max_length=500)
+    recurrence: RecurrenceRule | None = None
+    recurrence_timezone: str | None = Field(default=None, min_length=1, max_length=64)
+
+    @model_validator(mode="after")
+    def valid_recurrence(self):
+        if self.recurrence is None and self.recurrence_timezone is not None:
+            raise ValueError("recurrence_timezone requires recurrence")
+        if self.recurrence_timezone is not None:
+            TimezoneValue(timezone=self.recurrence_timezone)
+        return self
 
 
 class EventUpdate(StrictInput):
@@ -120,6 +199,8 @@ class EventUpdate(StrictInput):
     starts_at: datetime | None = None
     duration_minutes: int | None = Field(default=None, strict=True, ge=1, le=MAX_INTEGER)
     location: str | None = Field(default=None, max_length=500)
+    recurrence: RecurrenceRule | None = None
+    recurrence_timezone: str | None = Field(default=None, min_length=1, max_length=64)
 
     @model_validator(mode="after")
     def valid_update(self):
@@ -128,6 +209,8 @@ class EventUpdate(StrictInput):
         for field in {"title", "starts_at"} & self.model_fields_set:
             if getattr(self, field) is None:
                 raise ValueError(f"{field} cannot be null")
+        if self.recurrence_timezone is not None:
+            TimezoneValue(timezone=self.recurrence_timezone)
         return self
 
 
@@ -163,6 +246,9 @@ class CalendarOperationResponse(BaseModel):
     operation: Literal["create", "update", "delete"]
     resource: Literal["task", "event"]
     target_id: uuid.UUID
+    scope: Literal["series", "occurrence"] = "series"
+    occurrence_key: str | None = None
+    effective_from_occurrence_key: str | None = None
     before: dict | None
     after: dict | None
     changes: dict
@@ -181,6 +267,9 @@ class CalendarOperationResponse(BaseModel):
             operation=operation.operation,
             resource=operation.resource,
             target_id=operation.target_id,
+            scope=operation.scope,
+            occurrence_key=operation.occurrence_key,
+            effective_from_occurrence_key=operation.effective_from_occurrence_key,
             before=operation.before_state,
             after=operation.after_state,
             changes=operation.changes,
@@ -197,6 +286,26 @@ class AgentDisplayItemResponse(BaseModel):
     data: dict
 
 
+class CalendarOccurrenceResponse(BaseModel):
+    resource: Literal["task", "event"]
+    series_id: uuid.UUID
+    occurrence_key: str
+    original_at: datetime
+    scheduled_at: datetime
+    recurring: bool
+    data: dict
+
+
+T = TypeVar("T")
+
+
+class CursorPage(BaseModel, Generic[T]):
+    items: list[T]
+    total: int
+    has_more: bool
+    next_cursor: str | None = None
+
+
 class AgentMessageResponse(BaseModel):
     id: uuid.UUID
     conversation_id: uuid.UUID
@@ -211,9 +320,6 @@ class AgentMessageResponse(BaseModel):
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
-
-
-T = TypeVar("T")
 
 
 class Page(BaseModel, Generic[T]):
@@ -310,6 +416,9 @@ class DecisionTaskUpdateAction(StrictInput):
     resource: Literal["task"]
     target_id: uuid.UUID
     payload: DecisionTaskUpdatePayload
+    scope: Literal["series", "occurrence"] = "series"
+    occurrence_key: str | None = None
+    effective_from_occurrence_key: str | None = None
 
 
 class DecisionTaskDeleteAction(StrictInput):
@@ -317,6 +426,8 @@ class DecisionTaskDeleteAction(StrictInput):
     resource: Literal["task"]
     target_id: uuid.UUID
     payload: DecisionDeletePayload
+    scope: Literal["series", "occurrence"] = "series"
+    occurrence_key: str | None = None
 
 
 class DecisionEventCreateAction(StrictInput):
@@ -331,6 +442,9 @@ class DecisionEventUpdateAction(StrictInput):
     resource: Literal["event"]
     target_id: uuid.UUID
     payload: DecisionEventUpdatePayload
+    scope: Literal["series", "occurrence"] = "series"
+    occurrence_key: str | None = None
+    effective_from_occurrence_key: str | None = None
 
 
 class DecisionEventDeleteAction(StrictInput):
@@ -338,6 +452,8 @@ class DecisionEventDeleteAction(StrictInput):
     resource: Literal["event"]
     target_id: uuid.UUID
     payload: DecisionDeletePayload
+    scope: Literal["series", "occurrence"] = "series"
+    occurrence_key: str | None = None
 
 
 DecisionAction = (

@@ -277,3 +277,48 @@ async def test_retriever_searches_description_with_half_open_time_filter(session
         match["kind"] == "substring" and match["field"] == "description"
         for match in page.items[0]["matches"]
     )
+
+
+@pytest.mark.asyncio
+async def test_retriever_groups_series_and_caps_occurrence_dates_at_one_hundred(session, user):
+    created = (
+        await CalendarCommandService.execute(
+            session,
+            user,
+            [
+                CalendarMutation(
+                    "create",
+                    "event",
+                    {
+                        "title": "Ежедневная практика",
+                        "starts_at": datetime(2026, 1, 1, 8, tzinfo=UTC),
+                        "recurrence": {
+                            "frequency": "daily",
+                            "end": {"kind": "count", "count": 120},
+                        },
+                    },
+                )
+            ],
+            origin="rest",
+        )
+    )[0]
+
+    page = await CalendarRetriever.search_ready(
+        session,
+        user,
+        query="ежедневная практика",
+        query_embedding=vector(0, 1),
+        embedding_model="test-model",
+        index_generation=1,
+        resource="event",
+        from_datetime=datetime(2026, 1, 1, tzinfo=UTC),
+        to_datetime=datetime(2026, 6, 1, tzinfo=UTC),
+    )
+
+    assert page.total == 1
+    assert page.items[0]["id"] == str(created.target_id)
+    data = page.items[0]["data"]
+    assert len(data["occurrence_dates"]) == 100
+    assert data["occurrence_total"] == 120
+    assert data["occurrence_has_more"] is True
+    assert data["occurrence_cursor"] is not None

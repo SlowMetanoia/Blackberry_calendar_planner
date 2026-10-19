@@ -1,4 +1,4 @@
-import type { CalendarEntry, Event, Task } from "./types";
+import type { CalendarEntry, CalendarOccurrence, Event, Task } from "./types";
 
 function taskEntry(task:Task):CalendarEntry|null {
   if(task.status!=="open"||!task.deadline)return null;
@@ -19,6 +19,23 @@ export function toCalendarEntries(tasks:Task[],events:Event[]):CalendarEntry[] {
     ...tasks.map(taskEntry).filter((item):item is CalendarEntry=>item!==null),
     ...events.map(eventEntry),
   ];
+}
+
+export function occurrenceEntry(item:CalendarOccurrence):CalendarEntry {
+  if(item.resource==="task"){
+    const task=item.data as Task;
+    return {id:item.series_id,resource:"task",title:task.title,startsAt:item.scheduled_at,durationMinutes:task.estimated_minutes,task,occurrenceKey:item.occurrence_key,recurring:item.recurring};
+  }
+  const event=item.data as Event;
+  return {id:item.series_id,resource:"event",title:event.title,startsAt:item.scheduled_at,durationMinutes:event.duration_minutes,event,occurrenceKey:item.occurrence_key,recurring:item.recurring};
+}
+
+export function occurrencesToEntries(items:CalendarOccurrence[]):CalendarEntry[]{return items.map(occurrenceEntry);}
+
+export function partitionOccurrenceEntries(items:CalendarOccurrence[],undated:Task[],now:Date,days:number){
+  const nowTime=now.getTime(),endTime=nowTime+days*24*60*60*1000,entries=occurrencesToEntries(items);
+  const byTime=(left:CalendarEntry,right:CalendarEntry)=>timestamp(left.startsAt)-timestamp(right.startsAt)||left.title.localeCompare(right.title,"ru");
+  return {overdue:entries.filter(item=>item.resource==="task"&&item.task?.status==="open"&&timestamp(item.startsAt)<nowTime).sort(byTime),upcoming:entries.filter(item=>timestamp(item.startsAt)>=nowTime&&timestamp(item.startsAt)<endTime&&(item.resource==="event"||item.task?.status==="open")).sort(byTime),undated:undated.filter(item=>item.status==="open")};
 }
 
 export function partitionUpcoming(tasks:Task[],events:Event[],now:Date,days:number):{

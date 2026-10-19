@@ -8,6 +8,7 @@ from pydantic import Field
 
 from .config import get_settings
 from .models import User
+from .occurrences import OccurrenceService, occurrence_dict
 from .schemas import DecisionAction, DecisionTimeRange, StrictInput
 from .search import CalendarRetriever
 from .services import EventService, TaskService
@@ -94,7 +95,11 @@ def _resource_dict(resource: str, row: Any) -> dict[str, Any]:
     data = {
         column.name: getattr(row, column.name)
         for column in row.__table__.columns
-        if column.name != "owner_id"
+        if column.name not in {"owner_id", "recurrence_version_id"}
+        and not (
+            column.name in {"recurrence", "recurrence_timezone"}
+            and getattr(row, column.name) is None
+        )
     }
     return json.loads(
         json.dumps({"resource": resource, "id": str(row.id), "data": data}, default=str)
@@ -111,6 +116,23 @@ def _list_executor(resource: Literal["task", "event"]) -> ToolExecutor:
             raise LookupError("agent owner not found")
         service = TaskService if resource == "task" else EventService
         time_range = args.time_range
+        if time_range is not None:
+            page = await OccurrenceService.page(
+                context.session,
+                user,
+                resource=resource,
+                from_datetime=time_range.from_datetime,
+                to_datetime=time_range.to_datetime,
+                limit=min(args.limit, observation_limit),
+            )
+            return [
+                {
+                    "resource": resource,
+                    "id": str(item.series_id),
+                    "data": occurrence_dict(item),
+                }
+                for item in page.items
+            ]
         rows, _total = await service.page(
             context.session,
             user,

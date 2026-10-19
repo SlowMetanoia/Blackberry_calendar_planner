@@ -6,6 +6,7 @@ from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
     JSON,
     BigInteger,
+    Boolean,
     CheckConstraint,
     DateTime,
     Enum,
@@ -85,6 +86,9 @@ class Task(Base):
     deadline: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     estimated_minutes: Mapped[int | None] = mapped_column()
     status: Mapped[str] = mapped_column(String(32), default="open")
+    recurrence: Mapped[dict | None] = mapped_column(JSON(none_as_null=True))
+    recurrence_timezone: Mapped[str | None] = mapped_column(String(64))
+    recurrence_version_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
 
 
 class Event(Base):
@@ -114,6 +118,49 @@ class Event(Base):
     starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     duration_minutes: Mapped[int | None] = mapped_column()
     location: Mapped[str | None] = mapped_column(String(500))
+    recurrence: Mapped[dict | None] = mapped_column(JSON(none_as_null=True))
+    recurrence_timezone: Mapped[str | None] = mapped_column(String(64))
+    recurrence_version_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+
+
+class CalendarScheduleVersion(Base):
+    __tablename__ = "calendar_schedule_versions"
+    __table_args__ = (
+        CheckConstraint("resource IN ('task', 'event')", name="ck_schedule_versions_resource"),
+        Index("ix_schedule_versions_series", "owner_id", "resource", "series_id"),
+    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    owner_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    resource: Mapped[str] = mapped_column(String(16))
+    series_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
+    anchor_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    recurrence: Mapped[dict | None] = mapped_column(JSON(none_as_null=True))
+    timezone: Mapped[str] = mapped_column(String(64))
+    active_from: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    active_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class CalendarOccurrenceException(Base):
+    __tablename__ = "calendar_occurrence_exceptions"
+    __table_args__ = (
+        CheckConstraint("resource IN ('task', 'event')", name="ck_occurrence_exceptions_resource"),
+        UniqueConstraint("owner_id", "resource", "series_id", "occurrence_key"),
+        Index("ix_occurrence_exceptions_effective", "owner_id", "resource", "effective_at"),
+    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    owner_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    resource: Mapped[str] = mapped_column(String(16))
+    series_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
+    occurrence_key: Mapped[str] = mapped_column(String(255))
+    version_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
+    original_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    effective_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    patch: Mapped[dict] = mapped_column(JSON, default=dict)
+    cancelled: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
 class CalendarSearchDocument(Base):
@@ -219,6 +266,7 @@ class CalendarOperation(Base):
             name="ck_calendar_operations_operation",
         ),
         CheckConstraint("resource IN ('task', 'event')", name="ck_calendar_operations_resource"),
+        CheckConstraint("scope IN ('series', 'occurrence')", name="ck_calendar_operations_scope"),
         CheckConstraint(
             "origin IN ('agent', 'rest', 'undo')", name="ck_calendar_operations_origin"
         ),
@@ -242,6 +290,9 @@ class CalendarOperation(Base):
     operation: Mapped[str] = mapped_column(String(16))
     resource: Mapped[str] = mapped_column(String(16))
     target_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
+    scope: Mapped[str] = mapped_column(String(16), default="series", server_default="series")
+    occurrence_key: Mapped[str | None] = mapped_column(String(255))
+    effective_from_occurrence_key: Mapped[str | None] = mapped_column(String(255))
     before_state: Mapped[dict | None] = mapped_column(JSON(none_as_null=True))
     after_state: Mapped[dict | None] = mapped_column(JSON(none_as_null=True))
     changes: Mapped[dict] = mapped_column(JSON, default=dict)

@@ -18,12 +18,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from .config import Settings
 from .embeddings import EmbeddingClient, EmbeddingError
 from .models import (
+    CalendarOccurrenceException,
     CalendarSearchDocument,
     CalendarSearchIndexState,
     Event,
     Task,
     User,
 )
+from .occurrences import OccurrenceService
 from .services import normalize_datetime
 
 ResourceFilter = Literal["all", "task", "event"]
@@ -149,7 +151,11 @@ def _resource_dict(resource: str, row: Task | Event) -> dict[str, Any]:
     data = {
         column.name: getattr(row, column.name)
         for column in row.__table__.columns
-        if column.name != "owner_id"
+        if column.name not in {"owner_id", "recurrence_version_id"}
+        and not (
+            column.name in {"recurrence", "recurrence_timezone"}
+            and getattr(row, column.name) is None
+        )
     }
     return json.loads(
         json.dumps({"resource": resource, "id": str(row.id), "data": data}, default=str)
@@ -283,15 +289,32 @@ class CalendarRetriever:
         normalized_to = normalize_datetime(to_datetime, user)
         for document in documents:
             model = Task if document.resource == "task" else Event
-            temporal_column = model.deadline if document.resource == "task" else model.starts_at
             row_conditions = [model.id == document.target_id, model.owner_id == user.id]
-            if normalized_from is not None:
-                row_conditions.append(temporal_column >= normalized_from)
-            if normalized_to is not None:
-                row_conditions.append(temporal_column < normalized_to)
             row = await session.scalar(select(model).where(*row_conditions))
             if row is None:
                 continue
+
+            occurrence_page = None
+            if normalized_from is not None or normalized_to is not None:
+                occurrence_page = await OccurrenceService.page(
+                    session,
+                    user,
+                    resource=document.resource,
+                    series_id=document.target_id,
+                    from_datetime=normalized_from,
+                    to_datetime=normalized_to,
+                    limit=100,
+                )
+                if occurrence_page.total == 0:
+                    continue
+            elif getattr(row, "recurrence", None) is not None:
+                occurrence_page = await OccurrenceService.preview(
+                    session,
+                    user,
+                    resource=document.resource,
+                    series_id=document.target_id,
+                    limit=5,
+                )
 
             matches: list[dict[str, Any]] = []
             for field, value in (
@@ -333,6 +356,13 @@ class CalendarRetriever:
             if not matches:
                 continue
             item = _resource_dict(document.resource, row)
+            if occurrence_page is not None:
+                item["data"]["occurrence_dates"] = [
+                    value.scheduled_at.isoformat() for value in occurrence_page.items
+                ]
+                item["data"]["occurrence_total"] = occurrence_page.total
+                item["data"]["occurrence_has_more"] = occurrence_page.has_more
+                item["data"]["occurrence_cursor"] = occurrence_page.next_cursor
             item["matches"] = matches
             best_order = min(MATCH_ORDER[match["kind"]] for match in matches)
             best_score = max(float(match.get("score", 1.0)) for match in matches)
@@ -373,12 +403,37 @@ async def rebuild_search_documents(session: AsyncSession, user: User) -> None:
     for resource, model in (("task", Task), ("event", Event)):
         rows = list((await session.scalars(select(model).where(model.owner_id == user.id))).all())
         for row in rows:
+            overrides = list(
+                (
+                    await session.scalars(
+                        select(CalendarOccurrenceException).where(
+                            CalendarOccurrenceException.owner_id == user.id,
+                            CalendarOccurrenceException.resource == resource,
+                            CalendarOccurrenceException.series_id == row.id,
+                            CalendarOccurrenceException.cancelled.is_(False),
+                        )
+                    )
+                ).all()
+            )
+            aliases = sorted(
+                {
+                    str(value)
+                    for item in overrides
+                    for field in ("title", "description")
+                    if (value := (item.patch or {}).get(field))
+                }
+            )
             await sync_search_document(
                 session,
                 user.id,
                 resource,
                 row.id,
-                {"title": row.title, "description": row.description},
+                {
+                    "title": row.title,
+                    "description": "\n".join(
+                        value for value in [row.description or "", *aliases] if value
+                    ),
+                },
             )
     await mark_search_index_dirty(session, user.id)
 
