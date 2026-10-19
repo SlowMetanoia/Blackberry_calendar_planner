@@ -14,6 +14,7 @@ services:
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_started }
+      guard: { condition: service_healthy }
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
       interval: 10s
@@ -28,6 +29,22 @@ services:
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_started }
+      guard: { condition: service_healthy }
+  guard:
+    build: ./guard
+    environment:
+      GUARD_MODEL: ${GUARD_MODEL:-auren-research/lunaris-guardv3}
+      GUARD_MAX_LENGTH: ${GUARD_MAX_LENGTH:-2048}
+      GUARD_INJECTION_THRESHOLD: ${GUARD_INJECTION_THRESHOLD:-0.5}
+      GUARD_SAFETY_THRESHOLD: ${GUARD_SAFETY_THRESHOLD:-0.5}
+    ports: ["${GUARD_PORT:-8090}:8090"]
+    expose: ["8090"]
+    volumes: ["guard_models:/models"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8090/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
   indexer:
     build: .
     command: arq planner.search_worker.SearchWorkerSettings
@@ -62,3 +79,4 @@ services:
 volumes:
   postgres_data:
   audio_data:
+  guard_models:

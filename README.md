@@ -1,5 +1,42 @@
 # Smart Planner
 
+## Safety guard
+
+The API has a Russian-capable, optional safety boundary before the planner
+agent. Set `GUARD_ENABLED=true` and point `GUARD_BASE_URL` at a local guard
+service. The service receives:
+
+```json
+{"model":"auren-research/lunaris-guardv3","text":"...","source":"user_input"}
+```
+
+at `POST /classify` and should return:
+
+```json
+{
+  "action": "allow",
+  "label": "none",
+  "score": 0.01,
+  "reason": "..."
+}
+```
+
+Use `action: "refuse"` for prompt injection, hate speech, extremist praise,
+violence, sexual abuse, or other unsafe content. Use `label: "off_topic"` and
+`action: "clarify"` for requests unrelated to calendar tasks and events.
+
+The default configured model is `auren-research/lunaris-guardv3`. It is a
+multilingual model with prompt-injection and safety heads; evaluate it on a
+Russian test set before production rollout. The backend still performs
+deterministic pattern checks and independent owner/schema/tool authorization,
+so the guard model is not treated as an authorization mechanism.
+
+The default Docker Compose setup now includes this guard service. The first
+startup downloads the model into the `guard_models` volume and can take time.
+The API calls it internally at `http://guard:8090/classify`; users continue to
+send messages to the existing chat endpoint and do not call the guard endpoint
+directly.
+
 Асинхронный backend умного ежедневника. API принимает текстовые и голосовые сообщения,
 ставит их в Redis-очередь, а worker выполняет STT/LLM-обработку и сохраняет результат в PostgreSQL.
 Агентный pipeline оркестрируется LangGraph; его граф скрыт за внутренним `run_agent`-контрактом.

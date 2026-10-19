@@ -40,6 +40,7 @@ from .models import AgentMessage, CalendarOperation, User
 from .occurrences import OccurrenceService
 from .prompts_manager import get_prompts_manager
 from .search import SearchIndexUnavailable
+from .safety import GuardDecision, classify, refusal_for
 from .services import EventService, TaskService
 
 logger = logging.getLogger(__name__)
@@ -86,6 +87,7 @@ class AgentState(TypedDict, total=False):
     display_refs: list[dict[str, str]]
     operations: list[dict]
     known_resources: list[str]
+    guard_decision: GuardDecision
 
 
 class LLMProtocolError(RuntimeError):
@@ -396,6 +398,22 @@ async def _prepare_context(state: AgentState) -> AgentState:
     }
 
 
+async def _guard_input(state: AgentState) -> AgentState:
+    decision = await classify(state["text"], get_settings(), source="user_input")
+    if decision.action == "allow":
+        return {"guard_decision": decision}
+    return {
+        "state": "completed" if decision.action == "refuse" else "needs_clarification",
+        "result": json.dumps({"reply": refusal_for(decision)}, ensure_ascii=False),
+        "guard_decision": decision,
+        "route": "blocked",
+    }
+
+
+def _route_after_guard(state: AgentState) -> Literal["prepare_context", "blocked"]:
+    return "blocked" if state.get("route") == "blocked" else "prepare_context"
+
+
 def _route_after_prepare(state: AgentState) -> Literal["call_model", "failed"]:
     return "failed" if state.get("state") == "failed" else "call_model"
 
@@ -646,6 +664,10 @@ async def _execute_read_tools(state: AgentState) -> AgentState:
             payload = {"ok": True, "tool": tool.name, "data": data}
             if metadata is not None:
                 payload["meta"] = metadata
+            # Calendar titles/descriptions are data, not instructions. Keep
+            # the observation valid JSON for the model/tool protocol while
+            # explicitly labelling the whole payload as untrusted data.
+            payload["_trust"] = "untrusted_calendar_data"
             content = json.dumps(payload, ensure_ascii=False)
         except SearchIndexUnavailable as exc:
             logger.warning("Agent search index unavailable: %s", type(exc).__name__)
@@ -716,14 +738,32 @@ async def _validate_terminal(state: AgentState) -> AgentState:
     args = call["args"]
     if name == "finish_response":
         parsed = FinishResponseArgs.model_validate(args)
+        decision = await classify(parsed.reply, get_settings(), source="model_output")
+        if decision.action != "allow":
+            return {"reply": refusal_for(decision), "route": "finish"}
         return {"reply": parsed.reply, "route": "finish"}
     if name == "request_clarification":
         parsed = RequestClarificationArgs.model_validate(args)
+        decision = await classify(parsed.question, get_settings(), source="model_output")
+        if decision.action != "allow":
+            return {"reply": refusal_for(decision), "route": "clarify"}
         return {"reply": parsed.question, "route": "clarify"}
     if name != "commit_calendar_command":
         return {"state": "failed", "result": INVALID_DECISION_RESULT, "route": "failed"}
 
     parsed = CommitCalendarCommandArgs.model_validate(args)
+    settings = get_settings()
+    texts_to_check = [parsed.reply]
+    for mutation in parsed.mutations:
+        payload = mutation.payload
+        for field in ("title", "description", "location"):
+            value = payload.get(field)
+            if isinstance(value, str):
+                texts_to_check.append(value)
+    for value in texts_to_check:
+        decision = await classify(value, settings, source="mutation_payload")
+        if decision.action != "allow":
+            return {"reply": refusal_for(decision), "route": "finish"}
     known = set(state.get("known_resources", []))
     context = state.get("context")
     user = await context.session.get(User, context.owner_id) if context else None
@@ -813,6 +853,13 @@ async def _failed(state: AgentState) -> AgentState:
     return {"state": "failed", "result": state.get("result", "Agent processing failed")}
 
 
+async def _blocked(state: AgentState) -> AgentState:
+    return {
+        "state": state.get("state", "needs_clarification"),
+        "result": state.get("result", json.dumps({"reply": "Запрос отклонён."}, ensure_ascii=False)),
+    }
+
+
 async def _clarify(state: AgentState) -> AgentState:
     if state.get("result"):
         return {"state": "needs_clarification", "result": state["result"]}
@@ -896,6 +943,7 @@ async def _finish(state: AgentState) -> AgentState:
 @lru_cache(maxsize=1)
 def _compiled_graph():
     graph = StateGraph(AgentState)
+    graph.add_node("guard_input", _guard_input)
     graph.add_node("prepare_context", _prepare_context)
     graph.add_node("call_model", _call_model)
     graph.add_node("process_model", _process_model)
@@ -905,8 +953,11 @@ def _compiled_graph():
     graph.add_node("commit_mutations", _commit_mutations)
     graph.add_node("clarify", _clarify)
     graph.add_node("failed", _failed)
+    graph.add_node("blocked", _blocked)
     graph.add_node("finish", _finish)
-    graph.add_edge(START, "prepare_context")
+    graph.add_edge(START, "guard_input")
+    graph.add_conditional_edges("guard_input", _route_after_guard)
+    graph.add_edge("blocked", END)
     graph.add_conditional_edges("prepare_context", _route_after_prepare)
     graph.add_conditional_edges("call_model", _route_after_model)
     graph.add_conditional_edges("process_model", _route_after_processing)
