@@ -30,7 +30,7 @@ export function ScheduleSection({
   onOpen,
   overdue = false,
 }: {
-  title: string;
+  title?: string;
   entries: CalendarEntry[];
   onOpen: (entry: CalendarEntry) => void;
   overdue?: boolean;
@@ -43,20 +43,22 @@ export function ScheduleSection({
   });
   return (
     <section className="grid gap-1.5">
-      <h3 className="flex items-baseline gap-1.5 px-2 text-xs font-semibold">
-        <span className={overdue ? "text-destructive" : "text-foreground"}>
-          {title}
-        </span>
-        <span className="text-[11px] font-normal text-muted-foreground">
-          {entries.length}
-        </span>
-      </h3>
-      <div className="grid gap-2.5">
+      {title && (
+        <h3 className="flex items-baseline gap-1.5 px-2 text-xs font-semibold">
+          <span className={overdue ? "text-destructive" : "text-foreground"}>
+            {title}
+          </span>
+          <span className="text-[11px] font-normal tabular-nums text-muted-foreground">
+            {entries.length}
+          </span>
+        </h3>
+      )}
+      <div className="grid gap-2">
         {[...groups.entries()].map(([date, items]) => {
           const heading = dayHeading(date);
           return (
             <div className="grid" key={date}>
-              <h4 className="flex items-baseline gap-1.5 px-2 pb-1 text-[11px] leading-none">
+              <h4 className="sticky top-0 z-10 -mx-2 flex items-baseline gap-1.5 bg-card px-4 py-1 text-[11px] leading-none">
                 <span className="font-semibold text-foreground">
                   {heading.lead}
                 </span>

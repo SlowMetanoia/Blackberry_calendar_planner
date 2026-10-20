@@ -34,10 +34,10 @@ export function ScheduleItem({
         <TooltipTrigger asChild>
           <button
             type="button"
-            className="group flex w-full items-start gap-2.5 rounded-md px-2 py-2 text-left transition-colors outline-none hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring/50"
+            className="group flex w-full items-start gap-2.5 rounded-md px-2 py-1.5 text-left transition-colors outline-none hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring/50"
             onClick={() => onOpen(entry)}
           >
-            <span className="w-10 shrink-0 pt-px text-[11px] leading-4 font-medium tabular-nums text-muted-foreground">
+            <span className="w-9 shrink-0 pt-px text-[11px] leading-4 font-medium tabular-nums text-muted-foreground">
               {entry.startsAt ? formatHistoryTime(entry.startsAt) : "—"}
             </span>
             <span
@@ -47,10 +47,10 @@ export function ScheduleItem({
               }`}
             />
             <span className="grid min-w-0 flex-1 gap-0.5">
-              <strong className="truncate text-xs font-semibold">
+              <strong className="truncate text-[13px] leading-snug font-medium">
                 {entry.title}
               </strong>
-              <small className="truncate text-[11px] font-normal text-muted-foreground">
+              <small className="truncate text-[11px] leading-snug font-normal text-muted-foreground">
                 {entryInfo(entry)}
               </small>
             </span>

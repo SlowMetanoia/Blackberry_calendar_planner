@@ -7,6 +7,11 @@ import {
 import { useCalendarStore, useSessionStore } from "../stores";
 import type { CalendarEntry } from "../../types";
 
+function timestamp(value: string): number {
+  const time = Date.parse(value);
+  return Number.isFinite(time) ? time : Number.POSITIVE_INFINITY;
+}
+
 export function useCalendarData() {
   const revision = useSessionStore((state) => state.calendarRevision);
   const upcomingDays = useCalendarStore((state) => state.upcomingDays);
@@ -33,7 +38,12 @@ export function useCalendarData() {
   }, [refresh, revision]);
 
   const entries = useMemo(
-    () => occurrencesToEntries(calendarOccurrences),
+    () =>
+      occurrencesToEntries(calendarOccurrences).sort(
+        (left, right) =>
+          timestamp(left.startsAt) - timestamp(right.startsAt) ||
+          left.title.localeCompare(right.title, "ru"),
+      ),
     [calendarOccurrences],
   );
   const occupied = useMemo(

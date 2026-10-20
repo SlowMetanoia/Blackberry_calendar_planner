@@ -39,7 +39,7 @@ export function DayDialog({
         className="max-h-[calc(100dvh-2rem)] gap-4 overflow-hidden sm:max-w-xl"
       >
         <DialogHeader className="pr-8">
-          <DialogTitle className="text-xl capitalize">
+          <DialogTitle className="text-xl">
             Дела на {label}
           </DialogTitle>
         </DialogHeader>

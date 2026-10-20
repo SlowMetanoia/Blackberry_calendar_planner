@@ -1,6 +1,5 @@
 import { useState } from "react";
 import { createPortal } from "react-dom";
-import { Maximize2Icon } from "lucide-react";
 import type {
   CalendarEntry,
   DayHover,
@@ -8,20 +7,24 @@ import type {
   Resource,
 } from "../../types";
 import { useSessionStore } from "../../libs/stores";
-import { Button } from "../ui/button";
+import { Card } from "../ui/card";
 import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
 } from "../ui/dialog";
-import { ScrollArea } from "../ui/scroll-area";
 import { CalendarItemDialog } from "./CalendarItemDialog";
 import { DayDialog } from "./DayDialog";
 import { DayHoverPreview } from "./DayHoverPreview";
 import { MonthCalendar } from "./MonthCalendar";
 import { UpcomingPanel } from "./UpcomingPanel";
 import { useCalendarData } from "../../libs/hooks/use-calendar-data";
+
+function currentMonth(): Date {
+  const now = new Date();
+  return new Date(now.getFullYear(), now.getMonth(), 1, 12);
+}
 
 export function CalendarView() {
   const data = useCalendarData();
@@ -30,6 +33,7 @@ export function CalendarView() {
   );
   const onError = useSessionStore((state) => state.setError);
   const [fullOpen, setFullOpen] = useState(false);
+  const [month, setMonth] = useState(currentMonth);
   const [dayOpen, setDayOpen] = useState<string | null>(null);
   const [dayHover, setDayHover] = useState<DayHover | null>(null);
   const [editor, setEditor] = useState<EditorState | null>(null);
@@ -59,33 +63,25 @@ export function CalendarView() {
   const calendar = (fullscreen: boolean) => (
     <MonthCalendar
       fullscreen={fullscreen}
+      month={month}
       occupied={data.occupied}
+      entriesByDate={data.entriesByDate}
+      onMonthChange={setMonth}
       onRangeChange={data.updateVisibleRange}
       onOpenDate={openDate}
       onDayHover={handleDayHover}
+      onExpand={fullscreen ? undefined : () => setFullOpen(true)}
     />
   );
 
   return (
     <>
-      <ScrollArea
-        className="min-h-0 flex-1"
-        viewportClassName="px-4 py-5 sm:px-7"
-      >
-        <div className="mx-auto grid w-full max-w-6xl items-start gap-4 lg:grid-cols-[minmax(0,1.6fr)_minmax(320px,1fr)]">
-          <section className="grid gap-2" aria-label="Календарь месяца">
-            <div className="planner-calendar rounded-xl bg-card p-3 ring-1 ring-border/70">
+      <div className="min-h-0 flex-1 overflow-y-auto xl:overflow-hidden">
+        <div className="mx-auto grid min-h-full w-full max-w-[1600px] gap-4 p-4 sm:p-6 xl:h-full xl:grid-cols-[minmax(0,1fr)_20rem] xl:grid-rows-[minmax(0,1fr)] 2xl:grid-cols-[minmax(0,1fr)_22rem]">
+          <section className="flex min-h-0 flex-col" aria-label="Календарь месяца">
+            <Card className="flex min-h-[34rem] flex-1 flex-col overflow-hidden ring-border/70 [--card-spacing:0px] xl:min-h-0">
               {calendar(false)}
-            </div>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="w-fit justify-self-end text-muted-foreground hover:text-foreground"
-              onClick={() => setFullOpen(true)}
-            >
-              <Maximize2Icon aria-hidden="true" />
-              Развернуть календарь
-            </Button>
+            </Card>
           </section>
 
           <UpcomingPanel
@@ -101,7 +97,7 @@ export function CalendarView() {
             onOpenEntry={openEntry}
           />
         </div>
-      </ScrollArea>
+      </div>
 
       {dayHover &&
         createPortal(
@@ -117,12 +113,14 @@ export function CalendarView() {
       <Dialog open={fullOpen} onOpenChange={setFullOpen}>
         <DialogContent
           closeLabel="Закрыть подробный календарь"
-          className="h-[min(900px,calc(100dvh-2rem))] w-[min(1500px,calc(100vw-2rem))] grid-rows-[auto_minmax(0,1fr)] gap-3 p-4 sm:max-w-[min(1500px,calc(100vw-2rem))]"
+          className="flex h-[min(920px,calc(100dvh-2rem))] w-[min(1500px,calc(100vw-2rem))] flex-col gap-0 overflow-hidden p-0 sm:max-w-[min(1500px,calc(100vw-2rem))]"
         >
-          <DialogHeader className="pr-8">
-            <DialogTitle className="text-xl">Подробный календарь</DialogTitle>
+          <DialogHeader className="sr-only">
+            <DialogTitle>Подробный календарь</DialogTitle>
           </DialogHeader>
-          <div className="calendar-full min-h-0">{calendar(true)}</div>
+          <div className="calendar-full flex min-h-0 flex-1 flex-col">
+            {calendar(true)}
+          </div>
         </DialogContent>
       </Dialog>
 

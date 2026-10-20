@@ -141,49 +141,7 @@
   }
 }
 
-/* FullCalendar renders its own markup, so its palette is inherited from here - */
-
-.planner-calendar,
-.calendar-full {
-  --fc-classic-button: var(--card);
-  --fc-classic-button-border: var(--border);
-  --fc-classic-button-strong: var(--muted);
-  --fc-classic-button-strong-border: var(--border);
-  --fc-classic-button-outline: var(--ring);
-  --fc-classic-button-foreground: var(--foreground);
-  --fc-classic-primary: var(--primary);
-  --fc-classic-primary-foreground: var(--primary-foreground);
-  --fc-classic-today: color-mix(in oklab, var(--accent) 45%, transparent);
-  --fc-classic-now: var(--destructive);
-  --fc-classic-highlight: color-mix(in oklab, var(--accent) 35%, transparent);
-  --fc-classic-background: var(--card);
-  --fc-classic-foreground: var(--foreground);
-  --fc-classic-muted-foreground: var(--muted-foreground);
-  --fc-classic-faint-foreground: var(--muted-foreground);
-  --fc-classic-faint: color-mix(in oklab, var(--foreground) 5%, transparent);
-  --fc-classic-muted: color-mix(in oklab, var(--foreground) 8%, transparent);
-  --fc-classic-strong: color-mix(in oklab, var(--foreground) 14%, transparent);
-  --fc-classic-border: var(--border);
-  --fc-classic-strong-border: var(--input);
-}
-
-.dark .planner-calendar,
-.dark .calendar-full {
-  --fc-classic-today: color-mix(in oklab, var(--accent) 14%, transparent);
-}
-
-/* A dot marks days that already hold tasks or events. */
-.calendar-day-occupied::after {
-  content: "";
-  position: absolute;
-  bottom: 5px;
-  left: 50%;
-  width: 5px;
-  height: 5px;
-  margin-left: -2.5px;
-  border-radius: 999px;
-  background: var(--primary);
-}
+/* The calendar fills the workspace and scrolls its own upcoming rail. */
 
 .calendar-full {
   min-width: 0;

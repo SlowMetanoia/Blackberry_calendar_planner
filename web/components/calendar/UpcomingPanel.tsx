@@ -1,8 +1,10 @@
-import { ChevronsUpDownIcon } from "lucide-react";
+import { ChevronsDownIcon } from "lucide-react";
 import type { CalendarEntry } from "../../types";
 import { Button } from "../ui/button";
+import { Card } from "../ui/card";
 import { Label } from "../ui/label";
 import { NativeSelect } from "../ui/native-select";
+import { ScrollArea } from "../ui/scroll-area";
 import { Skeleton } from "../ui/skeleton";
 import { ScheduleList } from "./ScheduleList";
 import { ScheduleSection } from "./ScheduleSection";
@@ -32,16 +34,21 @@ export function UpcomingPanel({
   onLoadMore: () => Promise<void> | void;
   onOpenEntry: (entry: CalendarEntry) => void;
 }) {
+  const isEmpty = !loading && overviewTotal === 0;
+  const showSkeleton = loading && overviewTotal === 0;
+
   return (
-    <aside
-      className="grid content-start overflow-hidden rounded-xl bg-card ring-1 ring-border/70"
+    <Card
+      role="complementary"
       aria-label="Ближайшие дела"
+      aria-busy={loading}
+      className="flex h-[24rem] max-h-[70vh] min-h-0 flex-col overflow-hidden ring-border/70 [--card-spacing:0px] xl:h-full xl:max-h-none"
     >
-      <header className="flex items-center justify-between gap-3 border-b border-border/70 px-4 py-3">
+      <header className="flex shrink-0 items-center justify-between gap-3 border-b border-border/70 px-4 py-3">
         <div className="flex min-w-0 items-baseline gap-2">
           <h2 className="truncate text-sm font-semibold">Ближайшие дела</h2>
-          {overviewTotal > 0 && !loading && (
-            <span className="text-[11px] text-muted-foreground">
+          {overviewTotal > 0 && (
+            <span className="text-[11px] tabular-nums text-muted-foreground">
               {overviewTotal}
             </span>
           )}
@@ -49,7 +56,7 @@ export function UpcomingPanel({
         <Label htmlFor="upcoming-horizon" className="sr-only">
           Период ближайших дел
         </Label>
-        <span className="w-[84px] shrink-0">
+        <span className="w-[80px] shrink-0">
           <NativeSelect
             id="upcoming-horizon"
             aria-label="Период ближайших дел"
@@ -66,55 +73,63 @@ export function UpcomingPanel({
         </span>
       </header>
 
-      <div className="grid content-start gap-5 px-4 py-4">
-        {loading && (
-          <div className="grid gap-2">
+      <ScrollArea
+        className="min-h-0 flex-1"
+        viewportClassName="px-2 py-3"
+      >
+        {showSkeleton && (
+          <div className="grid gap-3 px-2 py-1">
             <Skeleton className="h-4 w-24" />
-            <Skeleton className="h-9 w-full" />
-            <Skeleton className="h-9 w-full" />
-            <Skeleton className="h-9 w-4/5" />
+            <Skeleton className="h-10 w-full" />
+            <Skeleton className="h-10 w-full" />
+            <Skeleton className="h-10 w-4/5" />
             <span className="sr-only">Загружаю…</span>
           </div>
         )}
-        {!loading && !overviewTotal && (
-          <p className="px-2 py-6 text-sm text-muted-foreground">
-            На этот период ничего не запланировано.
-          </p>
+
+        {isEmpty && (
+          <div className="grid place-items-center px-4 py-12 text-center">
+            <p className="text-sm font-medium">На этот период пусто</p>
+            <p className="mt-1 max-w-56 text-xs leading-relaxed text-muted-foreground">
+              Выберите день в календаре, чтобы добавить событие или задачу.
+            </p>
+          </div>
         )}
-        <ScheduleSection
-          title="Просрочено"
-          overdue
-          entries={overdue}
-          onOpen={onOpenEntry}
-        />
-        <ScheduleSection
-          title="В ближайшие дни"
-          entries={upcoming}
-          onOpen={onOpenEntry}
-        />
-        {undatedEntries.length > 0 && (
-          <section className="grid gap-1.5">
-            <h3 className="flex items-baseline gap-1.5 px-2 text-xs font-semibold">
-              <span>Без срока</span>
-              <span className="text-[11px] font-normal text-muted-foreground">
-                {undatedEntries.length}
-              </span>
-            </h3>
-            <ScheduleList entries={undatedEntries} onOpen={onOpenEntry} />
-          </section>
+
+        {!showSkeleton && (
+          <div className="grid gap-5">
+            <ScheduleSection
+              title="Просрочено"
+              overdue
+              entries={overdue}
+              onOpen={onOpenEntry}
+            />
+            <ScheduleSection entries={upcoming} onOpen={onOpenEntry} />
+            {undatedEntries.length > 0 && (
+              <section className="grid gap-1.5">
+                <h3 className="flex items-baseline gap-1.5 px-2 text-xs font-semibold">
+                  <span>Без срока</span>
+                  <span className="text-[11px] font-normal tabular-nums text-muted-foreground">
+                    {undatedEntries.length}
+                  </span>
+                </h3>
+                <ScheduleList entries={undatedEntries} onOpen={onOpenEntry} />
+              </section>
+            )}
+            {overviewCursor && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="w-full"
+                onClick={() => void onLoadMore()}
+              >
+                <ChevronsDownIcon aria-hidden="true" />
+                Показать ещё
+              </Button>
+            )}
+          </div>
         )}
-        {overviewCursor && (
-          <Button
-            variant="outline"
-            size="sm"
-            className="w-fit justify-self-start"
-            onClick={() => void onLoadMore()}
-          >
-            <ChevronsUpDownIcon aria-hidden="true" />
-            Показать ещё
-          </Button>
-        )}
-      </div>
-    </aside>
+      </ScrollArea>
+    </Card>
   );
 }

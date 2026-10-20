@@ -25,7 +25,9 @@ export function DayHoverPreview({
       style={{ left: Math.max(8, x), top: y }}
     >
       <CardHeader className="gap-0 px-0">
-        <CardTitle className="text-sm capitalize">{label}</CardTitle>
+        <CardTitle className="text-sm first-letter:uppercase">
+          {label}
+        </CardTitle>
       </CardHeader>
       <CardContent className="grid gap-2 px-0">
         {entries.slice(0, 4).map((entry) => (
