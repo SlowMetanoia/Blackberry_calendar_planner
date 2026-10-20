@@ -218,6 +218,78 @@ describe("planner chat", () => {
       container.querySelector('[data-date="2030-01-01"]'),
     ).toBeInTheDocument();
   });
+  it("shows a week timeline with entry blocks sized by duration", async () => {
+    const startsAt = new Date();
+    startsAt.setHours(9, 0, 0, 0);
+    const occurrence = {
+      resource: "event" as const,
+      series_id: "e1",
+      occurrence_key: "e1",
+      original_at: startsAt.toISOString(),
+      scheduled_at: startsAt.toISOString(),
+      recurring: false,
+      data: {
+        id: "e1",
+        owner_id: "u1",
+        title: "Планёрка",
+        description: null,
+        starts_at: startsAt.toISOString(),
+        duration_minutes: 90,
+        location: null,
+      },
+    };
+    localStorage.setItem("planner-token", "token");
+    vi.mocked(api.getOccurrences).mockResolvedValue({
+      items: [occurrence],
+      total: 1,
+      has_more: false,
+      next_cursor: null,
+    });
+    render(<App />);
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Календарь" }),
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Неделя" }));
+
+    expect(
+      await screen.findByRole("button", {
+        name: "Планёрка, 09:00–10:30",
+      }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Месяц" })).toHaveAttribute(
+      "aria-pressed",
+      "false",
+    );
+    expect(screen.getByRole("button", { name: "Неделя" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+  });
+  it("prefills the clicked week slot when creating an entry", async () => {
+    const now = new Date();
+    const part = (value: number) => String(value).padStart(2, "0");
+    const dayKey = `${now.getFullYear()}-${part(now.getMonth() + 1)}-${part(now.getDate())}`;
+    localStorage.setItem("planner-token", "token");
+    const { container } = render(<App />);
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Календарь" }),
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Неделя" }));
+
+    const column = container.querySelector<HTMLElement>(
+      `[data-week-date="${dayKey}"]`,
+    );
+    expect(column).not.toBeNull();
+    fireEvent.click(column!, { clientY: 14 * 48 + 5 });
+
+    const dayDialog = await screen.findByRole("dialog", { name: /Дела на/ });
+    await userEvent.click(
+      within(dayDialog).getByRole("button", { name: "Событие" }),
+    );
+    expect(await screen.findByLabelText("Начало")).toHaveValue(
+      `${dayKey}T14:00`,
+    );
+  });
   it("collapses the sidebar template and keeps the main section", async () => {
     localStorage.setItem("planner-token", "token");
     vi.mocked(api.syncTimeZone).mockResolvedValue({ timezone: "UTC" });

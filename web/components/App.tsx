@@ -129,6 +129,7 @@ function PlannerApp() {
                 <Button
                   variant="ghost"
                   size="sm"
+                  className="max-sm:size-9"
                   aria-label="Новый диалог"
                   onClick={handleNewConversation}
                 >
@@ -138,6 +139,7 @@ function PlannerApp() {
                 <Button
                   variant="ghost"
                   size="sm"
+                  className="max-sm:size-9"
                   aria-label="История сессий"
                   onClick={() => setSessionsOpen(true)}
                 >
@@ -149,6 +151,7 @@ function PlannerApp() {
             <Button
               variant="ghost"
               size="sm"
+              className="max-sm:size-9"
               aria-label="Выйти"
               onClick={() => void handleLogout()}
             >

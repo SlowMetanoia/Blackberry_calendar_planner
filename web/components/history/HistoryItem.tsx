@@ -42,7 +42,7 @@ export function HistoryItem({
       <Tooltip>
         <TooltipTrigger asChild>
           <article
-            className={`history-item ${item.operation} group relative grid min-h-11 grid-cols-[2.5rem_auto_minmax(0,1fr)_auto] items-start gap-x-2.5 rounded-md px-1.5 py-2.5 outline-none transition-colors hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring`}
+            className={`history-item ${item.operation} group relative grid min-h-12 grid-cols-[2.25rem_auto_minmax(0,1fr)_auto] items-start gap-x-2 rounded-md px-1 py-3 outline-none transition-colors hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring sm:min-h-11 sm:grid-cols-[2.5rem_auto_minmax(0,1fr)_auto] sm:gap-x-2.5 sm:px-1.5 sm:py-2.5`}
             tabIndex={0}
             aria-label={`${operationWords[item.operation]}: ${title}${scheduled ? `. ${scheduled}` : ""}`}
           >
@@ -69,7 +69,7 @@ export function HistoryItem({
               type="button"
               variant="ghost"
               size="icon-xs"
-              className="shrink-0 text-muted-foreground hover:text-foreground"
+              className="size-8 shrink-0 text-muted-foreground hover:text-foreground sm:size-6"
               aria-label={`Отменить ${undoWords[item.operation]}`}
               onClick={(event) => {
                 event.stopPropagation();

@@ -5,6 +5,7 @@ export type EditorState = {
   resource: Resource;
   entry?: CalendarEntry;
   date?: string;
+  time?: string;
 };
 export type DayHover = { date: string; x: number; y: number };
 export type PreviewAnchor = { x: number; y: number };

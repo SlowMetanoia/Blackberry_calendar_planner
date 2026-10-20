@@ -135,9 +135,37 @@
   body {
     @apply overflow-hidden bg-background text-foreground;
     margin: 0;
+    -webkit-tap-highlight-color: transparent;
+    overscroll-behavior-y: none;
+  }
+  button,
+  a,
+  [role="button"] {
+    touch-action: manipulation;
   }
   ::selection {
     background: color-mix(in oklab, var(--primary) 22%, transparent);
+  }
+}
+
+@media (max-width: 639px) {
+  html {
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+  }
+
+  /* Keep iOS from zooming the page when a form control receives focus. */
+  input,
+  select,
+  textarea {
+    font-size: 16px;
+  }
+}
+
+/* Hover-only previews are useless on touch screens and can linger after a tap. */
+@media (hover: none) {
+  .day-hover-preview {
+    display: none;
   }
 }
 

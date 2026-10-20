@@ -39,7 +39,7 @@ export function SidebarBrand({
         </span>
       </span>
       <Button
-        className="ml-auto text-sidebar-foreground/60 hover:bg-sidebar-accent/15 hover:text-sidebar-foreground md:hidden"
+        className="ml-auto size-9 text-sidebar-foreground/60 hover:bg-sidebar-accent/15 hover:text-sidebar-foreground md:hidden md:size-7"
         variant="ghost"
         size="icon-sm"
         aria-label="Закрыть меню"

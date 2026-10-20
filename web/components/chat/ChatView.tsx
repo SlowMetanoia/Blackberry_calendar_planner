@@ -4,6 +4,7 @@ import {
   useRef,
   type PointerEvent as ReactPointerEvent,
 } from "react";
+import { MessagesSquareIcon } from "lucide-react";
 import { useSessionStore, useVoiceStore } from "../../libs/stores";
 import { ScrollArea } from "../ui/scroll-area";
 import { ChatComposer } from "./ChatComposer";
@@ -51,11 +52,11 @@ export function ChatView({
       {messages.length ? (
         <ScrollArea
           className="min-h-0 flex-1"
-          viewportClassName="chat px-4 py-6 sm:px-8"
+          viewportClassName="chat px-3.5 py-4 sm:px-8 sm:py-6"
           viewportRef={chat}
           aria-live="polite"
         >
-          <div className="mx-auto flex w-full max-w-3xl flex-col gap-6">
+          <div className="mx-auto flex w-full max-w-3xl flex-col gap-5 sm:gap-6">
             {messages.map((message) => (
               <MessageExchange
                 key={message.id}
@@ -66,7 +67,7 @@ export function ChatView({
           </div>
         </ScrollArea>
       ) : (
-        <div className="flex min-h-0 flex-1 items-center px-4 sm:px-8">
+        <div className="flex min-h-0 flex-1 items-center justify-center px-6 pb-10 sm:px-8">
         </div>
       )}
 

@@ -36,29 +36,37 @@ export function DayDialog({
     >
       <DialogContent
         closeLabel="Закрыть дела на день"
-        className="max-h-[calc(100dvh-2rem)] gap-4 overflow-hidden sm:max-w-xl"
+        className="max-h-[calc(100dvh-2rem)] gap-4 overflow-hidden max-sm:max-h-[92dvh] sm:max-w-xl"
       >
         <DialogHeader className="pr-8">
-          <DialogTitle className="text-xl">
+          <DialogTitle className="text-lg sm:text-xl">
             Дела на {label}
           </DialogTitle>
         </DialogHeader>
-        <div className="grid gap-2 sm:grid-cols-2">
-          <Button variant="outline" onClick={() => onCreate("event")}>
+        <div className="grid grid-cols-2 gap-2">
+          <Button
+            variant="outline"
+            className="max-sm:h-11"
+            onClick={() => onCreate("event")}
+          >
             <CalendarPlusIcon aria-hidden="true" />
             Событие
           </Button>
-          <Button variant="outline" onClick={() => onCreate("task")}>
+          <Button
+            variant="outline"
+            className="max-sm:h-11"
+            onClick={() => onCreate("task")}
+          >
             <ListPlusIcon aria-hidden="true" />
             Задача
           </Button>
         </div>
-        <ScrollArea className="max-h-[55vh]">
+        <ScrollArea className="max-h-[55vh] max-sm:max-h-[60dvh]">
           <div className="grid gap-2 pr-2">
             {entries.map((entry) => (
               <Button
                 variant="outline"
-                className={`h-auto w-full justify-start border-l-[3px] px-3 py-2.5 text-left whitespace-normal ${
+                className={`h-auto min-h-11 w-full justify-start border-l-[3px] px-3 py-2.5 text-left whitespace-normal ${
                   entry.resource === "event"
                     ? "border-l-chart-2/80"
                     : "border-l-primary/60"

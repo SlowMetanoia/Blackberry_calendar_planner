@@ -34,7 +34,7 @@ export function ScheduleItem({
         <TooltipTrigger asChild>
           <button
             type="button"
-            className="group flex w-full items-start gap-2.5 rounded-md px-2 py-1.5 text-left transition-colors outline-none hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring/50"
+            className="group flex min-h-11 w-full items-start gap-2.5 rounded-md px-1.5 py-2.5 text-left transition-colors outline-none hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring/50 sm:min-h-0 sm:px-2 sm:py-1.5"
             onClick={() => onOpen(entry)}
           >
             <span className="w-9 shrink-0 pt-px text-[11px] leading-4 font-medium tabular-nums text-muted-foreground">

@@ -41,9 +41,9 @@ export function UpcomingPanel({
       role="complementary"
       aria-label="Ближайшие дела"
       aria-busy={loading}
-      className="flex h-[24rem] max-h-[70vh] min-h-0 flex-col overflow-hidden xl:h-full xl:max-h-none"
+      className="flex h-[22rem] max-h-[65dvh] min-h-0 flex-col overflow-hidden sm:h-[24rem] sm:max-h-[70vh] xl:h-full xl:max-h-none"
     >
-      <header className="flex shrink-0 items-center justify-between gap-3 border-b border-border/70 px-2 py-3">
+      <header className="flex shrink-0 items-center justify-between gap-3 border-b border-border/70 px-1.5 py-2.5 sm:px-2 sm:py-3">
         <div className="flex min-w-0 items-baseline gap-2">
           <h2 className="truncate text-sm font-semibold">Ближайшие дела</h2>
           {overviewTotal > 0 && (
@@ -59,7 +59,7 @@ export function UpcomingPanel({
           <NativeSelect
             id="upcoming-horizon"
             aria-label="Период ближайших дел"
-            className="h-7 text-xs"
+            className="h-9 text-xs sm:h-7"
             value={upcomingDays}
             onChange={(event) => void onHorizonChange(Number(event.target.value))}
           >
@@ -74,7 +74,7 @@ export function UpcomingPanel({
 
       <ScrollArea
         className="min-h-0 flex-1"
-        viewportClassName="py-3 pl-2 pr-4"
+        viewportClassName="py-2.5 pl-1.5 pr-3 sm:py-3 sm:pl-2 sm:pr-4"
       >
         {showSkeleton && (
           <div className="grid gap-3 py-1">
@@ -119,7 +119,7 @@ export function UpcomingPanel({
               <Button
                 variant="outline"
                 size="sm"
-                className="w-full"
+                className="w-full max-sm:h-11"
                 onClick={() => void onLoadMore()}
               >
                 <ChevronsDownIcon aria-hidden="true" />

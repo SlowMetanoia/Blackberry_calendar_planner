@@ -15,16 +15,12 @@ import {
   DialogTitle,
 } from "../ui/dialog";
 import { CalendarItemDialog } from "./CalendarItemDialog";
+import { Calendar } from "./Calendar";
+import type { CalendarMode } from "./calendar-utils";
 import { DayDialog } from "./DayDialog";
 import { DayHoverPreview } from "./DayHoverPreview";
-import { MonthCalendar } from "./MonthCalendar";
 import { UpcomingPanel } from "./UpcomingPanel";
 import { useCalendarData } from "../../libs/hooks/use-calendar-data";
-
-function currentMonth(): Date {
-  const now = new Date();
-  return new Date(now.getFullYear(), now.getMonth(), 1, 12);
-}
 
 export function CalendarView() {
   const data = useCalendarData();
@@ -33,8 +29,10 @@ export function CalendarView() {
   );
   const onError = useSessionStore((state) => state.setError);
   const [fullOpen, setFullOpen] = useState(false);
-  const [month, setMonth] = useState(currentMonth);
+  const [mode, setMode] = useState<CalendarMode>("month");
+  const [anchor, setAnchor] = useState(() => new Date());
   const [dayOpen, setDayOpen] = useState<string | null>(null);
+  const [dayTime, setDayTime] = useState<string | null>(null);
   const [dayHover, setDayHover] = useState<DayHover | null>(null);
   const [editor, setEditor] = useState<EditorState | null>(null);
 
@@ -44,9 +42,10 @@ export function CalendarView() {
     setEditor({ resource: entry.resource, entry });
   }
 
-  function openDate(date: string) {
+  function openDate(date: string, time?: string) {
     setDayHover(null);
     setDayOpen(date);
+    setDayTime(time ?? null);
   }
 
   function handleDayHover(hover: DayHover | null, date: string | null) {
@@ -61,14 +60,17 @@ export function CalendarView() {
   }
 
   const calendar = (fullscreen: boolean) => (
-    <MonthCalendar
+    <Calendar
       fullscreen={fullscreen}
-      month={month}
+      mode={mode}
+      anchor={anchor}
       occupied={data.occupied}
       entriesByDate={data.entriesByDate}
-      onMonthChange={setMonth}
+      onModeChange={setMode}
+      onAnchorChange={setAnchor}
       onRangeChange={data.updateVisibleRange}
       onOpenDate={openDate}
+      onOpenEntry={openEntry}
       onDayHover={handleDayHover}
       onExpand={fullscreen ? undefined : () => setFullOpen(true)}
     />
@@ -77,9 +79,9 @@ export function CalendarView() {
   return (
     <>
       <div className="min-h-0 flex-1 overflow-y-auto xl:overflow-hidden">
-        <div className="mx-auto grid min-h-full w-full max-w-[1600px] gap-4 p-4 sm:p-6 xl:h-full xl:grid-cols-[minmax(0,1fr)_20rem] xl:grid-rows-[minmax(0,1fr)] 2xl:grid-cols-[minmax(0,1fr)_22rem]">
+        <div className="mx-auto grid min-h-full w-full max-w-[1600px] gap-3 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:gap-4 sm:p-6 xl:h-full xl:grid-cols-[minmax(0,1fr)_20rem] xl:grid-rows-[minmax(0,1fr)] 2xl:grid-cols-[minmax(0,1fr)_22rem]">
           <section className="flex min-h-0 flex-col" aria-label="Календарь месяца">
-            <Card className="flex min-h-[34rem] flex-1 flex-col overflow-hidden ring-border/70 [--card-spacing:0px] xl:min-h-0">
+            <Card className="flex min-h-[28rem] flex-1 flex-col overflow-hidden ring-border/70 [--card-spacing:0px] sm:min-h-[34rem] xl:min-h-0">
               {calendar(false)}
             </Card>
           </section>
@@ -113,7 +115,7 @@ export function CalendarView() {
       <Dialog open={fullOpen} onOpenChange={setFullOpen}>
         <DialogContent
           closeLabel="Закрыть подробный календарь"
-          className="flex h-[min(920px,calc(100dvh-2rem))] w-[min(1500px,calc(100vw-2rem))] flex-col gap-0 overflow-hidden p-0 sm:max-w-[min(1500px,calc(100vw-2rem))]"
+          className="flex h-[min(920px,calc(100dvh-2rem))] w-[min(1500px,calc(100vw-2rem))] flex-col gap-0 overflow-hidden p-0 max-sm:h-[92dvh] max-sm:max-h-[92dvh] max-sm:w-full max-sm:max-w-none max-sm:rounded-t-2xl max-sm:rounded-b-none max-sm:p-0 max-sm:pb-0 sm:max-w-[min(1500px,calc(100vw-2rem))]"
         >
           <DialogHeader className="sr-only">
             <DialogTitle>Подробный календарь</DialogTitle>
@@ -128,10 +130,17 @@ export function CalendarView() {
         <DayDialog
           date={dayOpen}
           entries={selectedEntries}
-          onClose={() => setDayOpen(null)}
+          onClose={() => {
+            setDayOpen(null);
+            setDayTime(null);
+          }}
           onOpen={openEntry}
           onCreate={(resource: Resource) =>
-            setEditor({ resource, date: dayOpen })
+            setEditor({
+              resource,
+              date: dayOpen,
+              time: dayTime ?? undefined,
+            })
           }
         />
       )}

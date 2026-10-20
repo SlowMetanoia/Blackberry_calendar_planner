@@ -38,7 +38,7 @@ export function useCalendarItemForm({
   const [when, setWhen] = useState(() =>
     state.entry
       ? toLocalInput(state.entry.startsAt)
-      : `${state.date || localDateKey(new Date())}T09:00`,
+      : `${state.date || localDateKey(new Date())}T${state.time || "09:00"}`,
   );
   const [duration, setDuration] = useState(
     String(state.entry?.durationMinutes || ""),

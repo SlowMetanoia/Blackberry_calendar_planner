@@ -28,18 +28,18 @@ export function SessionHistoryDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent closeLabel="Закрыть историю сессий" className="sm:max-w-lg">
         <DialogHeader className="gap-1.5 pr-8">
-          <DialogTitle className="text-xl">История сессий</DialogTitle>
+          <DialogTitle className="text-lg sm:text-xl">История сессий</DialogTitle>
           <DialogDescription>
             Вернитесь к прошлому разговору или начните новый.
           </DialogDescription>
         </DialogHeader>
-        <ScrollArea className="max-h-[55vh]">
+        <ScrollArea className="max-h-[55vh] max-sm:max-h-[62dvh]">
           <div className="grid gap-1.5 pr-2">
             {sessions.map((session) => (
               <Button
                 key={session.id}
                 variant={conversation === session.id ? "secondary" : "ghost"}
-                className="h-auto w-full justify-start px-3 py-2.5 text-left whitespace-normal"
+                className="h-auto min-h-11 w-full justify-start px-3 py-2.5 text-left whitespace-normal"
                 onClick={() => onSelect(session.id)}
               >
                 <span className="grid min-w-0 flex-1 gap-1">

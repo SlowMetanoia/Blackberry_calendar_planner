@@ -36,10 +36,10 @@ export function HistoryPanel() {
   return (
     <ScrollArea
       className="min-h-0 flex-1"
-      viewportClassName="px-4 py-5 sm:px-7"
+      viewportClassName="px-3 py-4 pb-[max(1rem,env(safe-area-inset-bottom))] sm:px-7 sm:py-5"
       aria-label="История изменений календаря"
     >
-      <div className="mx-auto w-full max-w-[90%]">
+      <div className="mx-auto w-full max-w-3xl">
         {[...groups.entries()].map(([date, group]) => (
           <section className="grid" key={date}>
             <header className="sticky top-0 z-10 -mx-1.5 flex items-center gap-2.5 bg-background/95 px-1.5 py-2.5 backdrop-blur">

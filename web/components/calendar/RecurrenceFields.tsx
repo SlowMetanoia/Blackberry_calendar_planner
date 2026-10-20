@@ -39,7 +39,7 @@ export function RecurrenceFields({
             {(Object.keys(weekdayLabels) as Weekday[]).map((day) => (
               <Label
                 key={day}
-                className="cursor-pointer gap-1.5 rounded-md border bg-card px-2 py-1 text-xs font-normal has-data-[state=checked]:border-primary/50 has-data-[state=checked]:bg-primary/5"
+                className="cursor-pointer gap-1.5 rounded-md border bg-card px-2.5 py-2 text-xs font-normal has-data-[state=checked]:border-primary/50 has-data-[state=checked]:bg-primary/5 sm:px-2 sm:py-1"
               >
                 <Checkbox
                   checked={draft.weekdays.includes(day)}

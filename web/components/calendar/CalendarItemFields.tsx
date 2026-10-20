@@ -22,7 +22,7 @@ export function CalendarItemFields({
             value={form.resource}
             onValueChange={(value) => form.setResource(value as Resource)}
           >
-            <TabsList className="w-full">
+            <TabsList className="w-full max-sm:h-11">
               <TabsTrigger value="event">Событие</TabsTrigger>
               <TabsTrigger value="task">Задача</TabsTrigger>
             </TabsList>

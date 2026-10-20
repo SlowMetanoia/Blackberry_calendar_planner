@@ -33,10 +33,10 @@ export function LoginScreen({
   }
 
   return (
-    <main className="grid min-h-dvh place-items-center bg-secondary/40 p-5">
+    <main className="grid min-h-dvh place-items-center bg-secondary/40 px-4 py-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] sm:p-5">
       <div className="w-full max-w-md">
         <Card className="gap-0 shadow-sm ring-border">
-          <CardHeader className="gap-1.5 p-6 pb-0 sm:p-7 sm:pb-0">
+          <CardHeader className="gap-1.5 p-5 pb-0 sm:p-7 sm:pb-0">
             <span
               aria-hidden="true"
               className="mb-1 grid size-9 place-items-center rounded-xl bg-accent text-accent-foreground"
@@ -52,7 +52,7 @@ export function LoginScreen({
               Задачи и встречи голосом или текстом.
             </CardDescription>
           </CardHeader>
-          <CardContent className="grid gap-4 p-6 pt-6 sm:p-7 sm:pt-6">
+          <CardContent className="grid gap-4 p-5 pt-5 sm:p-7 sm:pt-6">
             <form className="grid gap-4" onSubmit={submit}>
               <div className="grid gap-1.5">
                 <Label htmlFor="auth-email">Email</Label>
@@ -77,7 +77,7 @@ export function LoginScreen({
                   required
                 />
               </div>
-              <Button className="w-full" size="lg">
+              <Button className="w-full max-sm:h-11" size="lg">
                 {register ? "Зарегистрироваться" : "Войти"}
               </Button>
             </form>

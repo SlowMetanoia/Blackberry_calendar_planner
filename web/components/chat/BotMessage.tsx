@@ -19,7 +19,7 @@ export function BotMessage({
   return (
     <Card
       size="sm"
-      className="bubble bot relative max-w-[82%] gap-0 rounded-bl-sm bg-muted/60 px-4 pt-3.5 pb-7 ring-border/60"
+      className="bubble bot relative max-w-[88%] gap-0 rounded-bl-sm bg-muted/60 px-3.5 pt-3 pb-7 break-words ring-border/60 sm:max-w-[82%] sm:px-4 sm:pt-3.5"
     >
       <CardContent className="grid min-w-0 gap-1 px-0">
         {message.reply ? (
@@ -34,7 +34,10 @@ export function BotMessage({
           <OperationReceipt item={item} key={item.id} />
         ))}
         {message.requires_new_conversation && (
-          <Button className="mt-2 w-fit" onClick={startNewConversation}>
+          <Button
+            className="mt-2 w-fit max-sm:h-11"
+            onClick={startNewConversation}
+          >
             <MessageSquarePlusIcon aria-hidden="true" />
             Начать новый диалог
           </Button>

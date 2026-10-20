@@ -58,7 +58,7 @@ export function SidebarNav({
             aria-label={label}
             title={collapsed ? label : undefined}
             onClick={() => onSelect(target)}
-            className={`group relative flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-left text-sm transition-colors outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring/50 ${
+            className={`group relative flex min-h-11 w-full items-center gap-2.5 rounded-lg px-3 py-3 text-left text-sm transition-colors outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring/50 md:min-h-0 md:py-2.5 ${
               collapsed ? "md:justify-center md:px-0" : ""
             } ${
               active
