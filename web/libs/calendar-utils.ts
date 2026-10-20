@@ -1,4 +1,4 @@
-import { localDateKey } from "../../libs/format";
+import { localDateKey } from "./format";
 
 export type CalendarMode = "month" | "week";
 export type CalendarDay = { date: Date; key: string };

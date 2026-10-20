@@ -16,7 +16,7 @@ import {
 } from "../ui/dialog";
 import { CalendarItemDialog } from "./CalendarItemDialog";
 import { Calendar } from "./Calendar";
-import type { CalendarMode } from "./calendar-utils";
+import type { CalendarMode } from "../../libs/calendar-utils";
 import { DayDialog } from "./DayDialog";
 import { DayHoverPreview } from "./DayHoverPreview";
 import { UpcomingPanel } from "./UpcomingPanel";
@@ -78,10 +78,10 @@ export function CalendarView() {
 
   return (
     <>
-      <div className="min-h-0 flex-1 overflow-y-auto xl:overflow-hidden">
+      <div className="calendar-scroll min-h-0 flex-1 overflow-y-auto overscroll-y-contain xl:overflow-hidden">
         <div className="mx-auto grid min-h-full w-full max-w-[1600px] gap-3 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:gap-4 sm:p-6 xl:h-full xl:grid-cols-[minmax(0,1fr)_20rem] xl:grid-rows-[minmax(0,1fr)] 2xl:grid-cols-[minmax(0,1fr)_22rem]">
           <section className="flex min-h-0 flex-col" aria-label="Календарь месяца">
-            <Card className="flex min-h-[28rem] flex-1 flex-col overflow-hidden ring-border/70 [--card-spacing:0px] sm:min-h-[34rem] xl:min-h-0">
+            <Card className="flex min-h-[28rem] flex-1 flex-col overflow-hidden ring-border/70 [--card-spacing:0px] max-sm:h-[max(28rem,calc(100dvh-11rem))] max-sm:flex-none sm:min-h-[34rem] xl:min-h-0">
               {calendar(false)}
             </Card>
           </section>

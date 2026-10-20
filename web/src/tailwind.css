@@ -175,3 +175,9 @@
   min-width: 0;
   min-height: 0;
 }
+
+/* Native-feeling vertical scrolling on touch devices without scroll chaining. */
+.calendar-scroll {
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-y: contain;
+}

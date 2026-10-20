@@ -12,7 +12,7 @@ import type { PlannerView } from "../types";
 import { Button } from "./ui/button";
 import { LoginScreen } from "./auth/LoginScreen";
 import { CalendarView } from "./calendar/CalendarView";
-import { ChatSidebar } from "./chat/ChatSidebar";
+import { ChatHistorySheet, ChatSidebar } from "./chat/ChatSidebar";
 import { ChatView } from "./chat/ChatView";
 import { HistoryPanel } from "./history/HistoryPanel";
 import { AppSidebar } from "./shared/AppSidebar";
@@ -50,6 +50,11 @@ function PlannerApp() {
   const selectView = useUiStore((state) => state.selectView);
   const setNavOpen = useUiStore((state) => state.setNavOpen);
   const toggleSidebar = useUiStore((state) => state.toggleSidebar);
+  const [historyOpen, setHistoryOpen] = useState(false);
+
+  useEffect(() => {
+    if (view !== "chat") setHistoryOpen(false);
+  }, [view]);
 
   useEffect(() => {
     if (!token) return;
@@ -77,10 +82,12 @@ function PlannerApp() {
   const handleNewConversation = useCallback(() => {
     stores.session.getState().startNewConversation();
     stores.ui.getState().resetNavigation();
+    setHistoryOpen(false);
   }, [stores]);
 
   const handleOpenConversation = useCallback(
     async (id: string) => {
+      setHistoryOpen(false);
       stores.ui.getState().resetNavigation();
       await stores.session.getState().openConversation(id);
     },
@@ -88,6 +95,7 @@ function PlannerApp() {
   );
 
   const handleLogout = useCallback(async () => {
+    setHistoryOpen(false);
     stores.voice.getState().reset();
     await stores.session.getState().logout();
     stores.calendar.getState().reset();
@@ -135,7 +143,11 @@ function PlannerApp() {
           </PlannerHeader>
 
           <ViewPanel active={view === "chat"}>
-            <ChatView startNewConversation={handleNewConversation} />
+            <ChatView
+              startNewConversation={handleNewConversation}
+              sessionCount={sessions.length}
+              onOpenHistory={() => setHistoryOpen(true)}
+            />
           </ViewPanel>
 
           <ViewPanel active={view === "calendar"}>
@@ -157,6 +169,15 @@ function PlannerApp() {
             onSelect={(id) => void handleOpenConversation(id)}
           />
         )}
+
+        <ChatHistorySheet
+          open={historyOpen}
+          onOpenChange={setHistoryOpen}
+          sessions={sessions}
+          conversation={conversation}
+          onNew={handleNewConversation}
+          onSelect={(id) => void handleOpenConversation(id)}
+        />
       </main>
     </div>
   );

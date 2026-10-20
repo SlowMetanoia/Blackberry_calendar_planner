@@ -15,7 +15,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "../ui/tooltip";
-import type { CalendarMode } from "./calendar-utils";
+import type { CalendarMode } from "../../libs/calendar-utils";
 import {
   addDays,
   buildMonthDays,
@@ -23,7 +23,7 @@ import {
   shiftMonth,
   startOfDay,
   withYearMonth,
-} from "./calendar-utils";
+} from "../../libs/calendar-utils";
 import { MonthGrid } from "./MonthGrid";
 import { WeekGrid } from "./WeekGrid";
 
@@ -252,6 +252,9 @@ export function Calendar({
           occupied={occupied}
           entriesByDate={entriesByDate}
           onOpenDate={onOpenDate}
+          onNavigateMonth={(direction) =>
+            onAnchorChange(shiftMonth(anchor, direction))
+          }
           onDayHover={onDayHover}
         />
       )}

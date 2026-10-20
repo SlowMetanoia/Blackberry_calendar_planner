@@ -2,8 +2,9 @@ import { cn } from "cn";
 import { formatHistoryTime } from "../../libs/format";
 import type { CalendarEntry, DayHover } from "../../types";
 import { Button } from "../ui/button";
-import type { CalendarDay } from "./calendar-utils";
-import { weekdays } from "./calendar-utils";
+import type { CalendarDay } from "../../libs/calendar-utils";
+import { weekdays } from "../../libs/calendar-utils";
+import { useHorizontalSwipe } from "../../libs/hooks/use-horizontal-swipe";
 
 const dayFormat = new Intl.DateTimeFormat("ru-RU", { dateStyle: "long" });
 
@@ -26,6 +27,7 @@ export function MonthGrid({
   occupied,
   entriesByDate,
   onOpenDate,
+  onNavigateMonth,
   onDayHover,
 }: {
   fullscreen?: boolean;
@@ -35,8 +37,16 @@ export function MonthGrid({
   occupied: Set<string>;
   entriesByDate: Map<string, CalendarEntry[]>;
   onOpenDate: (date: string) => void;
+  onNavigateMonth: (direction: 1 | -1) => void;
   onDayHover: (hover: DayHover | null, date: string | null) => void;
 }) {
+  const swipe = useHorizontalSwipe(onNavigateMonth);
+
+  function openDate(date: string) {
+    if (swipe.shouldIgnoreClick()) return;
+    onOpenDate(date);
+  }
+
   function showPreview(cell: HTMLElement, date: string) {
     if (!canHover()) return;
     const rect = cell.getBoundingClientRect();
@@ -67,10 +77,13 @@ export function MonthGrid({
       </div>
 
       <div
-        className="grid min-h-0 flex-1 grid-cols-7 gap-px bg-border/70"
+        className="grid min-h-0 flex-1 touch-pan-y grid-cols-7 gap-px bg-border/70"
         style={{
           gridTemplateRows: `repeat(${days.length / 7}, minmax(0, 1fr))`,
         }}
+        onTouchStart={swipe.onTouchStart}
+        onTouchEnd={swipe.onTouchEnd}
+        onTouchCancel={swipe.onTouchCancel}
       >
         {days.map(({ date, key }) => {
           const entries = entriesByDate.get(key) || [];
@@ -96,7 +109,7 @@ export function MonthGrid({
                   : "hover:bg-muted/40",
                 hasEntries && "calendar-day-occupied",
               )}
-              onClick={() => onOpenDate(key)}
+              onClick={() => openDate(key)}
               onMouseEnter={(event) => {
                 if (hasEntries) showPreview(event.currentTarget, key);
               }}
@@ -110,7 +123,7 @@ export function MonthGrid({
                   aria-label={`Открыть дела на ${dayFormat.format(date)}`}
                   onClick={(event) => {
                     event.stopPropagation();
-                    onOpenDate(key);
+                    openDate(key);
                   }}
                 >
                   <span
