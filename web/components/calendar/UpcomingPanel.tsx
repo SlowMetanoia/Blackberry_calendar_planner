@@ -1,7 +1,6 @@
 import { ChevronsDownIcon } from "lucide-react";
 import type { CalendarEntry } from "../../types";
 import { Button } from "../ui/button";
-import { Card } from "../ui/card";
 import { Label } from "../ui/label";
 import { NativeSelect } from "../ui/native-select";
 import { ScrollArea } from "../ui/scroll-area";
@@ -38,13 +37,13 @@ export function UpcomingPanel({
   const showSkeleton = loading && overviewTotal === 0;
 
   return (
-    <Card
+    <section
       role="complementary"
       aria-label="Ближайшие дела"
       aria-busy={loading}
-      className="flex h-[24rem] max-h-[70vh] min-h-0 flex-col overflow-hidden ring-border/70 [--card-spacing:0px] xl:h-full xl:max-h-none"
+      className="flex h-[24rem] max-h-[70vh] min-h-0 flex-col overflow-hidden xl:h-full xl:max-h-none"
     >
-      <header className="flex shrink-0 items-center justify-between gap-3 border-b border-border/70 px-4 py-3">
+      <header className="flex shrink-0 items-center justify-between gap-3 border-b border-border/70 px-2 py-3">
         <div className="flex min-w-0 items-baseline gap-2">
           <h2 className="truncate text-sm font-semibold">Ближайшие дела</h2>
           {overviewTotal > 0 && (
@@ -75,10 +74,10 @@ export function UpcomingPanel({
 
       <ScrollArea
         className="min-h-0 flex-1"
-        viewportClassName="px-2 py-3"
+        viewportClassName="py-3 pl-2 pr-4"
       >
         {showSkeleton && (
-          <div className="grid gap-3 px-2 py-1">
+          <div className="grid gap-3 py-1">
             <Skeleton className="h-4 w-24" />
             <Skeleton className="h-10 w-full" />
             <Skeleton className="h-10 w-full" />
@@ -130,6 +129,6 @@ export function UpcomingPanel({
           </div>
         )}
       </ScrollArea>
-    </Card>
+    </section>
   );
 }

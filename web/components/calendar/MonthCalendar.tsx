@@ -8,6 +8,7 @@ import { cn } from "cn";
 import { formatHistoryTime, localDateKey } from "../../libs/format";
 import type { CalendarEntry, DayHover } from "../../types";
 import { Button } from "../ui/button";
+import { NativeSelect } from "../ui/native-select";
 import {
   Tooltip,
   TooltipContent,
@@ -18,6 +19,13 @@ import {
 const weekdays = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
 const monthFormat = new Intl.DateTimeFormat("ru-RU", { month: "long" });
 const dayFormat = new Intl.DateTimeFormat("ru-RU", { dateStyle: "long" });
+const monthNames = Array.from({ length: 12 }, (_, index) => {
+  const name = monthFormat.format(new Date(2024, index, 1, 12));
+  return name.charAt(0).toUpperCase() + name.slice(1);
+});
+const yearOptions = Array.from({ length: 201 }, (_, index) => 1900 + index);
+const selectClassName =
+  "h-8 cursor-pointer border-0 bg-transparent pl-1 pr-7 font-heading text-base font-semibold tracking-tight shadow-none hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring/50";
 
 type CalendarDay = { date: Date; key: string };
 
@@ -77,7 +85,13 @@ export function MonthCalendar({
 }) {
   const days = useMemo(() => buildDays(month), [month]);
   const today = localDateKey(new Date());
-  const title = `${monthFormat.format(month)} ${month.getFullYear()}`;
+  const monthLabel = monthNames[month.getMonth()];
+  const years = useMemo(() => {
+    const year = month.getFullYear();
+    return yearOptions.includes(year)
+      ? yearOptions
+      : [...yearOptions, year].sort((a, b) => a - b);
+  }, [month]);
 
   useEffect(() => {
     if (!days.length) return;
@@ -127,12 +141,52 @@ export function MonthCalendar({
             <ChevronRightIcon aria-hidden="true" />
           </Button>
         </div>
-        <h2
-          className="min-w-0 flex-1 truncate font-heading text-base font-semibold tracking-tight first-letter:uppercase"
-          aria-live="polite"
-        >
-          {title}
-        </h2>
+        <div className="flex min-w-0 flex-1 items-center">
+          <span className="min-w-0 flex-1 sm:w-[9.5rem] sm:flex-none">
+            <NativeSelect
+              aria-label="Месяц"
+              value={month.getMonth()}
+              className={selectClassName}
+              onChange={(event) => {
+                onMonthChange(
+                  new Date(
+                    month.getFullYear(),
+                    Number(event.target.value),
+                    1,
+                    12,
+                  ),
+                );
+              }}
+            >
+              {monthNames.map((name, index) => (
+                <option value={index} key={name}>
+                  {name}
+                </option>
+              ))}
+            </NativeSelect>
+          </span>
+          <span className="w-[5.5rem] shrink-0">
+            <NativeSelect
+              aria-label="Год"
+              value={month.getFullYear()}
+              className={selectClassName}
+              onChange={(event) => {
+                onMonthChange(
+                  new Date(Number(event.target.value), month.getMonth(), 1, 12),
+                );
+              }}
+            >
+              {years.map((year) => (
+                <option value={year} key={year}>
+                  {year}
+                </option>
+              ))}
+            </NativeSelect>
+          </span>
+          <span className="sr-only" aria-live="polite">
+            {monthLabel} {month.getFullYear()}
+          </span>
+        </div>
         <div
           className={cn(
             "flex shrink-0 items-center gap-0.5",

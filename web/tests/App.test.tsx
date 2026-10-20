@@ -200,6 +200,24 @@ describe("planner chat", () => {
     ).toBeInTheDocument();
     await waitFor(() => expect(api.getOccurrences).toHaveBeenCalled());
   });
+  it("switches the calendar month and year independently", async () => {
+    localStorage.setItem("planner-token", "token");
+    const { container } = render(<App />);
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Календарь" }),
+    );
+    const month = await screen.findByRole("combobox", { name: "Месяц" });
+    const year = screen.getByRole("combobox", { name: "Год" });
+
+    await userEvent.selectOptions(month, "0");
+    await userEvent.selectOptions(year, "2030");
+
+    expect(month).toHaveValue("0");
+    expect(year).toHaveValue("2030");
+    expect(
+      container.querySelector('[data-date="2030-01-01"]'),
+    ).toBeInTheDocument();
+  });
   it("collapses the sidebar template and keeps the main section", async () => {
     localStorage.setItem("planner-token", "token");
     vi.mocked(api.syncTimeZone).mockResolvedValue({ timezone: "UTC" });

@@ -58,7 +58,7 @@ export function ScheduleSection({
           const heading = dayHeading(date);
           return (
             <div className="grid" key={date}>
-              <h4 className="sticky top-0 z-10 -mx-2 flex items-baseline gap-1.5 bg-card px-4 py-1 text-[11px] leading-none">
+              <h4 className="sticky top-0 z-10 flex items-baseline gap-1.5 bg-background px-2 py-1 text-[11px] leading-none">
                 <span className="font-semibold text-foreground">
                   {heading.lead}
                 </span>
