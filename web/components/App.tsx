@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { HistoryIcon, LogOutIcon, PlusIcon } from "lucide-react";
+import { LogOutIcon } from "lucide-react";
 import { AUTH_EXPIRED_EVENT } from "../api";
 import {
   PlannerStoresProvider,
@@ -12,8 +12,8 @@ import type { PlannerView } from "../types";
 import { Button } from "./ui/button";
 import { LoginScreen } from "./auth/LoginScreen";
 import { CalendarView } from "./calendar/CalendarView";
+import { ChatSidebar } from "./chat/ChatSidebar";
 import { ChatView } from "./chat/ChatView";
-import { SessionHistoryDialog } from "./chat/SessionHistoryDialog";
 import { HistoryPanel } from "./history/HistoryPanel";
 import { AppSidebar } from "./shared/AppSidebar";
 import { ErrorToast } from "./shared/ErrorToast";
@@ -46,11 +46,9 @@ function PlannerApp() {
   const conversation = useSessionStore((state) => state.conversation);
   const view = useUiStore((state) => state.view);
   const navOpen = useUiStore((state) => state.navOpen);
-  const sessionsOpen = useUiStore((state) => state.sessionsOpen);
   const navCollapsed = useUiStore((state) => state.sidebarCollapsed);
   const selectView = useUiStore((state) => state.selectView);
   const setNavOpen = useUiStore((state) => state.setNavOpen);
-  const setSessionsOpen = useUiStore((state) => state.setSessionsOpen);
   const toggleSidebar = useUiStore((state) => state.toggleSidebar);
 
   useEffect(() => {
@@ -101,7 +99,7 @@ function PlannerApp() {
 
   return (
     <div className="h-dvh w-full bg-background">
-      <main className="flex h-full w-full overflow-hidden bg-background">
+      <main className="flex h-full w-full flex-col overflow-hidden bg-background md:flex-row">
         <div
           aria-hidden="true"
           className={`fixed inset-0 z-40 bg-foreground/30 md:hidden ${
@@ -124,30 +122,6 @@ function PlannerApp() {
             title={viewTitles[view]}
             onOpenNav={() => setNavOpen(true)}
           >
-            {view === "chat" && (
-              <>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="max-sm:size-9"
-                  aria-label="Новый диалог"
-                  onClick={handleNewConversation}
-                >
-                  <PlusIcon aria-hidden="true" />
-                  <span className="hidden lg:inline">Новый диалог</span>
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="max-sm:size-9"
-                  aria-label="История сессий"
-                  onClick={() => setSessionsOpen(true)}
-                >
-                  <HistoryIcon aria-hidden="true" />
-                  <span className="hidden lg:inline">История сессий</span>
-                </Button>
-              </>
-            )}
             <Button
               variant="ghost"
               size="sm"
@@ -175,13 +149,14 @@ function PlannerApp() {
           <ErrorToast message={error} onDismiss={clearError} />
         </section>
 
-        <SessionHistoryDialog
-          open={sessionsOpen}
-          onOpenChange={setSessionsOpen}
-          sessions={sessions}
-          conversation={conversation}
-          onSelect={(id) => void handleOpenConversation(id)}
-        />
+        {view === "chat" && (
+          <ChatSidebar
+            sessions={sessions}
+            conversation={conversation}
+            onNew={handleNewConversation}
+            onSelect={(id) => void handleOpenConversation(id)}
+          />
+        )}
       </main>
     </div>
   );

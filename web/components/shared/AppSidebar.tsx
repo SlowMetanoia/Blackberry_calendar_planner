@@ -1,5 +1,4 @@
 import type { PlannerView } from "../../types";
-import { Separator } from "../ui/separator";
 import { SidebarBrand } from "./SidebarBrand";
 import { SidebarNav } from "./SidebarNav";
 

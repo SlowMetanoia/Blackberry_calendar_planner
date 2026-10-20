@@ -11,11 +11,9 @@ function storedSidebarCollapsed(): boolean {
 export type UiState = {
   view: PlannerView;
   navOpen: boolean;
-  sessionsOpen: boolean;
   sidebarCollapsed: boolean;
   selectView: (view: PlannerView) => void;
   setNavOpen: (open: boolean) => void;
-  setSessionsOpen: (open: boolean) => void;
   toggleSidebar: () => void;
   resetNavigation: () => void;
 };
@@ -24,12 +22,10 @@ export function createUiStore() {
   return createStore<UiState>()((set) => ({
     view: "chat",
     navOpen: false,
-    sessionsOpen: false,
     sidebarCollapsed: storedSidebarCollapsed(),
 
     selectView: (view) => set({ view, navOpen: false }),
     setNavOpen: (navOpen) => set({ navOpen }),
-    setSessionsOpen: (sessionsOpen) => set({ sessionsOpen }),
 
     toggleSidebar: () =>
       set((state) => {
@@ -39,7 +35,6 @@ export function createUiStore() {
         return { sidebarCollapsed };
       }),
 
-    resetNavigation: () =>
-      set({ view: "chat", navOpen: false, sessionsOpen: false }),
+    resetNavigation: () => set({ view: "chat", navOpen: false }),
   }));
 }

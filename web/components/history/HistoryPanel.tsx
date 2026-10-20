@@ -20,12 +20,7 @@ export function HistoryPanel() {
   const undo = useSessionStore((state) => state.undo);
 
   if (!items.length)
-    return (
-      <EmptyState
-        title="Изменений пока нет"
-        description="Здесь появятся созданные, изменённые и удалённые записи календаря."
-      />
-    );
+    return null
 
   const groups = new Map<string, CalendarOperation[]>();
   items.forEach((item) => {

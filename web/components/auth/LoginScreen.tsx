@@ -37,20 +37,19 @@ export function LoginScreen({
       <div className="w-full max-w-md">
         <Card className="gap-0 shadow-sm ring-border">
           <CardHeader className="gap-1.5 p-5 pb-0 sm:p-7 sm:pb-0">
-            <span
-              aria-hidden="true"
-              className="mb-1 grid size-9 place-items-center rounded-xl bg-accent text-accent-foreground"
-            >
-              <NotebookPenIcon className="size-4" />
-            </span>
-            <CardTitle asChild>
-              <h1 className="font-heading text-2xl font-semibold tracking-tight">
-                {register ? "Создать аккаунт" : "Войти в ежедневник"}
-              </h1>
-            </CardTitle>
-            <CardDescription>
-              Задачи и встречи голосом или текстом.
-            </CardDescription>
+            <div className="flex flex-row gap-4 align-middle items-center">
+              <span
+                aria-hidden="true"
+                className="mb-1 grid size-9 place-items-center rounded-xl bg-accent text-accent-foreground"
+              >
+                <NotebookPenIcon className="size-4" />
+              </span>
+              <CardTitle asChild>
+                <h1 className="font-heading text-2xl font-semibold tracking-tight">
+                  {register ? "Создать аккаунт" : "Войти в ежедневник"}
+                </h1>
+              </CardTitle>
+            </div>
           </CardHeader>
           <CardContent className="grid gap-4 p-5 pt-5 sm:p-7 sm:pt-6">
             <form className="grid gap-4" onSubmit={submit}>

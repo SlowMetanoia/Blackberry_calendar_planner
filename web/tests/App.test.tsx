@@ -13,7 +13,11 @@ import { HistoryItem } from "../components/history/HistoryItem";
 import { MessageExchange } from "../components/chat/MessageExchange";
 import { ReadCard } from "../components/chat/ReadCard";
 import * as api from "../api";
-import type { AgentMessage, CalendarOperation } from "../types";
+import type {
+  AgentMessage,
+  CalendarOccurrence,
+  CalendarOperation,
+} from "../types";
 
 const openAir = vi.hoisted(() => ({
   start: vi.fn(async () => {}),
@@ -182,7 +186,7 @@ describe("planner chat", () => {
       screen.getByRole("button", { name: "Отменить создание" }),
     ).toBeInTheDocument();
   });
-  it("loads a section only after it is selected", async () => {
+  it("renders a section only after it is selected", async () => {
     localStorage.setItem("planner-token", "token");
     vi.mocked(api.syncTimeZone).mockResolvedValue({ timezone: "UTC" });
     render(<App />);
@@ -192,13 +196,19 @@ describe("planner chat", () => {
     expect(
       screen.queryByRole("region", { name: "Календарь месяца" }),
     ).not.toBeInTheDocument();
-    expect(api.getOccurrences).not.toHaveBeenCalled();
+    await waitFor(() => expect(api.getOccurrences).toHaveBeenCalled());
+    const callsBeforeCalendar =
+      vi.mocked(api.getOccurrences).mock.calls.length;
 
     await userEvent.click(screen.getByRole("button", { name: "Календарь" }));
     expect(
       await screen.findByRole("region", { name: "Календарь месяца" }),
     ).toBeInTheDocument();
-    await waitFor(() => expect(api.getOccurrences).toHaveBeenCalled());
+    await waitFor(() =>
+      expect(
+        vi.mocked(api.getOccurrences).mock.calls.length,
+      ).toBeGreaterThan(callsBeforeCalendar),
+    );
   });
   it("switches the calendar month and year independently", async () => {
     localStorage.setItem("planner-token", "token");
@@ -320,7 +330,7 @@ describe("planner chat", () => {
       expect(localStorage.getItem("planner-sidebar-collapsed")).toBe("false"),
     );
   });
-  it("shows calendar history in the history view and sessions in a modal", async () => {
+  it("shows calendar history and opens chat sessions from the always-open right panel", async () => {
     localStorage.setItem("planner-token", "token");
     vi.mocked(api.syncTimeZone).mockResolvedValue({ timezone: "UTC" });
     vi.mocked(api.getCalendarHistory).mockResolvedValue({
@@ -342,7 +352,21 @@ describe("planner chat", () => {
       limit: 100,
       offset: 0,
     });
+    vi.mocked(api.getConversationHistory).mockResolvedValue({
+      items: [],
+      total: 0,
+      limit: 100,
+      offset: 0,
+    });
     render(<App />);
+    const panel = screen.getByRole("complementary", { name: "Диалоги" });
+    expect(
+      within(panel).getByRole("button", { name: "Новый диалог" }),
+    ).toBeInTheDocument();
+    expect(
+      within(panel).queryByRole("button", { name: "Свернуть панель диалогов" }),
+    ).not.toBeInTheDocument();
+
     await userEvent.click(
       await screen.findByRole("button", { name: "История изменений" }),
     );
@@ -350,14 +374,106 @@ describe("planner chat", () => {
     expect(
       screen.getByText(/запланировано на 15 октября 2026/),
     ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("complementary", { name: "Диалоги" }),
+    ).not.toBeInTheDocument();
+
     await userEvent.click(screen.getByRole("button", { name: "Чат" }));
-    await userEvent.click(
-      screen.getByRole("button", { name: "История сессий" }),
+    const reopenedPanel = screen.getByRole("complementary", {
+      name: "Диалоги",
+    });
+
+    const session = within(reopenedPanel).getByRole("button", {
+      name: "Старый диалог",
+    });
+    await userEvent.click(session);
+    await waitFor(() =>
+      expect(api.getConversationHistory).toHaveBeenCalledWith("s1", 100, 0),
     );
     expect(
-      screen.getByRole("dialog", { name: "История сессий" }),
+      screen.getByRole("complementary", { name: "Диалоги" }),
     ).toBeInTheDocument();
-    expect(screen.getByText("Старый диалог")).toBeInTheDocument();
+  });
+  it("keeps the chat sessions panel open when starting a new conversation", async () => {
+    localStorage.setItem("planner-token", "token");
+    vi.mocked(api.syncTimeZone).mockResolvedValue({ timezone: "UTC" });
+    render(<App />);
+    await screen.findByRole("heading", { name: "Что запланируем?" });
+    const panel = screen.getByRole("complementary", { name: "Диалоги" });
+    await userEvent.click(
+      within(panel).getByRole("button", { name: "Новый диалог" }),
+    );
+    expect(
+      screen.getByRole("complementary", { name: "Диалоги" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "Что запланируем?" }),
+    ).toBeInTheDocument();
+  });
+  it("shows weekly busyness in the chat sidebar", async () => {
+    localStorage.setItem("planner-token", "token");
+    vi.mocked(api.syncTimeZone).mockResolvedValue({ timezone: "UTC" });
+    const monday = new Date();
+    monday.setHours(10, 0, 0, 0);
+    const weekday = monday.getDay();
+    monday.setDate(monday.getDate() - (weekday === 0 ? 6 : weekday - 1));
+    const wednesday = new Date(monday);
+    wednesday.setDate(wednesday.getDate() + 2);
+    wednesday.setHours(14, 0, 0, 0);
+    const meeting: CalendarOccurrence = {
+      resource: "event",
+      series_id: "e1",
+      occurrence_key: "e1",
+      original_at: monday.toISOString(),
+      scheduled_at: monday.toISOString(),
+      recurring: false,
+      data: {
+        id: "e1",
+        owner_id: "u1",
+        title: "Планёрка",
+        description: null,
+        starts_at: monday.toISOString(),
+        duration_minutes: 90,
+        location: null,
+      },
+    };
+    const report: CalendarOccurrence = {
+      resource: "task",
+      series_id: "t1",
+      occurrence_key: "t1",
+      original_at: wednesday.toISOString(),
+      scheduled_at: wednesday.toISOString(),
+      recurring: false,
+      data: {
+        id: "t1",
+        owner_id: "u1",
+        title: "Подготовить отчёт",
+        description: null,
+        deadline: wednesday.toISOString(),
+        estimated_minutes: 60,
+        status: "open",
+      },
+    };
+    vi.mocked(api.getOccurrences).mockResolvedValue({
+      items: [meeting, report],
+      total: 2,
+      has_more: false,
+      next_cursor: null,
+    });
+
+    render(<App />);
+    const heatmap = await screen.findByRole("region", {
+      name: "Занятость недели",
+    });
+    const grid = within(heatmap).getByRole("img", {
+      name: /Понедельник.*1 час 30 минут/,
+    });
+    expect(within(heatmap).getByText("Пн")).toBeInTheDocument();
+
+    await userEvent.hover(grid);
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+    await userEvent.click(grid);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
   it("undoes an operation and refreshes history", async () => {
     localStorage.setItem("planner-token", "token");
