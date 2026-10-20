@@ -294,12 +294,16 @@ describe("planner chat", () => {
     localStorage.setItem("planner-token", "token");
     vi.mocked(api.syncTimeZone).mockResolvedValue({ timezone: "UTC" });
     render(<App />);
+    const sidebar = screen.getByLabelText("Разделы ежедневника");
+    expect(sidebar).toHaveClass("md:w-[264px]");
     await userEvent.click(
       await screen.findByRole("button", { name: "Свернуть панель" }),
     );
     expect(
       screen.getByRole("button", { name: "Развернуть панель" }),
     ).toBeInTheDocument();
+    expect(sidebar).toHaveClass("md:w-[76px]");
+    expect(sidebar).not.toHaveClass("md:w-[264px]");
     await waitFor(() =>
       expect(localStorage.getItem("planner-sidebar-collapsed")).toBe("true"),
     );
@@ -310,6 +314,8 @@ describe("planner chat", () => {
     await userEvent.click(
       screen.getByRole("button", { name: "Развернуть панель" }),
     );
+    expect(sidebar).toHaveClass("md:w-[264px]");
+    expect(sidebar).not.toHaveClass("md:w-[76px]");
     await waitFor(() =>
       expect(localStorage.getItem("planner-sidebar-collapsed")).toBe("false"),
     );
