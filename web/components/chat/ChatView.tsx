@@ -1,39 +1,40 @@
 import {
+  useCallback,
   useEffect,
   useRef,
   type PointerEvent as ReactPointerEvent,
 } from "react";
-import type { AgentMessage, OpenAirStatus } from "../../types";
+import { useSessionStore, useVoiceStore } from "../../libs/stores";
 import { ScrollArea } from "../ui/scroll-area";
 import { ChatComposer } from "./ChatComposer";
 import { MessageExchange } from "./MessageExchange";
 
 export function ChatView({
-  messages,
   startNewConversation,
-  recording,
-  openAirEnabled,
-  openAirStatus,
-  openAirSilenceMs,
-  onSendText,
-  onToggleOpenAir,
-  onChangeOpenAirSilence,
-  onStartRecording,
-  onStopRecording,
 }: {
-  messages: AgentMessage[];
   startNewConversation: () => void;
-  recording: boolean;
-  openAirEnabled: boolean;
-  openAirStatus: OpenAirStatus;
-  openAirSilenceMs: number;
-  onSendText: (text: string) => Promise<void> | void;
-  onToggleOpenAir: () => Promise<void> | void;
-  onChangeOpenAirSilence: (value: number) => Promise<void> | void;
-  onStartRecording: (event: ReactPointerEvent<HTMLButtonElement>) => void;
-  onStopRecording: () => void;
 }) {
   const chat = useRef<HTMLDivElement | null>(null);
+  const messages = useSessionStore((state) => state.messages);
+  const sendText = useSessionStore((state) => state.sendText);
+  const recording = useVoiceStore((state) => state.recording);
+  const openAirEnabled = useVoiceStore((state) => state.openAirEnabled);
+  const openAirStatus = useVoiceStore((state) => state.openAirStatus);
+  const openAirSilenceMs = useVoiceStore((state) => state.openAirSilenceMs);
+  const startRecording = useVoiceStore((state) => state.startRecording);
+  const stopRecording = useVoiceStore((state) => state.stopRecording);
+  const toggleOpenAir = useVoiceStore((state) => state.toggleOpenAir);
+  const changeOpenAirSilence = useVoiceStore(
+    (state) => state.changeOpenAirSilence,
+  );
+
+  const handleStartRecording = useCallback(
+    (event: ReactPointerEvent<HTMLButtonElement>) => {
+      event.currentTarget.setPointerCapture(event.pointerId);
+      void startRecording();
+    },
+    [startRecording],
+  );
 
   useEffect(() => {
     if (!messages.length) return;
@@ -66,21 +67,6 @@ export function ChatView({
         </ScrollArea>
       ) : (
         <div className="flex min-h-0 flex-1 items-center px-4 sm:px-8">
-          <div className="mx-auto w-full max-w-3xl">
-            <div className="max-w-xl border-l-2 border-accent py-2 pl-5">
-              <p className="font-heading text-3xl font-semibold tracking-tight sm:text-4xl">
-                Что на сегодня?
-              </p>
-              <p className="mt-3 max-w-md text-sm leading-relaxed text-muted-foreground">
-                Напишите или произнесите задачу — я разложу её по дням, найду
-                время и напомню о важном.
-              </p>
-              <p className="mt-6 max-w-md text-xs leading-relaxed text-muted-foreground">
-                <span className="font-medium text-foreground">Например:</span>{" "}
-                «Перенеси встречу с Анной на пятницу в 15:00».
-              </p>
-            </div>
-          </div>
         </div>
       )}
 
@@ -89,11 +75,11 @@ export function ChatView({
         openAirEnabled={openAirEnabled}
         openAirStatus={openAirStatus}
         openAirSilenceMs={openAirSilenceMs}
-        onSendText={onSendText}
-        onToggleOpenAir={onToggleOpenAir}
-        onChangeOpenAirSilence={onChangeOpenAirSilence}
-        onStartRecording={onStartRecording}
-        onStopRecording={onStopRecording}
+        onSendText={sendText}
+        onToggleOpenAir={toggleOpenAir}
+        onChangeOpenAirSilence={changeOpenAirSilence}
+        onStartRecording={handleStartRecording}
+        onStopRecording={stopRecording}
       />
     </div>
   );

@@ -7,6 +7,7 @@ import type {
   EditorState,
   Resource,
 } from "../../types";
+import { useSessionStore } from "../../libs/stores";
 import { Button } from "../ui/button";
 import {
   Dialog,
@@ -22,16 +23,12 @@ import { MonthCalendar } from "./MonthCalendar";
 import { UpcomingPanel } from "./UpcomingPanel";
 import { useCalendarData } from "../../libs/hooks/use-calendar-data";
 
-export function CalendarView({
-  revision,
-  onHistoryChanged,
-  onError,
-}: {
-  revision: number;
-  onHistoryChanged: () => Promise<void> | void;
-  onError: (message: string) => void;
-}) {
-  const data = useCalendarData({ revision, onError });
+export function CalendarView() {
+  const data = useCalendarData();
+  const onHistoryChanged = useSessionStore(
+    (state) => state.handleCalendarChanged,
+  );
+  const onError = useSessionStore((state) => state.setError);
   const [fullOpen, setFullOpen] = useState(false);
   const [dayOpen, setDayOpen] = useState<string | null>(null);
   const [dayHover, setDayHover] = useState<DayHover | null>(null);

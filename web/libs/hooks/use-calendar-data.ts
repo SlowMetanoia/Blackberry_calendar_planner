@@ -1,220 +1,36 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import {
-  getEvents,
-  getOccurrences,
-  getTasks,
-  getUserPreferences,
-  updateUserPreferences,
-} from "../../api";
+import { useEffect, useMemo } from "react";
 import { localDateKey } from "../format";
-import { collectPages } from "../pagination";
 import {
   occurrencesToEntries,
   partitionOccurrenceEntries,
 } from "../planner-data";
-import type {
-  CalendarEntry,
-  CalendarOccurrence,
-  Event,
-  Task,
-} from "../../types";
+import { useCalendarStore, useSessionStore } from "../stores";
+import type { CalendarEntry } from "../../types";
 
-function legacyOccurrences(
-  tasks: Task[],
-  events: Event[],
-): CalendarOccurrence[] {
-  return [
-    ...tasks
-      .filter((item) => item.deadline)
-      .map((item) => ({
-        resource: "task" as const,
-        series_id: item.id,
-        occurrence_key: `legacy-${item.id}`,
-        original_at: item.deadline!,
-        scheduled_at: item.deadline!,
-        recurring: false,
-        data: item,
-      })),
-    ...events.map((item) => ({
-      resource: "event" as const,
-      series_id: item.id,
-      occurrence_key: `legacy-${item.id}`,
-      original_at: item.starts_at,
-      scheduled_at: item.starts_at,
-      recurring: false,
-      data: item,
-    })),
-  ];
-}
-
-export function useCalendarData({
-  revision,
-  onError,
-}: {
-  revision: number;
-  onError: (message: string) => void;
-}) {
-  const [upcomingDays, setUpcomingDays] = useState(7);
-  const [undatedTasks, setUndatedTasks] = useState<Task[]>([]);
-  const [overviewOccurrences, setOverviewOccurrences] = useState<
-    CalendarOccurrence[]
-  >([]);
-  const [overviewCursor, setOverviewCursor] = useState<string | null>(null);
-  const [calendarOccurrences, setCalendarOccurrences] = useState<
-    CalendarOccurrence[]
-  >([]);
-  const [visibleRange, setVisibleRange] = useState<{
-    from: string;
-    to: string;
-  } | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  const loadOverview = useCallback(async (days: number) => {
-    const now = new Date(),
-      end = new Date(now.getTime() + days * 86_400_000);
-    const undated = await collectPages((offset) =>
-      getTasks({ offset, status: "open", deadlinePresence: "undated" }),
-    );
-    try {
-      const occurrences = await getOccurrences({
-        from: "1970-01-01T00:00:00.000Z",
-        to: end.toISOString(),
-        limit: 100,
-      });
-      setOverviewOccurrences(occurrences.items);
-      setOverviewCursor(occurrences.next_cursor);
-    } catch {
-      const [dated, events] = await Promise.all([
-        collectPages((offset) =>
-          getTasks({
-            offset,
-            status: "open",
-            deadlinePresence: "dated",
-            deadlineTo: end.toISOString(),
-          }),
-        ),
-        collectPages((offset) =>
-          getEvents({
-            offset,
-            startsAtFrom: now.toISOString(),
-            startsAtTo: end.toISOString(),
-          }),
-        ),
-      ]);
-      setOverviewOccurrences(legacyOccurrences(dated, events));
-      setOverviewCursor(null);
-    }
-    setUndatedTasks(undated);
-  }, []);
-
-  const loadCalendar = useCallback(
-    async (range: { from: string; to: string }) => {
-      try {
-        const first = await getOccurrences({
-          from: range.from,
-          to: range.to,
-          limit: 100,
-        });
-        const result = [...first.items];
-        let cursor = first.next_cursor;
-        while (cursor) {
-          const page = await getOccurrences({
-            from: range.from,
-            to: range.to,
-            limit: 100,
-            cursor,
-          });
-          result.push(...page.items);
-          cursor = page.next_cursor;
-        }
-        setCalendarOccurrences(result);
-      } catch {
-        const [tasks, events] = await Promise.all([
-          collectPages((offset) =>
-            getTasks({
-              offset,
-              status: "open",
-              deadlinePresence: "dated",
-              deadlineFrom: range.from,
-              deadlineTo: range.to,
-            }),
-          ),
-          collectPages((offset) =>
-            getEvents({
-              offset,
-              startsAtFrom: range.from,
-              startsAtTo: range.to,
-            }),
-          ),
-        ]);
-        setCalendarOccurrences(legacyOccurrences(tasks, events));
-      }
-    }, []);
-
-  const refresh = useCallback(async () => {
-    setLoading(true);
-    try {
-      await Promise.all([
-        loadOverview(upcomingDays),
-        ...(visibleRange ? [loadCalendar(visibleRange)] : []),
-      ]);
-    } catch (error) {
-      onError((error as Error).message);
-    } finally {
-      setLoading(false);
-    }
-  }, [loadCalendar, loadOverview, onError, upcomingDays, visibleRange]);
-
-  useEffect(() => {
-    void getUserPreferences()
-      .then((preferences) => setUpcomingDays(preferences.upcoming_days))
-      .catch((error) => onError((error as Error).message));
-  }, [onError]);
+export function useCalendarData() {
+  const revision = useSessionStore((state) => state.calendarRevision);
+  const upcomingDays = useCalendarStore((state) => state.upcomingDays);
+  const undatedTasks = useCalendarStore((state) => state.undatedTasks);
+  const overviewOccurrences = useCalendarStore(
+    (state) => state.overviewOccurrences,
+  );
+  const overviewCursor = useCalendarStore((state) => state.overviewCursor);
+  const calendarOccurrences = useCalendarStore(
+    (state) => state.calendarOccurrences,
+  );
+  const loading = useCalendarStore((state) => state.loading);
+  const refresh = useCalendarStore((state) => state.refresh);
+  const loadMoreOverview = useCalendarStore(
+    (state) => state.loadMoreOverview,
+  );
+  const changeHorizon = useCalendarStore((state) => state.changeHorizon);
+  const updateVisibleRange = useCalendarStore(
+    (state) => state.updateVisibleRange,
+  );
 
   useEffect(() => {
     void refresh();
   }, [refresh, revision]);
-
-  const loadMoreOverview = useCallback(async () => {
-    if (!overviewCursor) return;
-    try {
-      const now = new Date(),
-        end = new Date(now.getTime() + upcomingDays * 86_400_000),
-        page = await getOccurrences({
-          from: "1970-01-01T00:00:00.000Z",
-          to: end.toISOString(),
-          limit: 100,
-          cursor: overviewCursor,
-        });
-      setOverviewOccurrences((items) => [...items, ...page.items]);
-      setOverviewCursor(page.next_cursor);
-    } catch (error) {
-      onError((error as Error).message);
-    }
-  }, [onError, overviewCursor, upcomingDays]);
-
-  const changeHorizon = useCallback(
-    async (value: number) => {
-      setUpcomingDays(value);
-      try {
-        await updateUserPreferences({ upcoming_days: value });
-        await loadOverview(value);
-      } catch (error) {
-        onError((error as Error).message);
-      }
-    },
-    [loadOverview, onError],
-  );
-
-  const updateVisibleRange = useCallback(
-    (range: { from: string; to: string }) =>
-      setVisibleRange((current) =>
-        current?.from === range.from && current.to === range.to
-          ? current
-          : range,
-      ),
-    [],
-  );
 
   const entries = useMemo(
     () => occurrencesToEntries(calendarOccurrences),

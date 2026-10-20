@@ -1,4 +1,5 @@
 import { formatHistoryDate, historyDateKey } from "../../libs/format";
+import { useSessionStore } from "../../libs/stores";
 import type { CalendarOperation } from "../../types";
 import { ScrollArea } from "../ui/scroll-area";
 import { Separator } from "../ui/separator";
@@ -14,13 +15,10 @@ function changesCount(value: number): string {
   return `${value} изменений`;
 }
 
-export function HistoryPanel({
-  items,
-  undo,
-}: {
-  items: CalendarOperation[];
-  undo: (id: string) => void;
-}) {
+export function HistoryPanel() {
+  const items = useSessionStore((state) => state.history);
+  const undo = useSessionStore((state) => state.undo);
+
   if (!items.length)
     return (
       <EmptyState

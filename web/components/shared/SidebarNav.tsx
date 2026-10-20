@@ -14,19 +14,19 @@ const sections: {
   {
     view: "chat",
     label: "Чат",
-    description: "Голосом и текстом",
+    description: "",
     icon: MessagesSquareIcon,
   },
   {
     view: "calendar",
     label: "Календарь",
-    description: "Месяц и ближайшие дела",
+    description: "",
     icon: CalendarDaysIcon,
   },
   {
     view: "history",
     label: "История изменений",
-    description: "Что и когда изменилось",
+    description: "",
     icon: HistoryIcon,
   },
 ];
@@ -44,7 +44,7 @@ export function SidebarNav({
 }) {
   return (
     <nav
-      className={`grid content-start gap-1 p-3 ${collapsed ? "md:px-2" : ""}`}
+      className="grid content-start gap-1 p-3"
       aria-label="Разделы"
     >
       {sections.map(({ view: target, label, description, icon: Icon }) => {

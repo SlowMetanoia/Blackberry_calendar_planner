@@ -1,8 +1,13 @@
 import { useCallback, useEffect, useState } from "react";
 import { HistoryIcon, LogOutIcon, PlusIcon } from "lucide-react";
 import { AUTH_EXPIRED_EVENT } from "../api";
-import { usePlannerSession } from "../libs/hooks/use-planner-session";
-import { useVoiceAssistant } from "../libs/hooks/use-voice-assistant";
+import {
+  PlannerStoresProvider,
+  createPlannerStores,
+  usePlannerStores,
+  useSessionStore,
+  useUiStore,
+} from "../libs/stores";
 import type { PlannerView } from "../types";
 import { Button } from "./ui/button";
 import { LoginScreen } from "./auth/LoginScreen";
@@ -13,7 +18,6 @@ import { HistoryPanel } from "./history/HistoryPanel";
 import { AppSidebar } from "./shared/AppSidebar";
 import { ErrorToast } from "./shared/ErrorToast";
 import { PlannerHeader } from "./shared/PlannerHeader";
-import { useSidebarCollapsed } from "../libs/hooks/use-sidebar-collapsed";
 import { ViewPanel } from "./shared/ViewPanel";
 
 const viewTitles: Record<PlannerView, string> = {
@@ -23,33 +27,48 @@ const viewTitles: Record<PlannerView, string> = {
 };
 
 export default function App() {
-  const session = usePlannerSession();
-  const voice = useVoiceAssistant({
-    token: session.token,
-    acceptMessage: session.acceptMessage,
-    getConversationId: session.getConversationId,
-    onAudio: session.sendAudio,
-    onError: session.setError,
-  });
-  const [view, setView] = useState<PlannerView>("chat");
-  const [navOpen, setNavOpen] = useState(false);
-  const [sessionsOpen, setSessionsOpen] = useState(false);
-  const { collapsed: navCollapsed, toggle: toggleNavCollapsed } =
-    useSidebarCollapsed();
+  const [stores] = useState(createPlannerStores);
+  return (
+    <PlannerStoresProvider stores={stores}>
+      <PlannerApp />
+    </PlannerStoresProvider>
+  );
+}
 
-  const resetNavigation = useCallback(() => {
-    setView("chat");
-    setNavOpen(false);
-    setSessionsOpen(false);
-  }, []);
-  const { reset, startNewConversation, openConversation, logout } = session;
-  const { stopOpenAir } = voice;
+function PlannerApp() {
+  const stores = usePlannerStores();
+  const token = useSessionStore((state) => state.token);
+  const authenticate = useSessionStore((state) => state.authenticate);
+  const error = useSessionStore((state) => state.error);
+  const clearError = useSessionStore((state) => state.clearError);
+  const historyCount = useSessionStore((state) => state.history.length);
+  const sessions = useSessionStore((state) => state.sessions);
+  const conversation = useSessionStore((state) => state.conversation);
+  const view = useUiStore((state) => state.view);
+  const navOpen = useUiStore((state) => state.navOpen);
+  const sessionsOpen = useUiStore((state) => state.sessionsOpen);
+  const navCollapsed = useUiStore((state) => state.sidebarCollapsed);
+  const selectView = useUiStore((state) => state.selectView);
+  const setNavOpen = useUiStore((state) => state.setNavOpen);
+  const setSessionsOpen = useUiStore((state) => state.setSessionsOpen);
+  const toggleSidebar = useUiStore((state) => state.toggleSidebar);
+
+  useEffect(() => {
+    if (!token) return;
+    void stores.session.getState().bootstrap();
+    void stores.voice.getState().loadPreferences();
+  }, [stores, token]);
+
+  useEffect(() => () => stores.voice.getState().dispose(), [stores]);
 
   const handleAuthExpired = useCallback(() => {
-    stopOpenAir();
-    reset("Сессия истекла или недействительна. Войдите снова.");
-    resetNavigation();
-  }, [reset, resetNavigation, stopOpenAir]);
+    stores.voice.getState().reset();
+    stores.session
+      .getState()
+      .reset("Сессия истекла или недействительна. Войдите снова.");
+    stores.calendar.getState().reset();
+    stores.ui.getState().resetNavigation();
+  }, [stores]);
 
   useEffect(() => {
     window.addEventListener(AUTH_EXPIRED_EVENT, handleAuthExpired);
@@ -58,35 +77,31 @@ export default function App() {
   }, [handleAuthExpired]);
 
   const handleNewConversation = useCallback(() => {
-    startNewConversation();
-    resetNavigation();
-  }, [resetNavigation, startNewConversation]);
+    stores.session.getState().startNewConversation();
+    stores.ui.getState().resetNavigation();
+  }, [stores]);
 
   const handleOpenConversation = useCallback(
     async (id: string) => {
-      resetNavigation();
-      await openConversation(id);
+      stores.ui.getState().resetNavigation();
+      await stores.session.getState().openConversation(id);
     },
-    [openConversation, resetNavigation],
+    [stores],
   );
 
   const handleLogout = useCallback(async () => {
-    stopOpenAir();
-    await logout();
-    resetNavigation();
-  }, [logout, resetNavigation, stopOpenAir]);
+    stores.voice.getState().reset();
+    await stores.session.getState().logout();
+    stores.calendar.getState().reset();
+    stores.ui.getState().resetNavigation();
+  }, [stores]);
 
-  if (!session.token)
-    return (
-      <LoginScreen
-        error={session.error}
-        onAuthenticate={session.authenticate}
-      />
-    );
+  if (!token)
+    return <LoginScreen error={error} onAuthenticate={authenticate} />;
 
   return (
-    <div className="h-dvh w-full bg-secondary/30">
-      <main className="mx-auto flex h-full w-full max-w-[1680px] overflow-hidden bg-background">
+    <div className="h-dvh w-full bg-background">
+      <main className="flex h-full w-full overflow-hidden bg-background">
         <div
           aria-hidden="true"
           className={`fixed inset-0 z-40 bg-foreground/30 md:hidden ${
@@ -98,13 +113,10 @@ export default function App() {
           view={view}
           open={navOpen}
           collapsed={navCollapsed}
-          historyCount={session.history.length}
-          onSelect={(next) => {
-            setView(next);
-            setNavOpen(false);
-          }}
+          historyCount={historyCount}
+          onSelect={selectView}
           onClose={() => setNavOpen(false)}
-          onToggleCollapsed={toggleNavCollapsed}
+          onToggleCollapsed={toggleSidebar}
         />
 
         <section className="flex min-h-0 min-w-0 flex-1 flex-col md:border-l md:border-border/60">
@@ -146,41 +158,25 @@ export default function App() {
           </PlannerHeader>
 
           <ViewPanel active={view === "chat"}>
-            <ChatView
-              messages={session.messages}
-              startNewConversation={handleNewConversation}
-              recording={voice.recording}
-              openAirEnabled={voice.openAirEnabled}
-              openAirStatus={voice.openAirStatus}
-              openAirSilenceMs={voice.openAirSilenceMs}
-              onSendText={session.sendText}
-              onToggleOpenAir={voice.toggleOpenAir}
-              onChangeOpenAirSilence={voice.changeOpenAirSilence}
-              onStartRecording={voice.startRecording}
-              onStopRecording={voice.stopRecording}
-            />
+            <ChatView startNewConversation={handleNewConversation} />
           </ViewPanel>
 
           <ViewPanel active={view === "calendar"}>
-            <CalendarView
-              revision={session.calendarRevision}
-              onHistoryChanged={session.handleCalendarChanged}
-              onError={session.setError}
-            />
+            <CalendarView />
           </ViewPanel>
 
           <ViewPanel active={view === "history"}>
-            <HistoryPanel items={session.history} undo={session.undo} />
+            <HistoryPanel />
           </ViewPanel>
 
-          <ErrorToast message={session.error} onDismiss={session.clearError} />
+          <ErrorToast message={error} onDismiss={clearError} />
         </section>
 
         <SessionHistoryDialog
           open={sessionsOpen}
           onOpenChange={setSessionsOpen}
-          sessions={session.sessions}
-          conversation={session.conversation}
+          sessions={sessions}
+          conversation={conversation}
           onSelect={(id) => void handleOpenConversation(id)}
         />
       </main>
