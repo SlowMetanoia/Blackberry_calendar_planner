@@ -1,8 +1,9 @@
-import { formatHistoryDate, historyDateKey } from "../libs/format";
-import type { CalendarOperation } from "../types";
+import { formatHistoryDate, historyDateKey } from "../../libs/format";
+import type { CalendarOperation } from "../../types";
+import { ScrollArea } from "../ui/scroll-area";
+import { Separator } from "../ui/separator";
+import { EmptyState } from "../shared/EmptyState";
 import { HistoryItem } from "./HistoryItem";
-import { ScrollArea } from "./ui/scroll-area";
-import { Separator } from "./ui/separator";
 
 function changesCount(value: number): string {
   const lastTwo = value % 100,
@@ -22,14 +23,10 @@ export function HistoryPanel({
 }) {
   if (!items.length)
     return (
-      <div className="grid min-h-0 flex-1 place-items-center px-6 pb-16">
-        <div className="grid max-w-sm gap-1.5 text-center">
-          <p className="text-sm font-medium">Изменений пока нет</p>
-          <p className="text-xs leading-relaxed text-muted-foreground">
-            Здесь появятся созданные, изменённые и удалённые записи календаря.
-          </p>
-        </div>
-      </div>
+      <EmptyState
+        title="Изменений пока нет"
+        description="Здесь появятся созданные, изменённые и удалённые записи календаря."
+      />
     );
 
   const groups = new Map<string, CalendarOperation[]>();

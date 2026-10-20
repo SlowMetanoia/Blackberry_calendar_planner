@@ -1,0 +1,54 @@
+import { MessageSquarePlusIcon } from "lucide-react";
+import type { AgentMessage } from "../../types";
+import { Alert, AlertDescription } from "../ui/alert";
+import { Button } from "../ui/button";
+import { Card, CardContent } from "../ui/card";
+import { MessageTime } from "./MessageTime";
+import { OperationReceipt } from "./OperationReceipt";
+import { ReadCard } from "./ReadCard";
+
+export function BotMessage({
+  message,
+  showThinking,
+  startNewConversation,
+}: {
+  message: AgentMessage;
+  showThinking: boolean;
+  startNewConversation: () => void;
+}) {
+  return (
+    <Card
+      size="sm"
+      className="bubble bot relative max-w-[82%] gap-0 rounded-bl-sm bg-muted/60 px-4 pt-3.5 pb-7 ring-border/60"
+    >
+      <CardContent className="grid min-w-0 gap-1 px-0">
+        {message.reply ? (
+          <p className="text-sm leading-relaxed">{message.reply}</p>
+        ) : showThinking ? (
+          <p className="text-sm text-muted-foreground">Думаю…</p>
+        ) : null}
+        {message.display_items.map((item) => (
+          <ReadCard read={item} key={`${item.resource}-${item.id}`} />
+        ))}
+        {message.operations.map((item) => (
+          <OperationReceipt item={item} key={item.id} />
+        ))}
+        {message.requires_new_conversation && (
+          <Button className="mt-2 w-fit" onClick={startNewConversation}>
+            <MessageSquarePlusIcon aria-hidden="true" />
+            Начать новый диалог
+          </Button>
+        )}
+        {message.error && (
+          <Alert variant="destructive" className="mt-2 py-2">
+            <AlertDescription>{message.error}</AlertDescription>
+          </Alert>
+        )}
+        <MessageTime
+          value={message.created_at}
+          className="bot-time absolute bottom-2.5 left-4 text-muted-foreground"
+        />
+      </CardContent>
+    </Card>
+  );
+}

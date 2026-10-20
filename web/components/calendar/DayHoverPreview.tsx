@@ -1,5 +1,5 @@
-import type { CalendarEntry } from "../types";
-import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
+import type { CalendarEntry } from "../../types";
+import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
 import { EntryDetails } from "./EntryDetails";
 
 export function DayHoverPreview({

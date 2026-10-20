@@ -9,9 +9,9 @@ import {
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "../components/App";
-import { HistoryItem } from "../components/HistoryItem";
-import { MessageExchange } from "../components/MessageExchange";
-import { ReadCard } from "../components/ReadCard";
+import { HistoryItem } from "../components/history/HistoryItem";
+import { MessageExchange } from "../components/chat/MessageExchange";
+import { ReadCard } from "../components/chat/ReadCard";
 import * as api from "../api";
 import type { AgentMessage, CalendarOperation } from "../types";
 
@@ -182,7 +182,49 @@ describe("planner chat", () => {
       screen.getByRole("button", { name: "Отменить создание" }),
     ).toBeInTheDocument();
   });
-  it("shows calendar history in sidebar and sessions in a modal", async () => {
+  it("loads a section only after it is selected", async () => {
+    localStorage.setItem("planner-token", "token");
+    vi.mocked(api.syncTimeZone).mockResolvedValue({ timezone: "UTC" });
+    render(<App />);
+    expect(
+      await screen.findByRole("heading", { name: "Что запланируем?" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("region", { name: "Календарь месяца" }),
+    ).not.toBeInTheDocument();
+    expect(api.getOccurrences).not.toHaveBeenCalled();
+
+    await userEvent.click(screen.getByRole("button", { name: "Календарь" }));
+    expect(
+      await screen.findByRole("region", { name: "Календарь месяца" }),
+    ).toBeInTheDocument();
+    await waitFor(() => expect(api.getOccurrences).toHaveBeenCalled());
+  });
+  it("collapses the sidebar template and keeps the main section", async () => {
+    localStorage.setItem("planner-token", "token");
+    vi.mocked(api.syncTimeZone).mockResolvedValue({ timezone: "UTC" });
+    render(<App />);
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Свернуть панель" }),
+    );
+    expect(
+      screen.getByRole("button", { name: "Развернуть панель" }),
+    ).toBeInTheDocument();
+    await waitFor(() =>
+      expect(localStorage.getItem("planner-sidebar-collapsed")).toBe("true"),
+    );
+    expect(
+      screen.getByRole("heading", { name: "Что запланируем?" }),
+    ).toBeInTheDocument();
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "Развернуть панель" }),
+    );
+    await waitFor(() =>
+      expect(localStorage.getItem("planner-sidebar-collapsed")).toBe("false"),
+    );
+  });
+  it("shows calendar history in the history view and sessions in a modal", async () => {
     localStorage.setItem("planner-token", "token");
     vi.mocked(api.syncTimeZone).mockResolvedValue({ timezone: "UTC" });
     vi.mocked(api.getCalendarHistory).mockResolvedValue({
@@ -205,13 +247,14 @@ describe("planner chat", () => {
       offset: 0,
     });
     render(<App />);
-    expect(
+    await userEvent.click(
       await screen.findByRole("button", { name: "История изменений" }),
-    ).toBeInTheDocument();
+    );
     expect(screen.getByText("Релиз")).toBeInTheDocument();
     expect(
       screen.getByText(/запланировано на 15 октября 2026/),
     ).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Чат" }));
     await userEvent.click(
       screen.getByRole("button", { name: "История сессий" }),
     );
@@ -235,6 +278,9 @@ describe("planner chat", () => {
       operation: "delete",
     });
     render(<App />);
+    await userEvent.click(
+      await screen.findByRole("button", { name: "История изменений" }),
+    );
     await userEvent.click(
       await screen.findByRole("button", { name: "Отменить создание" }),
     );
@@ -440,6 +486,9 @@ describe("planner chat", () => {
       title: "Готовый отчёт",
     });
     const { container } = render(<App />);
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Календарь" }),
+    );
     const taskButton = await screen.findByRole("button", {
       name: /Подготовить отчёт/,
     });
@@ -535,6 +584,9 @@ describe("planner chat", () => {
     vi.mocked(api.updateTask).mockResolvedValue(task);
     render(<App />);
     await userEvent.click(
+      await screen.findByRole("button", { name: "Календарь" }),
+    );
+    await userEvent.click(
       await screen.findByRole("button", { name: /Французский/ }),
     );
     expect(screen.getByLabelText("Изменить")).toHaveValue("occurrence");
@@ -594,6 +646,9 @@ describe("planner chat", () => {
           : { items: [], total: 0, has_more: false, next_cursor: null },
     );
     render(<App />);
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Календарь" }),
+    );
     await userEvent.click(
       await screen.findByRole("button", { name: "Показать ещё" }),
     );

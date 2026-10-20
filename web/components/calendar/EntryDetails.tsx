@@ -1,14 +1,14 @@
 import { CalendarDaysIcon, ListTodoIcon, RepeatIcon } from "lucide-react";
-import { formatDuration, formatSchedule } from "../libs/format";
-import type { CalendarEntry } from "../types";
-import { Badge } from "./ui/badge";
+import { formatDuration, formatSchedule } from "../../libs/format";
+import type { CalendarEntry } from "../../types";
+import { Badge } from "../ui/badge";
 import {
   Item,
   ItemContent,
   ItemDescription,
   ItemMedia,
   ItemTitle,
-} from "./ui/item";
+} from "../ui/item";
 
 function entryKind(entry: CalendarEntry): string {
   return entry.resource === "task" ? "Задача" : "Событие";

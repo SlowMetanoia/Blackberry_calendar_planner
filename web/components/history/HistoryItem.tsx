@@ -2,30 +2,19 @@ import { Undo2Icon } from "lucide-react";
 import {
   operationSchedule,
   operationWords,
-  resourceMetadata,
   stringField,
   undoWords,
-} from "../libs/calendar-view";
-import { formatHistoryTime } from "../libs/format";
-import type { CalendarOperation } from "../types";
-import { Badge } from "./ui/badge";
-import { Button } from "./ui/button";
-import {
-  Card,
-  CardContent,
-  CardFooter,
-  CardHeader,
-  CardTitle,
-} from "./ui/card";
-import { Separator } from "./ui/separator";
+} from "../../libs/calendar-view";
+import { formatHistoryTime } from "../../libs/format";
+import type { CalendarOperation } from "../../types";
+import { Button } from "../ui/button";
 import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
-} from "./ui/tooltip";
-import { Changes } from "./Changes";
-import { Metadata } from "./Metadata";
+} from "../ui/tooltip";
+import { HistoryItemPreview } from "./HistoryItemPreview";
 
 const operationTone: Record<
   CalendarOperation["operation"],
@@ -98,30 +87,7 @@ export function HistoryItem({
           showArrow={false}
           className="block max-w-none bg-transparent p-0 text-foreground shadow-none"
         >
-          <Card size="sm" className="w-80 shadow-lg ring-border">
-            <CardHeader className="gap-1.5">
-              <Badge
-                variant={item.operation === "delete" ? "destructive" : "secondary"}
-                className="w-fit"
-              >
-                {operationWords[item.operation]}
-              </Badge>
-              <CardTitle className="text-sm">{title}</CardTitle>
-            </CardHeader>
-            <CardContent className="grid gap-2">
-              <Metadata items={resourceMetadata(item.resource, data)} />
-              {item.operation === "update" && (
-                <>
-                  <Separator />
-                  <Changes changes={item.changes} />
-                </>
-              )}
-            </CardContent>
-            <CardFooter className="py-2 text-[11px] text-muted-foreground">
-              Источник: {item.origin}
-              {item.reverts_operation_id ? " · компенсирующая операция" : ""}
-            </CardFooter>
-          </Card>
+          <HistoryItemPreview item={item} title={title} />
         </TooltipContent>
       </Tooltip>
     </TooltipProvider>

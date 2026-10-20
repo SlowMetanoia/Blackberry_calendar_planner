@@ -1,13 +1,14 @@
 import { CalendarPlusIcon, ListPlusIcon } from "lucide-react";
-import type { CalendarEntry, Resource } from "../types";
-import { Button } from "./ui/button";
+import type { CalendarEntry, Resource } from "../../types";
+import { Button } from "../ui/button";
 import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
-} from "./ui/dialog";
-import { ScrollArea } from "./ui/scroll-area";
+} from "../ui/dialog";
+import { ScrollArea } from "../ui/scroll-area";
+import { EmptyState } from "../shared/EmptyState";
 import { EntryDetails } from "./EntryDetails";
 
 export function DayDialog({
@@ -69,9 +70,10 @@ export function DayDialog({
               </Button>
             ))}
             {!entries.length && (
-              <p className="py-6 text-center text-sm text-muted-foreground">
-                На этот день пока ничего не запланировано.
-              </p>
+              <EmptyState
+                title="На этот день пока ничего не запланировано."
+                className="min-h-0 flex-none py-6 pb-6"
+              />
             )}
           </div>
         </ScrollArea>

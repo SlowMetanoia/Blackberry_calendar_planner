@@ -189,3 +189,40 @@
   min-width: 0;
   min-height: 0;
 }
+
+@media (max-width: 639px) {
+  :is(.planner-calendar, .calendar-full) .fc-toolbar.fc-header-toolbar {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 0.375rem;
+    margin-bottom: 0.75rem;
+  }
+
+  :is(.planner-calendar, .calendar-full) .fc-toolbar-chunk {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    gap: 0.25rem;
+  }
+
+  :is(.planner-calendar, .calendar-full) .fc-toolbar-chunk:nth-child(2) {
+    justify-content: center;
+    overflow: hidden;
+  }
+
+  :is(.planner-calendar, .calendar-full) .fc-toolbar-chunk:nth-child(3) {
+    justify-content: flex-end;
+  }
+
+  :is(.planner-calendar, .calendar-full) .fc-toolbar-title {
+    font-size: 1rem;
+    line-height: 1.25;
+    white-space: nowrap;
+  }
+
+  :is(.planner-calendar, .calendar-full) .fc-button {
+    padding: 0.25rem 0.45rem;
+    font-size: 0.75rem;
+  }
+}

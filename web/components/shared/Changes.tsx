@@ -1,4 +1,5 @@
-import type { CalendarOperation } from "../types";
+import type { CalendarOperation } from "../../types";
+
 export function Changes({
   changes,
 }: {
