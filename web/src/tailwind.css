@@ -1,0 +1,183 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+@import "@fontsource-variable/geist";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --font-heading: var(--font-sans);
+  --font-sans: "Geist Variable", ui-sans-serif, system-ui, sans-serif;
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --color-foreground: var(--foreground);
+  --color-background: var(--background);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
+}
+
+:root {
+  /* Ivory paper, fountain-pen ink, one dry highlighter. */
+  --background: oklch(0.968 0.006 92);
+  --foreground: oklch(0.28 0.032 255);
+  --card: oklch(0.991 0.003 92);
+  --card-foreground: oklch(0.28 0.032 255);
+  --popover: oklch(0.995 0.002 92);
+  --popover-foreground: oklch(0.28 0.032 255);
+  --primary: oklch(0.3 0.036 255);
+  --primary-foreground: oklch(0.985 0.004 90);
+  --secondary: oklch(0.938 0.007 92);
+  --secondary-foreground: oklch(0.32 0.03 255);
+  --muted: oklch(0.945 0.005 92);
+  --muted-foreground: oklch(0.47 0.02 255);
+  --accent: oklch(0.895 0.105 92);
+  --accent-foreground: oklch(0.315 0.048 78);
+  --destructive: oklch(0.525 0.175 27);
+  --border: oklch(0.892 0.007 92);
+  --input: oklch(0.875 0.008 92);
+  --ring: oklch(0.55 0.075 255);
+  --chart-1: oklch(0.42 0.06 255);
+  --chart-2: oklch(0.55 0.075 215);
+  --chart-3: oklch(0.715 0.135 72);
+  --chart-4: oklch(0.62 0.02 90);
+  --chart-5: oklch(0.58 0.14 30);
+  --radius: 0.75rem;
+  --sidebar: oklch(0.245 0.025 255);
+  --sidebar-foreground: oklch(0.955 0.006 90);
+  --sidebar-primary: oklch(0.895 0.105 92);
+  --sidebar-primary-foreground: oklch(0.28 0.032 255);
+  --sidebar-accent: oklch(0.895 0.105 92);
+  --sidebar-accent-foreground: oklch(0.28 0.032 255);
+  --sidebar-border: oklch(1 0 0 / 10%);
+  --sidebar-ring: oklch(0.895 0.105 92);
+  color-scheme: light;
+}
+
+.dark {
+  --background: oklch(0.205 0.015 255);
+  --foreground: oklch(0.925 0.012 90);
+  --card: oklch(0.248 0.016 255);
+  --card-foreground: oklch(0.925 0.012 90);
+  --popover: oklch(0.26 0.016 255);
+  --popover-foreground: oklch(0.925 0.012 90);
+  --primary: oklch(0.925 0.012 90);
+  --primary-foreground: oklch(0.225 0.02 255);
+  --secondary: oklch(0.3 0.018 255);
+  --secondary-foreground: oklch(0.925 0.012 90);
+  --muted: oklch(0.3 0.018 255);
+  --muted-foreground: oklch(0.725 0.015 90);
+  --accent: oklch(0.82 0.12 90);
+  --accent-foreground: oklch(0.245 0.045 75);
+  --destructive: oklch(0.7 0.15 27);
+  --border: oklch(1 0 0 / 12%);
+  --input: oklch(1 0 0 / 16%);
+  --ring: oklch(0.7 0.09 250);
+  --chart-1: oklch(0.72 0.06 255);
+  --chart-2: oklch(0.72 0.075 215);
+  --chart-3: oklch(0.8 0.12 72);
+  --chart-4: oklch(0.74 0.02 90);
+  --chart-5: oklch(0.68 0.13 30);
+  --sidebar: oklch(0.165 0.014 255);
+  --sidebar-foreground: oklch(0.925 0.012 90);
+  --sidebar-primary: oklch(0.82 0.12 90);
+  --sidebar-primary-foreground: oklch(0.225 0.02 255);
+  --sidebar-accent: oklch(0.82 0.12 90);
+  --sidebar-accent-foreground: oklch(0.245 0.045 75);
+  --sidebar-border: oklch(1 0 0 / 10%);
+  --sidebar-ring: oklch(0.82 0.12 90);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+  html {
+    @apply font-sans antialiased;
+    color-scheme: light;
+  }
+  body {
+    @apply overflow-hidden bg-background text-foreground;
+    margin: 0;
+    -webkit-tap-highlight-color: transparent;
+    overscroll-behavior-y: none;
+  }
+  button,
+  a,
+  [role="button"] {
+    touch-action: manipulation;
+  }
+  ::selection {
+    background: color-mix(in oklab, var(--primary) 22%, transparent);
+  }
+}
+
+@media (max-width: 639px) {
+  html {
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+  }
+
+  /* Keep iOS from zooming the page when a form control receives focus. */
+  input,
+  select,
+  textarea {
+    font-size: 16px;
+  }
+}
+
+/* Hover-only previews are useless on touch screens and can linger after a tap. */
+@media (hover: none) {
+  .day-hover-preview {
+    display: none;
+  }
+}
+
+/* The calendar fills the workspace and scrolls its own upcoming rail. */
+
+.calendar-full {
+  min-width: 0;
+  min-height: 0;
+}
+
+/* Native-feeling vertical scrolling on touch devices without scroll chaining. */
+.calendar-scroll {
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-y: contain;
+}
