@@ -6,7 +6,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .models import Event, Task, User
+from .models import Event, Reminder, Task, User
 
 
 def normalize_datetime(value: datetime | None, user: User) -> datetime | None:
@@ -146,3 +146,8 @@ class TaskService(ResourceService):
 class EventService(ResourceService):
     model = Event
     datetime_fields: ClassVar[set[str]] = {"starts_at"}
+
+
+class ReminderService(ResourceService):
+    model = Reminder
+    datetime_fields: ClassVar[set[str]] = {"remind_at"}

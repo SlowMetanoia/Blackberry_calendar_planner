@@ -123,6 +123,109 @@ class Event(Base):
     recurrence_version_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
 
 
+class Reminder(Base):
+    __tablename__ = "reminders"
+    __table_args__ = (
+        CheckConstraint(
+            "(linked_id IS NULL) = (linked_resource IS NULL)", name="ck_reminders_link_pair"
+        ),
+        CheckConstraint(
+            "description IS NULL OR length(description) <= 10000",
+            name="ck_reminders_description_length",
+        ),
+        Index("ix_reminders_link", "owner_id", "linked_resource", "linked_id"),
+        CheckConstraint("length(trim(title)) > 0", name="ck_reminders_title_not_blank"),
+        CheckConstraint("length(title) <= 500", name="ck_reminders_title_length"),
+        CheckConstraint("status IN ('active', 'fired', 'cancelled')", name="ck_reminders_status"),
+        CheckConstraint(
+            "linked_resource IS NULL OR linked_resource IN ('task', 'event')",
+            name="ck_reminders_linked_resource",
+        ),
+        CheckConstraint(
+            "(relative_offset_minutes IS NULL) OR linked_resource IS NOT NULL",
+            name="ck_reminders_relative_link",
+        ),
+        Index("ix_reminders_due", "status", "remind_at"),
+        Index("ix_reminders_owner_due", "owner_id", "status", "remind_at"),
+    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    owner_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    title: Mapped[str] = mapped_column(String(500))
+    description: Mapped[str | None] = mapped_column(Text())
+    remind_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    status: Mapped[str] = mapped_column(String(16), default="active", server_default="active")
+    linked_resource: Mapped[str | None] = mapped_column(String(16))
+    linked_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    relative_offset_minutes: Mapped[int | None] = mapped_column()
+    cancelled_reason: Mapped[str | None] = mapped_column(String(255))
+    fired_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class Notification(Base):
+    __tablename__ = "notifications"
+    __table_args__ = (
+        UniqueConstraint("reminder_id"),
+        Index("ix_notifications_owner_created", "owner_id", "created_at"),
+    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    owner_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    reminder_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("reminders.id", ondelete="CASCADE"), nullable=False
+    )
+    title: Mapped[str] = mapped_column(String(500))
+    body: Mapped[str | None] = mapped_column(Text())
+    read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class PushSubscription(Base):
+    __tablename__ = "push_subscriptions"
+    __table_args__ = (UniqueConstraint("owner_id", "endpoint"),)
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    owner_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    endpoint: Mapped[str] = mapped_column(Text())
+    p256dh: Mapped[str] = mapped_column(Text())
+    auth: Mapped[str] = mapped_column(Text())
+    active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class NotificationDelivery(Base):
+    __tablename__ = "notification_deliveries"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('pending', 'sent', 'failed', 'discarded')", name="ck_delivery_status"
+        ),
+        CheckConstraint("attempts >= 0", name="ck_delivery_attempts"),
+        UniqueConstraint("notification_id", "subscription_id"),
+        Index("ix_notification_deliveries_pending", "status", "next_attempt_at"),
+    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    notification_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("notifications.id", ondelete="CASCADE"), nullable=False
+    )
+    subscription_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("push_subscriptions.id", ondelete="CASCADE"), nullable=False
+    )
+    status: Mapped[str] = mapped_column(String(16), default="pending", server_default="pending")
+    attempts: Mapped[int] = mapped_column(default=0, server_default="0")
+    next_attempt_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True
+    )
+    last_error: Mapped[str | None] = mapped_column(Text())
+
+
 class CalendarScheduleVersion(Base):
     __tablename__ = "calendar_schedule_versions"
     __table_args__ = (
@@ -166,7 +269,9 @@ class CalendarOccurrenceException(Base):
 class CalendarSearchDocument(Base):
     __tablename__ = "calendar_search_documents"
     __table_args__ = (
-        CheckConstraint("resource IN ('task', 'event')", name="ck_search_documents_resource"),
+        CheckConstraint(
+            "resource IN ('task', 'event', 'reminder')", name="ck_search_documents_resource"
+        ),
         Index("ix_search_documents_owner_resource", "owner_id", "resource"),
     )
     owner_id: Mapped[uuid.UUID] = mapped_column(
@@ -265,7 +370,9 @@ class CalendarOperation(Base):
             "operation IN ('create', 'update', 'delete')",
             name="ck_calendar_operations_operation",
         ),
-        CheckConstraint("resource IN ('task', 'event')", name="ck_calendar_operations_resource"),
+        CheckConstraint(
+            "resource IN ('task', 'event', 'reminder')", name="ck_calendar_operations_resource"
+        ),
         CheckConstraint("scope IN ('series', 'occurrence')", name="ck_calendar_operations_scope"),
         CheckConstraint(
             "origin IN ('agent', 'rest', 'undo')", name="ck_calendar_operations_origin"

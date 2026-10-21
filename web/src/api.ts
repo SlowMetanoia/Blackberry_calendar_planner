@@ -1,4 +1,4 @@
-import type { AgentMessage, CalendarOccurrence, CalendarOperation, ConversationSummary, CursorPage, Event, Page, Task, UserPreferences } from "./types";
+import type { AgentMessage, CalendarOccurrence, CalendarOperation, ConversationSummary, CursorPage, Event, Notification, Page, Reminder, Task, UserPreferences } from "./types";
 
 const base = "/api";
 export const TOKEN_KEY = "planner-token";
@@ -76,6 +76,18 @@ export const deleteTask = (id:string) => request<void>(`/tasks/${id}`,{method:"D
 export const createEvent = (data:Omit<Event,"id"|"owner_id">) => request<Event>("/events",{method:"POST",body:JSON.stringify(data)});
 export const updateEvent = (id:string,data:Partial<Omit<Event,"id"|"owner_id">>,effectiveFrom?:string) => request<Event>(query(`/events/${id}`,{effective_from_occurrence_key:effectiveFrom}),{method:"PATCH",body:JSON.stringify(data)});
 export const deleteEvent = (id:string) => request<void>(`/events/${id}`,{method:"DELETE"});
+export type ReminderListOptions={limit?:number;offset?:number;status?:Reminder["status"];remindFrom?:string;remindTo?:string};
+export const getReminders=(options:ReminderListOptions={})=>request<Page<Reminder>>(query("/reminders",{limit:options.limit??100,offset:options.offset??0,status:options.status,remind_from:options.remindFrom,remind_to:options.remindTo}));
+export const createReminder=(data:Omit<Reminder,"id"|"owner_id"|"status"|"cancelled_reason"|"fired_at"|"cancelled_at"|"created_at">)=>request<Reminder>("/reminders",{method:"POST",body:JSON.stringify(data)});
+export const updateReminder=(id:string,data:Partial<Pick<Reminder,"title"|"description"|"remind_at"|"status"|"relative_offset_minutes">>)=>request<Reminder>(`/reminders/${id}`,{method:"PATCH",body:JSON.stringify(data)});
+export const deleteReminder=(id:string)=>request<void>(`/reminders/${id}`,{method:"DELETE"});
+export const getNotifications=(unread=false,limit=100,offset=0)=>request<Page<Notification>>(query("/notifications",{unread:unread?1:undefined,limit,offset}));
+export const markNotificationRead=(id:string)=>request<Notification>(`/notifications/${id}/read`,{method:"PATCH"});
+export const markAllNotificationsRead=()=>request<void>("/notifications/read-all",{method:"POST"});
+export const deleteNotification=(id:string)=>request<void>(`/notifications/${id}`,{method:"DELETE"});
+export const getPushConfig=()=>request<{enabled:boolean;public_key:string|null}>("/notifications/push/config");
+export const upsertPushSubscription=(data:{endpoint:string;p256dh:string;auth:string})=>request<void>("/notifications/push/subscription",{method:"PUT",body:JSON.stringify(data)});
+export const deletePushSubscription=(data:{endpoint:string;p256dh:string;auth:string})=>request<void>("/notifications/push/subscription",{method:"DELETE",body:JSON.stringify(data)});
 export type OccurrenceListOptions={resource?:"all"|"task"|"event";seriesId?:string;from?:string;to?:string;status?:"open"|"completed";limit?:number;cursor?:string};
 export const getOccurrences=(options:OccurrenceListOptions={})=>request<CursorPage<CalendarOccurrence>>(query("/calendar/occurrences",{resource:options.resource,series_id:options.seriesId,from:options.from,to:options.to,status:options.status,limit:options.limit??100,cursor:options.cursor}));
 export const updateTaskOccurrence=(id:string,key:string,data:Partial<Omit<Task,"id"|"owner_id">>)=>request<CalendarOccurrence>(`/tasks/${id}/occurrences/${encodeURIComponent(key)}`,{method:"PATCH",body:JSON.stringify(data)});

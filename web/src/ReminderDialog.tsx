@@ -1,0 +1,18 @@
+import { FormEvent, useState } from "react";
+import { createReminder, deleteReminder, updateReminder } from "./api";
+import type { Reminder } from "./types";
+
+export type ReminderLink={resource:"task"|"event";id:string;title:string;at:string};
+
+function localInput(value:string){const date=new Date(value);return Number.isNaN(date.getTime())?"":new Date(date.getTime()-date.getTimezoneOffset()*60000).toISOString().slice(0,16);}
+
+export function ReminderDialog({reminder,date,link,onClose,onChanged,onError}:{reminder?:Reminder;date?:string;link?:ReminderLink;onClose:()=>void;onChanged:()=>Promise<void>;onError:(message:string)=>void}){
+  const [title,setTitle]=useState(reminder?.title||link?.title||""),[description,setDescription]=useState(reminder?.description||"");
+  const [when,setWhen]=useState(reminder?localInput(reminder.remind_at):link?localInput(link.at):`${date||new Date().toISOString().slice(0,10)}T09:00`);
+  const [relative,setRelative]=useState(reminder?.relative_offset_minutes!=null||Boolean(link));
+  const [offset,setOffset]=useState(reminder?.relative_offset_minutes??-60),[saving,setSaving]=useState(false);
+  const disabled=Boolean(reminder&&reminder.status!=="active");
+  async function submit(event:FormEvent){event.preventDefault();setSaving(true);try{const remind_at=new Date(when).toISOString();if(reminder)await updateReminder(reminder.id,{title,description:description||null,remind_at,relative_offset_minutes:relative?offset:null});else await createReminder({title,description:description||null,remind_at,linked_resource:link?.resource||null,linked_id:link?.id||null,relative_offset_minutes:relative?offset:null});await onChanged();}catch(error){onError((error as Error).message);}finally{setSaving(false);}}
+  async function remove(){if(!reminder)return;setSaving(true);try{await deleteReminder(reminder.id);await onChanged();}catch(error){onError((error as Error).message);}finally{setSaving(false);}}
+  return <div className="item-dialog-scrim" onMouseDown={onClose}><form className="item-dialog" role="dialog" aria-modal="true" aria-label="Напоминание" onMouseDown={event=>event.stopPropagation()} onSubmit={submit}><div className="item-dialog-head"><h2>{reminder?"Напоминание":"Новое напоминание"}</h2><button type="button" aria-label="Закрыть напоминание" onClick={onClose}>×</button></div><label>Название<input required maxLength={500} disabled={disabled} value={title} onChange={event=>setTitle(event.target.value)}/></label><label>Напомнить в<input type="datetime-local" required disabled={disabled||relative} value={when} onChange={event=>setWhen(event.target.value)}/></label>{(link||reminder?.linked_id)&&<><label><input type="checkbox" disabled={disabled} checked={relative} onChange={event=>setRelative(event.target.checked)}/>Относительно {link?.resource==="task"||reminder?.linked_resource==="task"?"дедлайна":"начала события"}</label>{relative&&<label>Смещение в минутах (минус — заранее)<input type="number" required disabled={disabled} value={offset} onChange={event=>setOffset(Number(event.target.value))}/></label>}</>}<label>Описание<textarea maxLength={10000} disabled={disabled} value={description} onChange={event=>setDescription(event.target.value)}/></label>{disabled&&<p>{reminder?.status==="fired"?"Напоминание сработало":"Напоминание отменено"}. Для другого времени создайте новое.</p>}<div className="item-dialog-actions">{reminder&&!disabled&&<button type="button" className="danger" disabled={saving} onClick={()=>void remove()}>Отменить напоминание</button>}<span/><button type="button" onClick={onClose}>Закрыть</button>{!disabled&&<button className="primary" disabled={saving}>Сохранить</button>}</div></form></div>;
+}

@@ -11,7 +11,7 @@ from arq.connections import RedisSettings
 from fastapi import Depends, FastAPI, File, Header, HTTPException, Query, Request, UploadFile
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .agent import TranscriptionError, transcribe
@@ -25,7 +25,18 @@ from .calendar import (
 from .config import get_settings
 from .db import Base, engine, get_session
 from .llm import verify_llm_connection
-from .models import AgentMessage, CalendarOperation, Conversation, Event, MessageStatus, Task, User
+from .models import (
+    AgentMessage,
+    CalendarOperation,
+    Conversation,
+    Event,
+    MessageStatus,
+    Notification,
+    PushSubscription,
+    Reminder,
+    Task,
+    User,
+)
 from .occurrences import OccurrenceService, occurrence_dict, parse_occurrence_key
 from .schemas import (
     AgentInput,
@@ -38,9 +49,15 @@ from .schemas import (
     EventCreate,
     EventResponse,
     EventUpdate,
+    NotificationResponse,
     Page,
     ProblemDetail,
     ProblemFieldError,
+    PushConfigResponse,
+    PushSubscriptionPayload,
+    ReminderCreate,
+    ReminderResponse,
+    ReminderUpdate,
     TaskCreate,
     TaskResponse,
     TaskUpdate,
@@ -50,7 +67,10 @@ from .schemas import (
     UserPreferencesResponse,
     UserPreferencesUpdate,
 )
-from .search import SearchIndexUnavailable, schedule_calendar_index
+from .search import (
+    SearchIndexUnavailable,
+    schedule_calendar_index,
+)
 from .security import (
     AuthSessionContext,
     create_auth_session,
@@ -462,6 +482,253 @@ async def delete_event(
     await _schedule_index(user.id)
 
 
+@app.post("/reminders", response_model=ReminderResponse, status_code=201)
+async def create_reminder(
+    data: ReminderCreate,
+    user: User = Depends(current_user),
+    session: AsyncSession = Depends(get_session),
+) -> Reminder:
+    operation = (
+        await CalendarCommandService.execute(
+            session,
+            user,
+            [CalendarMutation("create", "reminder", data.model_dump())],
+            origin="rest",
+        )
+    )[0]
+    await session.commit()
+    await _schedule_index(user.id)
+    return await session.get(Reminder, operation.target_id)
+
+
+@app.get("/reminders", response_model=Page[ReminderResponse])
+async def list_reminders(
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    status: Literal["active", "fired", "cancelled"] | None = None,
+    remind_from: datetime | None = None,
+    remind_to: datetime | None = None,
+    linked_resource: Literal["task", "event"] | None = None,
+    linked_id: uuid.UUID | None = None,
+    user: User = Depends(current_user),
+    session: AsyncSession = Depends(get_session),
+) -> Page[ReminderResponse]:
+    conditions = [Reminder.owner_id == user.id]
+    if remind_from and remind_to and remind_from >= remind_to:
+        raise HTTPException(422, "remind_from must be earlier than remind_to")
+    if linked_resource:
+        conditions.append(Reminder.linked_resource == linked_resource)
+    if linked_id:
+        conditions.append(Reminder.linked_id == linked_id)
+    if status:
+        conditions.append(Reminder.status == status)
+    if remind_from:
+        conditions.append(Reminder.remind_at >= normalize_datetime(remind_from, user))
+    if remind_to:
+        conditions.append(Reminder.remind_at < normalize_datetime(remind_to, user))
+    items = list(
+        (
+            await session.scalars(
+                select(Reminder)
+                .where(*conditions)
+                .order_by(Reminder.remind_at, Reminder.id)
+                .offset(offset)
+                .limit(limit)
+            )
+        ).all()
+    )
+    total = int(
+        await session.scalar(select(func.count()).select_from(Reminder).where(*conditions)) or 0
+    )
+    return Page(items=items, total=total, limit=limit, offset=offset)
+
+
+@app.get("/reminders/{reminder_id}", response_model=ReminderResponse)
+async def get_reminder(
+    reminder_id: uuid.UUID,
+    user: User = Depends(current_user),
+    session: AsyncSession = Depends(get_session),
+) -> Reminder:
+    reminder = await session.scalar(
+        select(Reminder).where(Reminder.id == reminder_id, Reminder.owner_id == user.id)
+    )
+    if reminder is None:
+        raise HTTPException(404, "Reminder not found")
+    return reminder
+
+
+@app.patch("/reminders/{reminder_id}", response_model=ReminderResponse)
+async def update_reminder(
+    reminder_id: uuid.UUID,
+    data: ReminderUpdate,
+    user: User = Depends(current_user),
+    session: AsyncSession = Depends(get_session),
+) -> Reminder:
+    try:
+        await CalendarCommandService.execute(
+            session,
+            user,
+            [
+                CalendarMutation(
+                    "update", "reminder", data.model_dump(exclude_unset=True), reminder_id
+                )
+            ],
+            origin="rest",
+        )
+    except CalendarTargetNotFound as exc:
+        raise HTTPException(404, "Reminder not found") from exc
+    await session.commit()
+    await _schedule_index(user.id)
+    return await session.get(Reminder, reminder_id)
+
+
+@app.delete("/reminders/{reminder_id}", status_code=204)
+async def delete_reminder(
+    reminder_id: uuid.UUID,
+    user: User = Depends(current_user),
+    session: AsyncSession = Depends(get_session),
+) -> None:
+    try:
+        await CalendarCommandService.execute(
+            session, user, [CalendarMutation("delete", "reminder", {}, reminder_id)], origin="rest"
+        )
+    except CalendarTargetNotFound as exc:
+        raise HTTPException(404, "Reminder not found") from exc
+    await session.commit()
+    await _schedule_index(user.id)
+
+
+@app.get("/notifications", response_model=Page[NotificationResponse])
+async def list_notifications(
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    unread: bool = False,
+    user: User = Depends(current_user),
+    session: AsyncSession = Depends(get_session),
+) -> Page[NotificationResponse]:
+    conditions = [Notification.owner_id == user.id]
+    if unread:
+        conditions.append(Notification.read_at.is_(None))
+    items = list(
+        (
+            await session.scalars(
+                select(Notification)
+                .where(*conditions)
+                .order_by(Notification.created_at.desc())
+                .offset(offset)
+                .limit(limit)
+            )
+        ).all()
+    )
+    total = int(
+        await session.scalar(select(func.count()).select_from(Notification).where(*conditions)) or 0
+    )
+    return Page(items=items, total=total, limit=limit, offset=offset)
+
+
+@app.patch("/notifications/{notification_id}/read", response_model=NotificationResponse)
+async def mark_notification_read(
+    notification_id: uuid.UUID,
+    user: User = Depends(current_user),
+    session: AsyncSession = Depends(get_session),
+) -> Notification:
+    notification = await session.scalar(
+        select(Notification).where(
+            Notification.id == notification_id, Notification.owner_id == user.id
+        )
+    )
+    if notification is None:
+        raise HTTPException(404, "Notification not found")
+    notification.read_at = datetime.now(UTC)
+    await session.commit()
+    return notification
+
+
+@app.post("/notifications/read-all", status_code=204)
+async def mark_all_notifications_read(
+    user: User = Depends(current_user), session: AsyncSession = Depends(get_session)
+) -> None:
+
+    await session.execute(
+        update(Notification)
+        .where(Notification.owner_id == user.id, Notification.read_at.is_(None))
+        .values(read_at=datetime.now(UTC))
+    )
+    await session.commit()
+
+
+@app.delete("/notifications/{notification_id}", status_code=204)
+async def delete_notification(
+    notification_id: uuid.UUID,
+    user: User = Depends(current_user),
+    session: AsyncSession = Depends(get_session),
+) -> None:
+    notification = await session.scalar(
+        select(Notification).where(
+            Notification.id == notification_id, Notification.owner_id == user.id
+        )
+    )
+    if notification is None:
+        raise HTTPException(404, "Notification not found")
+    await session.delete(notification)
+    await session.commit()
+
+
+@app.get("/notifications/push/config", response_model=PushConfigResponse)
+async def push_config() -> PushConfigResponse:
+    settings = get_settings()
+    return PushConfigResponse(
+        enabled=bool(
+            settings.web_push_vapid_public_key
+            and settings.web_push_vapid_private_key
+            and settings.web_push_vapid_subject
+        ),
+        public_key=settings.web_push_vapid_public_key,
+    )
+
+
+@app.put("/notifications/push/subscription", status_code=204)
+async def upsert_push_subscription(
+    data: PushSubscriptionPayload,
+    user: User = Depends(current_user),
+    session: AsyncSession = Depends(get_session),
+) -> None:
+    await session.execute(
+        update(PushSubscription)
+        .where(PushSubscription.endpoint == data.endpoint, PushSubscription.owner_id != user.id)
+        .values(active=False)
+    )
+    subscription = await session.scalar(
+        select(PushSubscription).where(
+            PushSubscription.owner_id == user.id, PushSubscription.endpoint == data.endpoint
+        )
+    )
+    if subscription is None:
+        subscription = PushSubscription(owner_id=user.id, **data.model_dump())
+        session.add(subscription)
+    else:
+        subscription.p256dh = data.p256dh
+        subscription.auth = data.auth
+        subscription.active = True
+    await session.commit()
+
+
+@app.delete("/notifications/push/subscription", status_code=204)
+async def delete_push_subscription(
+    data: PushSubscriptionPayload,
+    user: User = Depends(current_user),
+    session: AsyncSession = Depends(get_session),
+) -> None:
+    subscription = await session.scalar(
+        select(PushSubscription).where(
+            PushSubscription.owner_id == user.id, PushSubscription.endpoint == data.endpoint
+        )
+    )
+    if subscription is not None:
+        subscription.active = False
+        await session.commit()
+
+
 @app.get("/calendar/occurrences", response_model=CursorPage[CalendarOccurrenceResponse])
 async def list_calendar_occurrences(
     resource: Literal["all", "task", "event"] = "all",
@@ -800,7 +1067,7 @@ async def _message_response(message: AgentMessage, session: AsyncSession) -> Age
                 ident = uuid.UUID(str(item.get("id")))
             except (TypeError, ValueError, AttributeError):
                 continue
-            if resource not in {"task", "event"}:
+            if resource not in {"task", "event", "reminder"}:
                 continue
             key = (resource, ident)
             if key in seen_display_items:

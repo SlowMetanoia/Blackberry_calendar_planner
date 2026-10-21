@@ -31,6 +31,62 @@ def login(client, email):
     return {"Authorization": f"Bearer {response.json()['access_token']}"}
 
 
+def test_reminders_agent_notifier_search_and_linked_undo():
+    with httpx.Client(base_url=BASE_URL, timeout=20) as client:
+        owner = register(client, "reminders-e2e@example.com")
+        other = register(client, "reminders-other@example.com")
+        submitted = client.post(
+            "/agent/messages", headers=owner, json={"text": "создай напоминание"}
+        )
+        submitted.raise_for_status()
+        completed = wait_message(client, owner, submitted.json()["id"])
+        assert completed["status"] == "completed", completed
+        reminder_id = completed["operations"][0]["target_id"]
+        for _ in range(60):
+            inbox = client.get("/notifications", headers=owner).json()
+            if inbox["total"]:
+                break
+            time.sleep(0.2)
+        assert inbox["total"] == 1
+        notice = inbox["items"][0]
+        assert notice["reminder_id"] == reminder_id
+        assert client.get("/notifications", headers=other).json()["total"] == 0
+        assert client.get(f"/reminders/{reminder_id}", headers=other).status_code == 404
+        assert client.get(f"/reminders/{reminder_id}", headers=owner).json()["status"] == "fired"
+        assert client.patch(f"/notifications/{notice['id']}/read", headers=owner).status_code == 200
+        assert client.get("/notifications?unread=true", headers=owner).json()["total"] == 0
+        search = client.post("/agent/messages", headers=owner, json={"text": "найди напоминание"})
+        found = wait_message(client, owner, search.json()["id"])
+        assert found["status"] == "completed", found
+        assert any(item["id"] == reminder_id for item in found["display_items"])
+        event = client.post(
+            "/events", headers=owner, json={"title": "Урок", "starts_at": "2030-01-01T10:00:00Z"}
+        ).json()
+        linked = client.post(
+            "/agent/messages", headers=owner, json={"text": "создай связанное напоминание"}
+        )
+        linked_message = wait_message(client, owner, linked.json()["id"])
+        assert linked_message["status"] == "completed", linked_message
+        ident = linked_message["operations"][0]["target_id"]
+        assert "09:00:00" in client.get(f"/reminders/{ident}", headers=owner).json()["remind_at"]
+        moved = client.patch(
+            f"/events/{event['id']}", headers=owner, json={"starts_at": "2030-01-01T12:00:00Z"}
+        )
+        assert moved.status_code == 200, moved.text
+        assert "11:00:00" in client.get(f"/reminders/{ident}", headers=owner).json()["remind_at"]
+        assert client.delete(f"/events/{event['id']}", headers=owner).status_code == 204
+        assert client.get(f"/reminders/{ident}", headers=owner).json()["status"] == "cancelled"
+        history = client.get("/calendar/history", headers=owner).json()["items"]
+        deleted = next(
+            item
+            for item in history
+            if item["resource"] == "event" and item["operation"] == "delete"
+        )
+        undo = client.post(f"/calendar/history/{deleted['id']}/undo", headers=owner)
+        assert undo.status_code == 201, undo.text
+        assert client.get(f"/reminders/{ident}", headers=owner).json()["status"] == "active"
+
+
 def test_text_voice_history_undo_and_owner_isolation():
     with httpx.Client(base_url=BASE_URL, timeout=10) as client:
         owner = register(client, "owner-e2e@example.com")

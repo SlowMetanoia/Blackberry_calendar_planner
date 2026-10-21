@@ -19,3 +19,14 @@
 @media(max-width:1199px){.app-shell{max-width:1260px;grid-template-columns:280px minmax(0,1fr)}.planner-toggle{display:inline-block}.planner-sidebar{position:fixed;z-index:41;inset:0 0 0 auto;width:min(380px,92vw);transform:translateX(105%);transition:transform .2s ease;box-shadow:-14px 0 50px #18150e2b}.planner-sidebar.open{transform:translateX(0)}.planner-sidebar .sidebar-close{display:block}.planner-scrim{position:fixed;z-index:40;inset:0;background:#17140e52}.planner-scrim.visible{display:block}}
 @media(max-width:800px){.calendar-modal{width:calc(100vw - 16px);height:calc(100dvh - 16px);padding:12px}.calendar-full{min-height:0}.item-dialog,.day-dialog{padding:17px}.planner-sidebar{width:min(380px,94vw)}}
 .schedule-day{display:grid;gap:5px}.schedule-day h4{margin:2px 1px 0;color:#676a63;font-size:10px;text-transform:capitalize}
+/* Persistent reminder inbox */
+.notification-center{position:relative}
+.notifications-panel{position:absolute;right:0;top:calc(100% + 12px);width:min(420px,90vw);max-height:70vh;overflow:auto;z-index:80;padding:18px;background:#fffdf6;border:1px solid #d9d0be;border-radius:12px;box-shadow:0 12px 36px #0002;color:#282d26}
+.notifications-head,.notifications-actions{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px}
+.notifications-head h2{font-size:1.2rem;margin:0}
+.notifications-actions button{font-size:.85rem;padding:8px}
+.notification-item{display:flex;gap:8px;border-top:1px solid #ded9ce;padding:12px 0}
+.notification-item.unread{border-left:3px solid #a6682a;padding-left:10px}
+.notification-content{display:flex;flex:1;flex-direction:column;gap:6px;text-align:left;background:none;border:0;color:inherit}
+.notification-content time{font-size:.8rem;color:#71756b}
+.schedule-item.reminder,.day-entry.reminder{border-left:4px solid #a6682a}

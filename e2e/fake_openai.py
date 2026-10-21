@@ -67,13 +67,70 @@ class Handler(BaseHTTPRequestHandler):
                 continue
             for item in tool_payload.get("data", []):
                 key = (item.get("resource"), item.get("id"))
-                if key[0] in {"task", "event"} and key[1] and key not in seen_references:
+                if (
+                    key[0] in {"task", "event", "reminder"}
+                    and key[1]
+                    and key not in seen_references
+                ):
                     observed_references.append({"resource": key[0], "target_id": key[1]})
                     seen_references.add(key)
         earlier_user_messages = [
             message["content"].lower() for message in messages[:-1] if message["role"] == "user"
         ]
-        if "что у меня на завтра" in lowered:
+        if "создай связанное напоминание" in lowered:
+            if last_tool == "list_events":
+                rows = json.loads(messages[-1]["content"]).get("data", [])
+                calls = [
+                    (
+                        "commit_calendar_command",
+                        {
+                            "reply": "Напоминание добавлено",
+                            "mutations": [
+                                {
+                                    "operation": "create",
+                                    "resource": "reminder",
+                                    "payload": {
+                                        "title": "За час до урока",
+                                        "linked_resource": "event",
+                                        "linked_id": rows[0]["id"],
+                                        "relative_offset_minutes": -60,
+                                    },
+                                }
+                            ],
+                        },
+                    )
+                ]
+            else:
+                calls = [("list_events", {})]
+        elif "создай напоминание" in lowered:
+            calls = [
+                (
+                    "commit_calendar_command",
+                    {
+                        "reply": "Напоминание добавлено",
+                        "mutations": [
+                            {
+                                "operation": "create",
+                                "resource": "reminder",
+                                "payload": {
+                                    "title": "Проверить уведомления",
+                                    "remind_at": "2000-01-01T00:00:00Z",
+                                },
+                            }
+                        ],
+                    },
+                )
+            ]
+        elif "найди напоминание" in lowered:
+            if last_tool == "show_calendar_items":
+                calls = [("finish_response", {"reply": "Вот напоминания"})]
+            elif observed and observed_references:
+                calls = [("show_calendar_items", {"items": observed_references})]
+            elif observed:
+                calls = [("finish_response", {"reply": "Ничего не найдено"})]
+            else:
+                calls = [("search_calendar", {"query": "уведомления", "resource": "reminder"})]
+        elif "что у меня на завтра" in lowered:
             time_range = {"from": "2026-10-15T00:00:00+03:00", "to": "2026-10-16T00:00:00+03:00"}
             if last_tool == "show_calendar_items":
                 calls = [("finish_response", {"reply": "Вот ваши задачи и события на завтра"})]

@@ -39,9 +39,9 @@ from .llm import (
 from .models import AgentMessage, CalendarOperation, User
 from .occurrences import OccurrenceService
 from .prompts_manager import get_prompts_manager
-from .search import SearchIndexUnavailable
 from .safety import GuardDecision, classify, refusal_for
-from .services import EventService, TaskService
+from .search import SearchIndexUnavailable
+from .services import EventService, ReminderService, TaskService
 
 logger = logging.getLogger(__name__)
 INVALID_DECISION_RESULT = json.dumps(
@@ -235,7 +235,7 @@ def _result_payload(result: str | None) -> dict:
 
 
 def _resource_reference(resource: object, ident: object) -> tuple[str, uuid.UUID] | None:
-    if resource not in {"task", "event"} or not ident:
+    if resource not in {"task", "event", "reminder"} or not ident:
         return None
     try:
         return str(resource), uuid.UUID(str(ident))
@@ -311,7 +311,9 @@ async def _referenced_resource_context(
         return []
     resources: list[dict] = []
     for resource, ident in references:
-        service = TaskService if resource == "task" else EventService
+        service = {"task": TaskService, "event": EventService, "reminder": ReminderService}[
+            resource
+        ]
         row = await service.get(context.session, user, ident)
         if row is None:
             continue
@@ -708,7 +710,9 @@ async def _execute_presentation_tools(state: AgentState) -> AgentState:
             if key is None or key not in known or context is None or user is None:
                 invalid = True
                 break
-            service = TaskService if item.resource == "task" else EventService
+            service = {"task": TaskService, "event": EventService, "reminder": ReminderService}[
+                item.resource
+            ]
             current = await service.get(context.session, user, item.target_id)
             if current is None:
                 invalid = True
@@ -755,9 +759,9 @@ async def _validate_terminal(state: AgentState) -> AgentState:
     settings = get_settings()
     texts_to_check = [parsed.reply]
     for mutation in parsed.mutations:
-        payload = mutation.payload
-        for field in ("title", "description", "location"):
-            value = payload.get(field)
+        payload = mutation.payload.model_dump(exclude_unset=True)
+        for text_field in ("title", "description", "location"):
+            value = payload.get(text_field)
             if isinstance(value, str):
                 texts_to_check.append(value)
     for value in texts_to_check:
@@ -772,7 +776,9 @@ async def _validate_terminal(state: AgentState) -> AgentState:
         if mutation.operation not in {"update", "delete"}:
             continue
         key = _resource_key(mutation.resource, mutation.target_id)
-        service = TaskService if mutation.resource == "task" else EventService
+        service = {"task": TaskService, "event": EventService, "reminder": ReminderService}[
+            mutation.resource
+        ]
         current = (
             await service.get(context.session, user, mutation.target_id)
             if context is not None and user is not None
@@ -856,7 +862,9 @@ async def _failed(state: AgentState) -> AgentState:
 async def _blocked(state: AgentState) -> AgentState:
     return {
         "state": state.get("state", "needs_clarification"),
-        "result": state.get("result", json.dumps({"reply": "Запрос отклонён."}, ensure_ascii=False)),
+        "result": state.get(
+            "result", json.dumps({"reply": "Запрос отклонён."}, ensure_ascii=False)
+        ),
     }
 
 
@@ -886,7 +894,9 @@ async def _selected_display_items(state: AgentState) -> list[dict[str, Any]]:
         if parsed is None:
             continue
         resource, ident = parsed
-        service = TaskService if resource == "task" else EventService
+        service = {"task": TaskService, "event": EventService, "reminder": ReminderService}[
+            resource
+        ]
         row = await service.get(context.session, user, ident)
         if row is None:
             continue

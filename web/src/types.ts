@@ -1,5 +1,5 @@
 export type Status = "queued" | "transcribing" | "processing" | "needs_clarification" | "completed" | "failed";
-export type CalendarOperation = { id:string; sequence:number; command_id:string; ordinal:number; operation:"create"|"update"|"delete"; resource:"task"|"event"; target_id:string; scope?:"series"|"occurrence"; occurrence_key?:string|null; effective_from_occurrence_key?:string|null; before:Record<string,unknown>|null; after:Record<string,unknown>|null; changes:Record<string,{before:unknown;after:unknown}>; origin:"agent"|"rest"|"undo"; source_message_id:string|null; reverts_operation_id:string|null; created_at:string };
+export type CalendarOperation = { id:string; sequence:number; command_id:string; ordinal:number; operation:"create"|"update"|"delete"; resource:"task"|"event"|"reminder"; target_id:string; scope?:"series"|"occurrence"; occurrence_key?:string|null; effective_from_occurrence_key?:string|null; before:Record<string,unknown>|null; after:Record<string,unknown>|null; changes:Record<string,{before:unknown;after:unknown}>; origin:"agent"|"rest"|"undo"; source_message_id:string|null; reverts_operation_id:string|null; created_at:string };
 export type AgentMessage = { id:string; conversation_id:string; sequence:number; input_text:string|null; status:Status; reply:string|null; display_items:Array<{resource:string; id:string; data:Record<string,unknown>}>; operations:CalendarOperation[]; error:string|null; requires_new_conversation?:boolean; created_at:string };
 export type ConversationSummary = { id:string; preview:string; created_at:string; last_activity_at:string };
 export type Page<T> = { items:T[]; total:number; limit:number; offset:number };
@@ -8,12 +8,14 @@ export type Weekday="MO"|"TU"|"WE"|"TH"|"FR"|"SA"|"SU";
 export type RecurrenceRule={frequency:"daily"|"weekly"|"monthly"|"yearly";interval:number;weekdays?:Weekday[]|null;monthly?:{kind:"day_of_month"|"nth_weekday"|"last_day";day?:number|null;ordinal?:number|null;weekday?:Weekday|null}|null;end:{kind:"never"|"until"|"count";until?:string|null;count?:number|null}};
 export type Task = { id:string; owner_id:string; title:string; description:string|null; deadline:string|null; estimated_minutes:number|null; status:TaskStatus;recurrence?:RecurrenceRule|null;recurrence_timezone?:string|null };
 export type Event = { id:string; owner_id:string; title:string; description:string|null; starts_at:string; duration_minutes:number|null; location:string|null;recurrence?:RecurrenceRule|null;recurrence_timezone?:string|null };
+export type Reminder = { id:string; owner_id:string; title:string; description:string|null; remind_at:string; status:"active"|"fired"|"cancelled"; linked_resource:"task"|"event"|null; linked_id:string|null; relative_offset_minutes:number|null; cancelled_reason:string|null; fired_at:string|null; cancelled_at:string|null; created_at:string };
+export type Notification = { id:string; reminder_id:string; title:string; body:string|null; read_at:string|null; created_at:string };
 export type CalendarOccurrence={resource:"task"|"event";series_id:string;occurrence_key:string;original_at:string;scheduled_at:string;recurring:boolean;data:Task|Event};
 export type CursorPage<T>={items:T[];total:number;has_more:boolean;next_cursor:string|null};
 export type UserPreferences = { timezone:string; upcoming_days:number; open_air_silence_ms:number };
 export type CalendarEntry = {
   id:string;
-  resource:"task"|"event";
+  resource:"task"|"event"|"reminder";
   title:string;
   startsAt:string;
   durationMinutes:number|null;
@@ -21,4 +23,5 @@ export type CalendarEntry = {
   recurring?:boolean;
   task?:Task;
   event?:Event;
+  reminder?:Reminder;
 };
