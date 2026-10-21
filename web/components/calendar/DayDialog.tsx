@@ -1,4 +1,4 @@
-import { CalendarPlusIcon, ListPlusIcon } from "lucide-react";
+import { BellPlusIcon, CalendarPlusIcon, ListPlusIcon } from "lucide-react";
 import type { CalendarEntry, Resource } from "../../types";
 import { Button } from "../ui/button";
 import {
@@ -43,7 +43,10 @@ export function DayDialog({
             Дела на {label}
           </DialogTitle>
         </DialogHeader>
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+          <Button variant="outline" className="max-sm:col-span-2 max-sm:h-11" onClick={()=>onCreate("reminder")}>
+            <BellPlusIcon aria-hidden="true" />Напоминание
+          </Button>
           <Button
             variant="outline"
             className="max-sm:h-11"
@@ -69,6 +72,7 @@ export function DayDialog({
                 className={`h-auto min-h-11 w-full justify-start border-l-[3px] px-3 py-2.5 text-left whitespace-normal ${
                   entry.resource === "event"
                     ? "border-l-chart-2/80"
+                    : entry.resource === "reminder" ? "border-l-chart-4/80"
                     : "border-l-primary/60"
                 }`}
                 key={`${entry.resource}:${entry.occurrenceKey || entry.id}`}

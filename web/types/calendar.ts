@@ -1,4 +1,5 @@
-export type Resource = "task" | "event";
+export type CalendarResource = "task" | "event";
+export type Resource = CalendarResource | "reminder";
 export type OperationKind = "create" | "update" | "delete";
 export type OperationOrigin = "agent" | "rest" | "undo";
 export type OperationScope = "series" | "occurrence";
@@ -62,7 +63,7 @@ export type Event = {
   recurrence_timezone?: string | null;
 };
 export type CalendarOccurrence = {
-  resource: Resource;
+  resource: CalendarResource;
   series_id: string;
   occurrence_key: string;
   original_at: string;
@@ -86,6 +87,7 @@ export type CalendarEntry = {
   recurring?: boolean;
   task?: Task;
   event?: Event;
+  reminder?: Reminder;
 };
 export type TaskListOptions = {
   limit?: number;
@@ -102,11 +104,36 @@ export type EventListOptions = {
   startsAtTo?: string;
 };
 export type OccurrenceListOptions = {
-  resource?: "all" | Resource;
+  resource?: "all" | CalendarResource;
   seriesId?: string;
   from?: string;
   to?: string;
   status?: TaskStatus;
   limit?: number;
   cursor?: string;
+};
+
+export type Reminder = {
+  id: string;
+  owner_id: string;
+  title: string;
+  description: string | null;
+  remind_at: string;
+  status: "active" | "fired" | "cancelled";
+  linked_resource: CalendarResource | null;
+  linked_id: string | null;
+  relative_offset_minutes: number | null;
+  cancelled_reason: string | null;
+  fired_at: string | null;
+  cancelled_at: string | null;
+  created_at: string;
+};
+
+export type Notification = {
+  id: string;
+  reminder_id: string;
+  title: string;
+  body: string | null;
+  read_at: string | null;
+  created_at: string;
 };

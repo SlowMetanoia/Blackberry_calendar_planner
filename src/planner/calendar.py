@@ -14,12 +14,21 @@ from .models import (
     CalendarOperation,
     CalendarScheduleVersion,
     Event,
+    Reminder,
     Task,
     User,
 )
 from .occurrences import OccurrenceService, aware_utc, occurrence_key, parse_occurrence_key
 from .recurrence import expand_recurrence
-from .schemas import EventCreate, EventUpdate, TaskCreate, TaskUpdate
+from .reminders import resolve_reminder
+from .schemas import (
+    EventCreate,
+    EventUpdate,
+    ReminderCreate,
+    ReminderUpdate,
+    TaskCreate,
+    TaskUpdate,
+)
 from .search import mark_search_index_dirty, rebuild_search_documents, sync_search_document
 from .services import _normalize_payload
 
@@ -51,10 +60,10 @@ class CalendarMutation:
     effective_from_occurrence_key: str | None = None
 
 
-MODELS = {"task": Task, "event": Event}
-DATETIME_FIELDS = {"task": {"deadline"}, "event": {"starts_at"}}
-CREATE_SCHEMAS = {"task": TaskCreate, "event": EventCreate}
-UPDATE_SCHEMAS = {"task": TaskUpdate, "event": EventUpdate}
+MODELS = {"task": Task, "event": Event, "reminder": Reminder}
+DATETIME_FIELDS = {"task": {"deadline"}, "event": {"starts_at"}, "reminder": {"remind_at"}}
+CREATE_SCHEMAS = {"task": TaskCreate, "event": EventCreate, "reminder": ReminderCreate}
+UPDATE_SCHEMAS = {"task": TaskUpdate, "event": EventUpdate, "reminder": ReminderUpdate}
 OPERATIONS = {"create", "update", "delete"}
 ORIGINS = {"agent", "rest", "undo"}
 
@@ -80,12 +89,18 @@ def _snapshot_value_equal(left: Any, right: Any) -> bool:
     return False
 
 
-def resource_snapshot(obj: Task | Event) -> dict[str, Any]:
+def resource_snapshot(obj: Task | Event | Reminder) -> dict[str, Any]:
+    if isinstance(obj, Reminder):
+        for name in ("remind_at", "cancelled_at"):
+            value = getattr(obj, name)
+            if value is not None and value.tzinfo is None:
+                setattr(obj, name, value.replace(tzinfo=UTC))
     return _json_value(
         {
             column.name: getattr(obj, column.name)
             for column in obj.__table__.columns
             if column.name not in {"owner_id", "recurrence_version_id"}
+            and not (isinstance(obj, Reminder) and column.name in {"created_at", "fired_at"})
             and not (
                 column.name in {"recurrence", "recurrence_timezone"}
                 and getattr(obj, column.name) is None
@@ -146,6 +161,15 @@ def _validated_mutation(value: Any, user: User) -> CalendarMutation:
         raise CalendarValidationError(f"Unsupported operation: {mutation.operation}")
     if mutation.resource not in MODELS:
         raise CalendarValidationError(f"Unsupported resource: {mutation.resource}")
+    if mutation.resource == "reminder" and mutation.operation == "delete":
+        mutation = CalendarMutation(
+            "update",
+            "reminder",
+            {"status": "cancelled"},
+            mutation.target_id,
+            mutation.scope,
+            mutation.occurrence_key,
+        )
     if mutation.scope not in {"series", "occurrence"}:
         raise CalendarValidationError("scope must be series or occurrence")
     if mutation.scope == "occurrence" and (
@@ -172,10 +196,24 @@ def _validated_mutation(value: Any, user: User) -> CalendarMutation:
         except (TypeError, ValueError, AttributeError) as exc:
             raise CalendarValidationError("target_id must be a UUID") from exc
     try:
+        internal = {}
+        raw_payload = dict(mutation.payload)
+        if mutation.resource == "reminder":
+            # Older reminder snapshots also stored delivery timestamps. They
+            # remain operational state and must never reactivate a fired item.
+            raw_payload.pop("created_at", None)
+            raw_payload.pop("fired_at", None)
+            for field in (
+                "cancelled_reason",
+                "cancelled_at",
+                *(["status"] if mutation.operation == "create" else []),
+            ):
+                if field in raw_payload:
+                    internal[field] = raw_payload.pop(field)
         if mutation.operation == "create":
             payload = (
                 CREATE_SCHEMAS[mutation.resource]
-                .model_validate(mutation.payload)
+                .model_validate(raw_payload)
                 .model_dump(mode="python")
             )
             if payload.get("recurrence") is not None and not payload.get("recurrence_timezone"):
@@ -183,7 +221,7 @@ def _validated_mutation(value: Any, user: User) -> CalendarMutation:
         elif mutation.operation == "update":
             payload = (
                 UPDATE_SCHEMAS[mutation.resource]
-                .model_validate(mutation.payload)
+                .model_validate(raw_payload)
                 .model_dump(exclude_unset=True, mode="python")
             )
         else:
@@ -192,8 +230,14 @@ def _validated_mutation(value: Any, user: User) -> CalendarMutation:
             payload = {}
     except ValidationError as exc:
         raise CalendarValidationError("Некорректные данные календарного действия") from exc
+    payload.update(internal)
     try:
-        normalized = _normalize_payload(payload, user, DATETIME_FIELDS[mutation.resource])
+        normalized = _normalize_payload(
+            payload,
+            user,
+            DATETIME_FIELDS[mutation.resource]
+            | ({"cancelled_at"} if mutation.resource == "reminder" else set()),
+        )
     except (TypeError, ValueError) as exc:
         raise CalendarValidationError("Некорректная дата календарного действия") from exc
     return CalendarMutation(
@@ -292,8 +336,24 @@ class CalendarCommandService:
                 before = None
                 target_id = mutation.target_id
                 payload = mutation.payload
+                if mutation.resource == "reminder":
+                    current = (
+                        await cls._owned(session, user, "reminder", target_id)
+                        if target_id
+                        else None
+                    )
+                    if mutation.operation == "update" and current is None:
+                        raise CalendarTargetNotFound("reminder not found")
+                    if current is not None and current.status == "cancelled" and origin != "undo":
+                        raise CalendarValidationError("Отменённое напоминание нельзя изменить")
+                    try:
+                        payload = await resolve_reminder(session, user, payload, current=current)
+                    except ValueError as exc:
+                        raise CalendarValidationError(str(exc)) from exc
                 resolved_effective_from = mutation.effective_from_occurrence_key
                 if mutation.scope == "occurrence":
+                    if mutation.resource == "reminder":
+                        raise CalendarValidationError("reminders do not support occurrences")
                     obj = await cls._owned(session, user, mutation.resource, target_id)
                     if obj is None:
                         raise CalendarTargetNotFound(f"{mutation.resource} not found")
@@ -329,7 +389,13 @@ class CalendarCommandService:
                         )
                         session.add(exception)
                     if mutation.operation == "update":
-                        schedule_field = "deadline" if mutation.resource == "task" else "starts_at"
+                        schedule_field = (
+                            "deadline"
+                            if mutation.resource == "task"
+                            else "starts_at"
+                            if mutation.resource == "event"
+                            else "remind_at"
+                        )
                         exception.patch = _json_value({**(exception.patch or {}), **payload})
                         if schedule_field in payload:
                             exception.effective_at = payload[schedule_field]
@@ -352,7 +418,7 @@ class CalendarCommandService:
                         owner_id=user.id,
                         sequence=sequence,
                         command_id=command_id,
-                        ordinal=ordinal,
+                        ordinal=len(result),
                         operation=mutation.operation,
                         resource=mutation.resource,
                         target_id=target_id,
@@ -374,7 +440,13 @@ class CalendarCommandService:
                     obj = model(id=target_id, owner_id=user.id, **payload)
                     session.add(obj)
                     await session.flush()
-                    anchor = obj.deadline if mutation.resource == "task" else obj.starts_at
+                    anchor = (
+                        obj.deadline
+                        if mutation.resource == "task"
+                        else obj.starts_at
+                        if mutation.resource == "event"
+                        else None
+                    )
                     if anchor is not None:
                         retained = await session.scalar(
                             select(CalendarScheduleVersion)
@@ -421,18 +493,30 @@ class CalendarCommandService:
                         candidate.pop("id", None)
                         candidate.update(_json_value(payload))
                         try:
+                            if mutation.resource == "reminder":
+                                candidate = {
+                                    key: value
+                                    for key, value in candidate.items()
+                                    if key in ReminderCreate.model_fields
+                                }
                             CREATE_SCHEMAS[mutation.resource].model_validate(candidate)
                         except ValidationError as exc:
                             raise CalendarValidationError(
                                 "Некорректное итоговое состояние календарной записи"
                             ) from exc
-                        schedule_field = "deadline" if mutation.resource == "task" else "starts_at"
-                        schedule_changed = bool(
+                        schedule_field = (
+                            "deadline"
+                            if mutation.resource == "task"
+                            else "starts_at"
+                            if mutation.resource == "event"
+                            else "remind_at"
+                        )
+                        schedule_changed = mutation.resource != "reminder" and bool(
                             {schedule_field, "recurrence", "recurrence_timezone"} & payload.keys()
                         )
                         current_version = (
                             await session.get(CalendarScheduleVersion, obj.recurrence_version_id)
-                            if obj.recurrence_version_id
+                            if getattr(obj, "recurrence_version_id", None)
                             else None
                         )
                         if (
@@ -524,7 +608,7 @@ class CalendarCommandService:
                     owner_id=user.id,
                     sequence=sequence,
                     command_id=command_id,
-                    ordinal=ordinal,
+                    ordinal=len(result),
                     operation=mutation.operation,
                     resource=mutation.resource,
                     target_id=target_id,
@@ -538,6 +622,93 @@ class CalendarCommandService:
                 )
                 session.add(operation)
                 result.append(operation)
+                await session.flush()
+                if mutation.resource in {"task", "event"}:
+                    linked = list(
+                        (
+                            await session.scalars(
+                                select(Reminder)
+                                .where(
+                                    Reminder.owner_id == user.id,
+                                    Reminder.linked_resource == mutation.resource,
+                                    Reminder.linked_id == target_id,
+                                )
+                                .with_for_update()
+                            )
+                        ).all()
+                    )
+                    source_reason = (
+                        f"deleted:{operation.id}"
+                        if after is None
+                        else f"completed:{operation.id}"
+                        if mutation.resource == "task" and after.get("status") == "completed"
+                        else None
+                    )
+                    anchor_field = "deadline" if mutation.resource == "task" else "starts_at"
+                    for reminder in linked:
+                        previous = resource_snapshot(reminder)
+                        if source_reason and reminder.status == "active":
+                            reminder.status = "cancelled"
+                            reminder.cancelled_reason = source_reason
+                            reminder.cancelled_at = datetime.now(UTC)
+                        elif after is not None:
+                            if (
+                                reminder.status == "cancelled"
+                                and (reminder.cancelled_reason or "").startswith("completed:")
+                                and mutation.resource == "task"
+                                and after.get("status") == "open"
+                            ):
+                                reminder.status = "active"
+                                reminder.cancelled_reason = None
+                                reminder.cancelled_at = None
+                            if (
+                                reminder.status == "active"
+                                and reminder.relative_offset_minutes is not None
+                            ):
+                                anchor = after.get(anchor_field)
+                                if anchor is None:
+                                    raise CalendarValidationError(
+                                        "Сначала удалите относительные напоминания перед снятием срока"
+                                    )
+                                reminder.remind_at = datetime.fromisoformat(anchor) + timedelta(
+                                    minutes=reminder.relative_offset_minutes
+                                )
+                        updated = resource_snapshot(reminder)
+                        if previous != updated:
+                            sequence += 1
+                            session.add(
+                                CalendarOperation(
+                                    owner_id=user.id,
+                                    sequence=sequence,
+                                    command_id=command_id,
+                                    ordinal=len(result),
+                                    operation="update",
+                                    resource="reminder",
+                                    target_id=reminder.id,
+                                    scope="series",
+                                    before_state=previous,
+                                    after_state=updated,
+                                    changes={
+                                        key: {
+                                            "before": previous.get(key),
+                                            "after": updated.get(key),
+                                        }
+                                        for key in previous.keys() | updated.keys()
+                                        if previous.get(key) != updated.get(key)
+                                    },
+                                    origin=origin,
+                                    source_message_id=source_message_id,
+                                )
+                            )
+                            await session.flush()
+                            result.append(
+                                await session.scalar(
+                                    select(CalendarOperation).where(
+                                        CalendarOperation.owner_id == user.id,
+                                        CalendarOperation.sequence == sequence,
+                                    )
+                                )
+                            )
             await session.flush()
             if search_projection_changed:
                 await mark_search_index_dirty(session, user.id)
@@ -612,7 +783,14 @@ class CalendarCommandService:
         current = await cls._owned(session, user, original.resource, original.target_id)
         current_state = resource_snapshot(current) if current is not None else None
         if original.operation == "create":
-            if current_state != original.after_state:
+            expected_state = original.after_state
+            if original.resource == "reminder" and expected_state:
+                expected_state = {
+                    key: value
+                    for key, value in expected_state.items()
+                    if key not in {"created_at", "fired_at"}
+                }
+            if current_state != expected_state:
                 raise UndoConflict(
                     "Объект изменился после создания и не может быть отменён автоматически"
                 )
@@ -636,6 +814,42 @@ class CalendarCommandService:
             snapshot.pop("id", None)
             inverse = CalendarMutation("create", original.resource, snapshot, original.target_id)
         operation = (await cls.execute(session, user, [inverse], origin="undo"))[0]
+        if original.resource in {"task", "event"}:
+            reason = (
+                f"deleted:{original.id}"
+                if original.operation == "delete"
+                else f"completed:{original.id}"
+                if original.resource == "task"
+                and (original.after_state or {}).get("status") == "completed"
+                and (original.before_state or {}).get("status") != "completed"
+                else None
+            )
+            if reason:
+                reminders = list(
+                    (
+                        await session.scalars(
+                            select(Reminder).where(
+                                Reminder.owner_id == user.id,
+                                Reminder.linked_resource == original.resource,
+                                Reminder.linked_id == original.target_id,
+                                Reminder.status == "cancelled",
+                                Reminder.cancelled_reason == reason,
+                            )
+                        )
+                    ).all()
+                )
+                if reminders:
+                    await cls.execute(
+                        session,
+                        user,
+                        [
+                            CalendarMutation(
+                                "update", "reminder", {"status": "active"}, reminder.id
+                            )
+                            for reminder in reminders
+                        ],
+                        origin="undo",
+                    )
         if original.operation == "update" and original.effective_from_occurrence_key:
             previous_version_id, boundary = parse_occurrence_key(
                 original.effective_from_occurrence_key
@@ -740,7 +954,13 @@ class CalendarCommandService:
                     for field, change in operation.changes.items():
                         patch[field] = change.get("after")
                     exception.patch = patch
-                    schedule_field = "deadline" if operation.resource == "task" else "starts_at"
+                    schedule_field = (
+                        "deadline"
+                        if operation.resource == "task"
+                        else "starts_at"
+                        if operation.resource == "event"
+                        else "remind_at"
+                    )
                     if schedule_field in patch and patch[schedule_field] is not None:
                         value = patch[schedule_field]
                         exception.effective_at = (
@@ -758,6 +978,12 @@ class CalendarCommandService:
                 session.add(model(id=operation.target_id, owner_id=user.id, **normalized))
             else:
                 for key, value in normalized.items():
+                    if (
+                        operation.resource == "reminder"
+                        and current.status == "fired"
+                        and key == "status"
+                    ):
+                        continue
                     setattr(current, key, value)
         await session.flush()
         await rebuild_search_documents(session, user)

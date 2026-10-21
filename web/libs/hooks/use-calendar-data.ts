@@ -24,6 +24,7 @@ export function useCalendarData() {
     (state) => state.calendarOccurrences,
   );
   const loading = useCalendarStore((state) => state.loading);
+  const reminders = useCalendarStore((state) => state.reminders);
   const refresh = useCalendarStore((state) => state.refresh);
   const loadMoreOverview = useCalendarStore(
     (state) => state.loadMoreOverview,
@@ -37,14 +38,24 @@ export function useCalendarData() {
     void refresh();
   }, [refresh, revision]);
 
+  useEffect(() => {
+    const update = () => void refresh();
+    window.addEventListener("focus", update);
+    return () => window.removeEventListener("focus", update);
+  }, [refresh]);
+
+  const reminderEntries = useMemo<CalendarEntry[]>(() => reminders
+    .filter(item => item.status !== "cancelled")
+    .map(reminder => ({id:reminder.id,resource:"reminder",title:reminder.title,startsAt:reminder.remind_at,durationMinutes:null,reminder})), [reminders]);
+
   const entries = useMemo(
     () =>
-      occurrencesToEntries(calendarOccurrences).sort(
+      [...occurrencesToEntries(calendarOccurrences), ...reminderEntries].sort(
         (left, right) =>
           timestamp(left.startsAt) - timestamp(right.startsAt) ||
           left.title.localeCompare(right.title, "ru"),
       ),
-    [calendarOccurrences],
+    [calendarOccurrences, reminderEntries],
   );
   const occupied = useMemo(
     () => new Set(entries.map((entry) => localDateKey(entry.startsAt))),
@@ -59,14 +70,19 @@ export function useCalendarData() {
     return result;
   }, [entries]);
   const overview = useMemo(
-    () =>
-      partitionOccurrenceEntries(
+    () => {
+      const result = partitionOccurrenceEntries(
         overviewOccurrences,
         undatedTasks,
         new Date(),
         upcomingDays,
-      ),
-    [overviewOccurrences, undatedTasks, upcomingDays],
+      );
+      const end = Date.now() + upcomingDays * 86400000;
+      result.upcoming.push(...reminderEntries.filter(item => item.reminder?.status === "active" && timestamp(item.startsAt) < end));
+      result.upcoming.sort((left,right)=>timestamp(left.startsAt)-timestamp(right.startsAt));
+      return result;
+    },
+    [overviewOccurrences, undatedTasks, upcomingDays, reminderEntries],
   );
   const undatedEntries = useMemo<CalendarEntry[]>(
     () =>

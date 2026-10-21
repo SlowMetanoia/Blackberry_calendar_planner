@@ -8,6 +8,7 @@ services:
       LLM_API_KEY: test
       LLM_MODEL: fake-planner
       LLM_REQUIRED: "true"
+      GUARD_ENABLED: "false"
       EMBEDDING_BASE_URL: http://fake-openai:8080/v1
       EMBEDDING_API_KEY: test
       EMBEDDING_MODEL: fake-embedding
@@ -25,6 +26,8 @@ services:
     environment: *test-env
     depends_on:
       fake-openai: { condition: service_healthy }
+  notifier:
+    environment: *test-env
   migrate:
     environment:
       <<: *test-env
@@ -32,7 +35,17 @@ services:
   web:
     environment:
       E2E: "1"
+  guard:
+    build: ./e2e
+    ports: !reset []
+    volumes: !reset []
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"]
+      interval: 2s
+      timeout: 2s
+      retries: 10
   postgres:
+    ports: ["127.0.0.1::5432"]
     volumes: []
     tmpfs: [/var/lib/postgresql/data]
   fake-openai:

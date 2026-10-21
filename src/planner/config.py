@@ -41,6 +41,9 @@ class Settings(BaseSettings):
     stt_api_key: str | None = None
     stt_model: str = "gigaam-v3-e2e-rnnt"
     audio_max_upload_bytes: int = Field(default=25 * 1024 * 1024, ge=1)
+    web_push_vapid_public_key: str | None = None
+    web_push_vapid_private_key: str | None = None
+    web_push_vapid_subject: str | None = None
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

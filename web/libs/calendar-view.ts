@@ -9,6 +9,7 @@ import {
 export const resourceHeadings: Record<string, string> = {
   task: "Задача",
   event: "Событие",
+  reminder: "Напоминание",
 };
 export const operationWords: Record<string, string> = {
   create: "Создано",
@@ -23,6 +24,9 @@ export const undoWords: Record<string, string> = {
 export const taskStatusLabels: Record<string, string> = {
   open: "Открыта",
   completed: "Выполнена",
+  active: "Активно",
+  fired: "Сработало",
+  cancelled: "Отменено",
 };
 
 export function stringField(data: Record<string, unknown>, key: string) {
@@ -76,6 +80,9 @@ export function resourceMetadata(
   } else if (resource === "event") {
     const start = stringField(data, "starts_at");
     if (start) items.push({ value: formatSchedule(start, duration, timeZone) });
+  } else if (resource === "reminder") {
+    const when = stringField(data, "remind_at");
+    if (when) items.push({label:"Напомнить",value:formatDateTime(when,timeZone)});
   } else {
     const deadline = stringField(data, "deadline");
     if (deadline)
@@ -113,8 +120,8 @@ export function operationSchedule(
 ): string {
   const value = stringField(
     data,
-    resource === "event" ? "starts_at" : "deadline",
+    resource === "event" ? "starts_at" : resource === "reminder" ? "remind_at" : "deadline",
   );
   if (!value) return "";
-  return `${resource === "event" ? "запланировано на" : "запланировано к"} ${formatDateTime(value)}`;
+  return `${resource === "event" ? "запланировано на" : resource === "reminder" ? "напомнить в" : "запланировано к"} ${formatDateTime(value)}`;
 }

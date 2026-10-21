@@ -104,6 +104,7 @@ function mobileDayLabel(day: CalendarDay): string {
 function entryBlockClass(entry: CalendarEntry): string {
   return entry.resource === "event"
     ? "border-chart-2 bg-chart-2/15 active:bg-chart-2/25"
+    : entry.resource === "reminder" ? "border-chart-4 bg-chart-4/15 active:bg-chart-4/25"
     : "border-primary bg-primary/10 active:bg-primary/15";
 }
 

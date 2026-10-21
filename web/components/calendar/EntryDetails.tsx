@@ -1,4 +1,4 @@
-import { CalendarDaysIcon, ListTodoIcon, RepeatIcon } from "lucide-react";
+import { BellIcon, CalendarDaysIcon, ListTodoIcon, RepeatIcon } from "lucide-react";
 import { formatDuration, formatSchedule } from "../../libs/format";
 import type { CalendarEntry } from "../../types";
 import { Badge } from "../ui/badge";
@@ -11,7 +11,7 @@ import {
 } from "../ui/item";
 
 function entryKind(entry: CalendarEntry): string {
-  return entry.resource === "task" ? "Задача" : "Событие";
+  return entry.resource === "task" ? "Задача" : entry.resource === "reminder" ? "Напоминание" : "Событие";
 }
 
 export function EntryDetails({
@@ -21,7 +21,7 @@ export function EntryDetails({
   entry: CalendarEntry;
   brief?: boolean;
 }) {
-  const source = entry.task || entry.event;
+  const source = entry.task || entry.event || entry.reminder;
   const schedule = entry.startsAt
     ? formatSchedule(
         entry.startsAt,
@@ -37,7 +37,7 @@ export function EntryDetails({
       <ItemMedia className="mt-0.5 rounded-md bg-muted p-1.5 text-muted-foreground">
         {entry.resource === "task" ? (
           <ListTodoIcon aria-hidden="true" />
-        ) : (
+        ) : entry.resource === "reminder" ? <BellIcon aria-hidden="true" /> : (
           <CalendarDaysIcon aria-hidden="true" />
         )}
       </ItemMedia>

@@ -19,6 +19,7 @@ import { AppSidebar } from "./shared/AppSidebar";
 import { ErrorToast } from "./shared/ErrorToast";
 import { PlannerHeader } from "./shared/PlannerHeader";
 import { ViewPanel } from "./shared/ViewPanel";
+import { detachPushSubscription, NotificationCenter } from "./notifications/NotificationCenter";
 
 const viewTitles: Record<PlannerView, string> = {
   chat: "Что запланируем?",
@@ -97,6 +98,7 @@ function PlannerApp() {
   const handleLogout = useCallback(async () => {
     setHistoryOpen(false);
     stores.voice.getState().reset();
+    try { await detachPushSubscription(); } catch { /* logout must remain available */ }
     await stores.session.getState().logout();
     stores.calendar.getState().reset();
     stores.ui.getState().resetNavigation();
@@ -130,6 +132,7 @@ function PlannerApp() {
             title={viewTitles[view]}
             onOpenNav={() => setNavOpen(true)}
           >
+            <NotificationCenter onError={stores.session.getState().setError} />
             <Button
               variant="ghost"
               size="sm"

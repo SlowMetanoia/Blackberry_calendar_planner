@@ -60,6 +60,9 @@ vi.mock("../api", async () => {
     updateUserPreferences: vi.fn(),
     transcribeAudio: vi.fn(),
     getTasks: vi.fn(),
+    getReminders: vi.fn(),
+    getNotifications: vi.fn(),
+    updateReminder: vi.fn(),
     getEvents: vi.fn(),
     getOccurrences: vi.fn(),
     createTask: vi.fn(),
@@ -103,6 +106,8 @@ describe("planner chat", () => {
     localStorage.clear();
     sessionStorage.clear();
     vi.clearAllMocks();
+    vi.mocked(api.getReminders).mockResolvedValue({items:[],total:0,limit:100,offset:0});
+    vi.mocked(api.getNotifications).mockResolvedValue({items:[],total:0,limit:100,offset:0});
     vi.mocked(api.syncTimeZone).mockResolvedValue({ timezone: "UTC" });
     vi.mocked(api.getConversations).mockResolvedValue({
       items: [],
@@ -145,6 +150,21 @@ describe("planner chat", () => {
     await userEvent.type(screen.getByLabelText("Пароль"), "password1");
     await userEvent.click(screen.getByRole("button", { name: "Войти" }));
     expect(await screen.findByText("Что запланируем?")).toBeInTheDocument();
+  });
+  it("keeps reminders editable in the new calendar UI", async () => {
+    localStorage.setItem("planner-token", "token");
+    const reminder = {id:"reminder-1",owner_id:"u1",title:"Позвонить врачу",description:"Согласовать время",remind_at:new Date(Date.now()+86400000).toISOString(),status:"active" as const,linked_resource:null,linked_id:null,relative_offset_minutes:null,cancelled_reason:null,fired_at:null,cancelled_at:null,created_at:new Date().toISOString()};
+    vi.mocked(api.getReminders).mockResolvedValue({items:[reminder],total:1,limit:100,offset:0});
+    vi.mocked(api.updateReminder).mockResolvedValue({...reminder,title:"Позвонить в клинику"});
+    render(<App/>);
+    await userEvent.click(await screen.findByRole("button",{name:"Календарь"}));
+    await userEvent.click(await screen.findByRole("button",{name:/Позвонить врачу/}));
+    const dialog = await screen.findByRole("dialog",{name:"Напоминание"});
+    const title = within(dialog).getByLabelText("Название");
+    await userEvent.clear(title);
+    await userEvent.type(title,"Позвонить в клинику");
+    await userEvent.click(within(dialog).getByRole("button",{name:"Сохранить"}));
+    await waitFor(()=>expect(api.updateReminder).toHaveBeenCalledWith("reminder-1",expect.objectContaining({title:"Позвонить в клинику"})));
   });
   it("switches chat, calendar and history from the sidebar", async () => {
     localStorage.setItem("planner-token", "token");

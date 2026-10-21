@@ -22,13 +22,14 @@ from .models import (
     CalendarSearchDocument,
     CalendarSearchIndexState,
     Event,
+    Reminder,
     Task,
     User,
 )
-from .occurrences import OccurrenceService
+from .occurrences import OccurrenceService, aware_utc
 from .services import normalize_datetime
 
-ResourceFilter = Literal["all", "task", "event"]
+ResourceFilter = Literal["all", "task", "event", "reminder"]
 MATCH_ORDER = {"exact": 0, "substring": 1, "fuzzy": 2, "semantic": 3}
 
 
@@ -288,14 +289,21 @@ class CalendarRetriever:
         normalized_from = normalize_datetime(from_datetime, user)
         normalized_to = normalize_datetime(to_datetime, user)
         for document in documents:
-            model = Task if document.resource == "task" else Event
+            model = {"task": Task, "event": Event, "reminder": Reminder}[document.resource]
             row_conditions = [model.id == document.target_id, model.owner_id == user.id]
             row = await session.scalar(select(model).where(*row_conditions))
             if row is None:
                 continue
 
             occurrence_page = None
-            if normalized_from is not None or normalized_to is not None:
+            if document.resource == "reminder" and (
+                normalized_from is not None or normalized_to is not None
+            ):
+                if normalized_from is not None and aware_utc(row.remind_at) < normalized_from:
+                    continue
+                if normalized_to is not None and aware_utc(row.remind_at) >= normalized_to:
+                    continue
+            elif normalized_from is not None or normalized_to is not None:
                 occurrence_page = await OccurrenceService.page(
                     session,
                     user,
@@ -307,7 +315,7 @@ class CalendarRetriever:
                 )
                 if occurrence_page.total == 0:
                     continue
-            elif getattr(row, "recurrence", None) is not None:
+            elif document.resource != "reminder" and getattr(row, "recurrence", None) is not None:
                 occurrence_page = await OccurrenceService.preview(
                     session,
                     user,
@@ -400,7 +408,7 @@ async def rebuild_search_documents(session: AsyncSession, user: User) -> None:
     await session.execute(
         delete(CalendarSearchDocument).where(CalendarSearchDocument.owner_id == user.id)
     )
-    for resource, model in (("task", Task), ("event", Event)):
+    for resource, model in (("task", Task), ("event", Event), ("reminder", Reminder)):
         rows = list((await session.scalars(select(model).where(model.owner_id == user.id))).all())
         for row in rows:
             overrides = list(

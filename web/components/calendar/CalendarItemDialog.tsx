@@ -1,6 +1,6 @@
 import { FormEvent } from "react";
-import { Trash2Icon } from "lucide-react";
-import type { EditorState } from "../../types";
+import { BellPlusIcon, Trash2Icon } from "lucide-react";
+import type { CalendarEntry, EditorState } from "../../types";
 import { Button } from "../ui/button";
 import {
   Dialog,
@@ -16,11 +16,13 @@ export function CalendarItemDialog({
   onClose,
   onChanged,
   onError,
+  onAddReminder,
 }: {
   state: EditorState;
   onClose: () => void;
   onChanged: () => Promise<void>;
   onError: (message: string) => void;
+  onAddReminder?: (entry: CalendarEntry) => void;
 }) {
   const form = useCalendarItemForm({ state, onChanged, onError });
 
@@ -63,6 +65,7 @@ export function CalendarItemDialog({
               </Button>
             )}
             <span className="hidden flex-1 sm:block" />
+            {state.entry?.startsAt && onAddReminder && <Button type="button" variant="outline" disabled={form.saving} onClick={()=>onAddReminder(state.entry!)}><BellPlusIcon aria-hidden="true"/>Добавить напоминание</Button>}
             <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto sm:items-center">
               <Button
                 type="button"

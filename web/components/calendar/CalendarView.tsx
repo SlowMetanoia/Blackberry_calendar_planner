@@ -15,6 +15,7 @@ import {
   DialogTitle,
 } from "../ui/dialog";
 import { CalendarItemDialog } from "./CalendarItemDialog";
+import { ReminderDialog, type ReminderLink } from "./ReminderDialog";
 import { Calendar } from "./Calendar";
 import type { CalendarMode } from "../../libs/calendar-utils";
 import { DayDialog } from "./DayDialog";
@@ -35,6 +36,7 @@ export function CalendarView() {
   const [dayTime, setDayTime] = useState<string | null>(null);
   const [dayHover, setDayHover] = useState<DayHover | null>(null);
   const [editor, setEditor] = useState<EditorState | null>(null);
+  const [reminderLink, setReminderLink] = useState<ReminderLink>();
 
   const selectedEntries = dayOpen ? data.entriesByDate.get(dayOpen) || [] : [];
 
@@ -56,6 +58,7 @@ export function CalendarView() {
 
   async function changed() {
     setEditor(null);
+    setReminderLink(undefined);
     await Promise.all([data.refresh(), Promise.resolve(onHistoryChanged())]);
   }
 
@@ -144,12 +147,14 @@ export function CalendarView() {
           }
         />
       )}
-      {editor && (
+      {(editor?.resource === "reminder" || reminderLink) && <ReminderDialog reminder={editor?.entry?.reminder} date={editor?.date} link={reminderLink} onClose={()=>{setEditor(null);setReminderLink(undefined);}} onChanged={changed} onError={onError} />}
+      {editor && editor.resource !== "reminder" && !reminderLink && (
         <CalendarItemDialog
           state={editor}
           onClose={() => setEditor(null)}
           onChanged={changed}
           onError={onError}
+          onAddReminder={(entry)=>{if(entry.resource !== "reminder")setReminderLink({resource:entry.resource,id:entry.id,title:entry.title,at:entry.startsAt});}}
         />
       )}
     </>

@@ -4,3 +4,5 @@ export * from "./auth";
 export * from "./calendar";
 export * from "./client";
 export * from "./users";
+export * from "./notifications";
+export * from "./reminders";

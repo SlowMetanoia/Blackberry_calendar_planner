@@ -1,13 +1,14 @@
 import { createStore } from "zustand/vanilla";
 import {
   getEvents,
+  getReminders,
   getOccurrences,
   getTasks,
   getUserPreferences,
   updateUserPreferences,
 } from "../../api";
 import { collectPages } from "../pagination";
-import type { CalendarOccurrence, Event, Task } from "../../types";
+import type { CalendarOccurrence, Event, Reminder, Task } from "../../types";
 import type { SessionStore } from "./session-store";
 
 function legacyOccurrences(
@@ -49,6 +50,7 @@ const initialData = () => ({
   visibleRange: null as Range | null,
   loading: true,
   preferencesLoaded: false,
+  reminders: [] as Reminder[],
 });
 
 export type CalendarData = ReturnType<typeof initialData>;
@@ -172,6 +174,7 @@ export function createCalendarStore(session: SessionStore) {
           }
           const { upcomingDays, visibleRange } = get();
           await Promise.all([
+            collectPages((offset) => getReminders({offset})).then((reminders) => set({reminders})),
             loadOverview(upcomingDays),
             ...(visibleRange ? [loadCalendar(visibleRange)] : []),
           ]);

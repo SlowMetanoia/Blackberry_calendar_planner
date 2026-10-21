@@ -16,7 +16,7 @@ export function entryInfo(entry: CalendarEntry): string {
       entry.resource === "event"
         ? [entry.event?.location, duration]
         : [duration];
-  return [entry.resource === "event" ? "событие" : "задача", ...detail]
+  return [entry.resource === "event" ? "событие" : entry.resource === "reminder" ? "напоминание" : "задача", ...detail]
     .filter(Boolean)
     .join(", ");
 }
@@ -43,7 +43,7 @@ export function ScheduleItem({
             <span
               aria-hidden="true"
               className={`mt-[5px] size-1.5 shrink-0 rounded-full ${
-                entry.resource === "event" ? "bg-chart-2" : "bg-primary"
+                entry.resource === "event" ? "bg-chart-2" : entry.resource === "reminder" ? "bg-chart-4" : "bg-primary"
               }`}
             />
             <span className="grid min-w-0 flex-1 gap-0.5">

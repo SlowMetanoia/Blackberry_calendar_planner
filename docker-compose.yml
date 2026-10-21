@@ -53,6 +53,13 @@ services:
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_started }
+  notifier:
+    build: .
+    command: arq planner.notifier.NotifierSettings
+    env_file: ${ENV_FILE:-.env}
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_started }
   migrate:
     build: .
     command: alembic upgrade head
