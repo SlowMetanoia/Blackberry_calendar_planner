@@ -11,7 +11,10 @@
     "isolatedModules": true,
     "noEmit": true,
     "jsx": "react-jsx",
-    "strict": true
+    "strict": true,
+    "paths": {
+      "@/*": ["./*"]
+    }
   },
-  "include": ["src", "vite.config.ts"]
+  "include": ["src", "api", "components", "libs", "types", "tests", "vite.config.ts"]
 }
