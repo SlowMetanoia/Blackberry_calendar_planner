@@ -28,7 +28,7 @@ GuardCategory = Literal[
 
 SAFE_REFUSAL = (
     "Я могу помогать только с задачами и событиями календаря. "
-    "Не могу помогать с созданием другого вредоносного контента."
+    "Не могу помогать с разжиганием ненависти или созданием другого вредоносного контента."
 )
 OFF_TOPIC_REFUSAL = (
     "Я предназначен для управления задачами и событиями календаря. "
@@ -115,7 +115,9 @@ def _parse_remote_decision(payload: Any) -> GuardDecision:
         action = "refuse" if category != "none" else "clarify"
     if category != "none" and action == "allow" and score >= 0.5:
         action = "refuse"
-    return GuardDecision(action, category, max(0.0, min(score, 1.0)), str(payload.get("reason", "")))
+    return GuardDecision(
+        action, category, max(0.0, min(score, 1.0)), str(payload.get("reason", ""))
+    )
 
 
 async def classify(text: str, settings: Settings, *, source: str = "user") -> GuardDecision:

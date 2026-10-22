@@ -19,6 +19,7 @@ export type AgentMessage = {
   input_text: string | null;
   status: Status;
   reply: string | null;
+  speech_text?: string | null;
   display_items: DisplayItem[];
   operations: CalendarOperation[];
   error: string | null;

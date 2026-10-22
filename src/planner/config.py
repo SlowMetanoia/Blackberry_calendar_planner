@@ -41,6 +41,14 @@ class Settings(BaseSettings):
     stt_api_key: str | None = None
     stt_model: str = "gigaam-v3-e2e-rnnt"
     audio_max_upload_bytes: int = Field(default=25 * 1024 * 1024, ge=1)
+    voice_ticket_ttl_seconds: int = Field(default=60, ge=10, le=300)
+    voice_max_pcm_bytes: int = Field(default=3_200_000, ge=32_000)
+    voice_max_duration_seconds: int = Field(default=60, ge=1, le=300)
+    voice_terminal_wait_seconds: float = Field(default=180, gt=0)
+    tts_base_url: str | None = None
+    tts_api_key: str | None = None
+    tts_model: str = "v5_6_ru"
+    tts_request_timeout_seconds: float = Field(default=60, gt=0)
     web_push_vapid_public_key: str | None = None
     web_push_vapid_private_key: str | None = None
     web_push_vapid_subject: str | None = None

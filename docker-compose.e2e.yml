@@ -15,6 +15,9 @@ services:
       EMBEDDING_INDEX_WAIT_SECONDS: 10
       STT_BASE_URL: http://fake-openai:8080/v1
       STT_API_KEY: test
+      TTS_BASE_URL: http://fake-openai:8080/v1
+      TTS_API_KEY: test
+      TTS_MODEL: v5_6_ru
       CREATE_AUTO_CONFIRM_SECONDS: 1
     depends_on:
       fake-openai: { condition: service_healthy }
@@ -44,6 +47,8 @@ services:
       interval: 2s
       timeout: 2s
       retries: 10
+  tts:
+    profiles: ["live-tts"]
   postgres:
     ports: ["127.0.0.1::5432"]
     volumes: []

@@ -47,6 +47,7 @@ export type SessionState = {
   bootstrap: () => Promise<void>;
   handleCalendarChanged: () => Promise<void>;
   acceptMessage: (message: AgentMessage) => Promise<void>;
+  receiveMessage: (message: AgentMessage) => void;
   sendText: (text: string) => Promise<void>;
   sendAudio: (blob: Blob) => Promise<void>;
   openConversation: (id: string) => Promise<void>;
@@ -187,6 +188,19 @@ export function createSessionStore(): SessionStore {
       },
 
       acceptMessage,
+      receiveMessage: (message) => {
+        mergeMessage(message);
+        set({ conversation: message.conversation_id });
+        if (terminal.has(message.status)) {
+          void refreshHistory().catch((error) =>
+            set({ error: (error as Error).message }),
+          );
+          set((state) => ({ calendarRevision: state.calendarRevision + 1 }));
+        }
+        void refreshSessions().catch((error) =>
+          set({ error: (error as Error).message }),
+        );
+      },
 
       sendText: async (text) => {
         if (!text.trim()) return;

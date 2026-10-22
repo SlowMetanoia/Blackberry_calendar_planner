@@ -83,6 +83,7 @@ class AgentState(TypedDict, total=False):
     terminal_call: dict[str, Any]
     route: str
     reply: str
+    speech_reply: str
     observed_resources: list[dict[str, str]]
     display_refs: list[dict[str, str]]
     operations: list[dict]
@@ -745,13 +746,13 @@ async def _validate_terminal(state: AgentState) -> AgentState:
         decision = await classify(parsed.reply, get_settings(), source="model_output")
         if decision.action != "allow":
             return {"reply": refusal_for(decision), "route": "finish"}
-        return {"reply": parsed.reply, "route": "finish"}
+        return {"reply": parsed.reply, "speech_reply": parsed.speech_reply, "route": "finish"}
     if name == "request_clarification":
         parsed = RequestClarificationArgs.model_validate(args)
         decision = await classify(parsed.question, get_settings(), source="model_output")
         if decision.action != "allow":
             return {"reply": refusal_for(decision), "route": "clarify"}
-        return {"reply": parsed.question, "route": "clarify"}
+        return {"reply": parsed.question, "speech_reply": parsed.speech_reply, "route": "clarify"}
     if name != "commit_calendar_command":
         return {"state": "failed", "result": INVALID_DECISION_RESULT, "route": "failed"}
 
@@ -802,6 +803,7 @@ async def _validate_terminal(state: AgentState) -> AgentState:
         }
     return {
         "reply": parsed.reply,
+        "speech_reply": parsed.speech_reply,
         "terminal_call": {**call, "args": parsed},
         "route": "commit",
     }
@@ -934,12 +936,15 @@ async def _selected_display_items(state: AgentState) -> list[dict[str, Any]]:
 
 
 async def _final_response_payload(state: AgentState, reply: str) -> dict[str, Any]:
-    return {
+    payload = {
         "reply": reply,
         "display_items": await _selected_display_items(state),
         "observed_resources": state.get("observed_resources", []),
         "operations": state.get("operations", []),
     }
+    if state.get("speech_reply"):
+        payload["speech_reply"] = state["speech_reply"]
+    return payload
 
 
 async def _finish(state: AgentState) -> AgentState:

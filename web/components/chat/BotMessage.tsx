@@ -1,5 +1,6 @@
-import { MessageSquarePlusIcon } from "lucide-react";
+import { MessageSquarePlusIcon, Volume2Icon } from "lucide-react";
 import type { AgentMessage } from "../../types";
+import { useVoiceStore } from "../../libs/stores";
 import { Alert, AlertDescription } from "../ui/alert";
 import { Button } from "../ui/button";
 import { Card, CardContent } from "../ui/card";
@@ -42,6 +43,7 @@ export function BotMessage({
             Начать новый диалог
           </Button>
         )}
+        {message.speech_text && <RepeatSpeechButton messageId={message.id} />}
         {message.error && (
           <Alert variant="destructive" className="mt-2 py-2">
             <AlertDescription>{message.error}</AlertDescription>
@@ -53,5 +55,22 @@ export function BotMessage({
         />
       </CardContent>
     </Card>
+  );
+}
+
+function RepeatSpeechButton({ messageId }: { messageId: string }) {
+  const repeat = useVoiceStore((state) => state.repeat);
+  const voiceConnected = useVoiceStore((state) => state.openAirEnabled);
+  return (
+    <Button
+      variant="ghost"
+      size="sm"
+      className="mt-1 w-fit"
+      disabled={!voiceConnected}
+      onClick={() => repeat(messageId)}
+    >
+      <Volume2Icon aria-hidden="true" />
+      Повторить
+    </Button>
   );
 }

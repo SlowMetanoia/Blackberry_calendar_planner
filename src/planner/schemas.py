@@ -53,12 +53,22 @@ class UserPreferencesResponse(BaseModel):
     timezone: str
     upcoming_days: int
     open_air_silence_ms: int
+    open_air_active_timeout_seconds: int
+    voice_output_enabled: bool
+    tts_voice: Literal["aidar", "baya", "kseniya", "xenia", "eugene"]
+    tts_speed: float
+    open_air_default: bool
 
 
 class UserPreferencesUpdate(StrictInput):
     timezone: str | None = Field(default=None, min_length=1, max_length=64)
     upcoming_days: int | None = Field(default=None, strict=True, ge=1, le=90)
     open_air_silence_ms: int | None = Field(default=None, strict=True, ge=500, le=5000)
+    open_air_active_timeout_seconds: int | None = Field(default=None, strict=True, ge=5, le=300)
+    voice_output_enabled: bool | None = Field(default=None, strict=True)
+    tts_voice: Literal["aidar", "baya", "kseniya", "xenia", "eugene"] | None = None
+    tts_speed: float | None = Field(default=None, ge=0.75, le=1.5)
+    open_air_default: bool | None = Field(default=None, strict=True)
 
     @field_validator("timezone")
     @classmethod
@@ -425,6 +435,7 @@ class AgentMessageResponse(BaseModel):
     input_text: str | None = None
     error: str | None = None
     reply: str | None = None
+    speech_text: str | None = None
     display_items: list[AgentDisplayItemResponse] = Field(default_factory=list)
     operations: list[CalendarOperationResponse] = Field(default_factory=list)
     requires_new_conversation: bool = False

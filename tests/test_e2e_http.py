@@ -1,8 +1,11 @@
+import json
 import os
 import time
+from urllib.parse import urlsplit
 
 import httpx
 import pytest
+from websockets.sync.client import connect
 
 BASE_URL = os.getenv("E2E_BASE_URL")
 pytestmark = pytest.mark.skipif(not BASE_URL, reason="requires Compose e2e environment")
@@ -29,6 +32,75 @@ def login(client, email):
     response = client.post("/auth/login", json={"email": email, "password": "password1"})
     response.raise_for_status()
     return {"Authorization": f"Bearer {response.json()['access_token']}"}
+
+
+def _receive_voice_turn(socket):
+    queued = None
+    terminal = None
+    audio = []
+    for _ in range(30):
+        incoming = socket.recv(timeout=10)
+        if isinstance(incoming, bytes):
+            audio.append(incoming)
+            continue
+        event = json.loads(incoming)
+        if event["type"] == "message":
+            if event["message"]["status"] in {"completed", "needs_clarification", "failed"}:
+                terminal = event["message"]
+            else:
+                queued = event["message"]
+        if event["type"] == "playback_ready":
+            return queued, terminal, audio
+    raise AssertionError("voice turn did not finish")
+
+
+def test_hands_free_stream_accepts_follow_up_without_second_wake_word():
+    with httpx.Client(base_url=BASE_URL, timeout=10) as client:
+        owner = register(client, "hands-free-e2e@example.com")
+        preferences = client.patch(
+            "/users/me/preferences", headers=owner, json={"voice_output_enabled": True}
+        )
+        preferences.raise_for_status()
+        ticket_response = client.post("/voice/session-tickets", headers=owner)
+        ticket_response.raise_for_status()
+        parts = urlsplit(BASE_URL)
+        websocket_url = (
+            f"ws://{parts.netloc}/voice/session?ticket={ticket_response.json()['ticket']}"
+        )
+        with connect(websocket_url, open_timeout=10) as socket:
+            assert json.loads(socket.recv())["state"] == "armed"
+            socket.send(json.dumps({"type": "start"}))
+            assert json.loads(socket.recv())["state"] == "ready"
+            for _ in range(2):
+                socket.send(json.dumps({"type": "utterance_start", "sample_rate": 16_000}))
+                assert json.loads(socket.recv()) == {
+                    "type": "state",
+                    "state": "capturing",
+                    "phase": "command",
+                }
+                socket.send(b"\0\0" * 1_600)
+                socket.send(json.dumps({"type": "utterance_end"}))
+                assert json.loads(socket.recv()) == {
+                    "type": "state",
+                    "state": "processing",
+                    "phase": "command",
+                }
+                transcript = json.loads(socket.recv())
+                assert transcript == {
+                    "type": "transcript",
+                    "text": "создай задачу Голосовая задача",
+                }
+                queued, terminal, audio = _receive_voice_turn(socket)
+                assert queued["input_text"] == "создай задачу Голосовая задача"
+                assert terminal["status"] == "completed", terminal
+                assert terminal["speech_text"].startswith("Создана задача")
+                assert audio and audio[0].startswith(b"RIFF")
+                socket.send(json.dumps({"type": "playback_complete"}))
+                assert json.loads(socket.recv())["state"] == "ready"
+            socket.send(json.dumps({"type": "stop"}))
+            assert json.loads(socket.recv())["state"] == "armed"
+
+        assert client.get("/tasks", headers=owner).json()["total"] == 2
 
 
 def test_reminders_agent_notifier_search_and_linked_undo():
@@ -109,17 +181,31 @@ def test_text_voice_history_undo_and_owner_isolation():
             "timezone": "Europe/Moscow",
             "upcoming_days": 7,
             "open_air_silence_ms": 1500,
+            "open_air_active_timeout_seconds": 15,
+            "voice_output_enabled": False,
+            "tts_voice": "kseniya",
+            "tts_speed": 1.0,
+            "open_air_default": False,
         }
         preferences = client.patch(
             "/users/me/preferences",
             headers=owner,
-            json={"upcoming_days": 14, "open_air_silence_ms": 2000},
+            json={
+                "upcoming_days": 14,
+                "open_air_silence_ms": 2000,
+                "open_air_active_timeout_seconds": 30,
+            },
         )
         assert preferences.status_code == 200
         assert preferences.json() == {
             "timezone": "Europe/Moscow",
             "upcoming_days": 14,
             "open_air_silence_ms": 2000,
+            "open_air_active_timeout_seconds": 30,
+            "voice_output_enabled": False,
+            "tts_voice": "kseniya",
+            "tts_speed": 1.0,
+            "open_air_default": False,
         }
         assert (
             client.put(

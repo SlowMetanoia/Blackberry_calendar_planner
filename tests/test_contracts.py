@@ -2,7 +2,7 @@ from planner.main import app
 
 
 def test_async_message_endpoints_exist() -> None:
-    routes = {(route.path, tuple(route.methods or ())) for route in app.routes}
+    routes = {(route.path, tuple(getattr(route, "methods", ()) or ())) for route in app.routes}
     assert ("/agent/messages", ("POST",)) in routes
     assert ("/agent/messages/audio", ("POST",)) in routes
     assert ("/audio/transcriptions", ("POST",)) in routes
@@ -15,7 +15,11 @@ def test_crud_endpoints_exist() -> None:
 
 
 def test_calendar_history_endpoints_replace_plans() -> None:
-    routes = {(route.path, method) for route in app.routes for method in (route.methods or ())}
+    routes = {
+        (route.path, method)
+        for route in app.routes
+        for method in (getattr(route, "methods", ()) or ())
+    }
     assert {
         ("/calendar/history", "GET"),
         ("/calendar/history/{operation_id}/undo", "POST"),
@@ -24,12 +28,20 @@ def test_calendar_history_endpoints_replace_plans() -> None:
 
 
 def test_timezone_endpoint_exists() -> None:
-    routes = {(route.path, method) for route in app.routes for method in (route.methods or ())}
+    routes = {
+        (route.path, method)
+        for route in app.routes
+        for method in (getattr(route, "methods", ()) or ())
+    }
     assert ("/users/me/timezone", "PUT") in routes
 
 
 def test_conversation_list_endpoint_exists() -> None:
-    routes = {(route.path, method) for route in app.routes for method in (route.methods or ())}
+    routes = {
+        (route.path, method)
+        for route in app.routes
+        for method in (getattr(route, "methods", ()) or ())
+    }
     assert ("/agent/conversations", "GET") in routes
 
 
@@ -37,4 +49,5 @@ def test_agent_message_exposes_display_items_not_internal_reads() -> None:
     properties = app.openapi()["components"]["schemas"]["AgentMessageResponse"]["properties"]
 
     assert "display_items" in properties
+    assert "speech_text" in properties
     assert "reads" not in properties

@@ -25,6 +25,42 @@ const openAir = vi.hoisted(() => ({
   updateSilenceMs: vi.fn(),
   options: null as null | { onPhrase: (audio: Blob) => void },
 }));
+const handsFree = vi.hoisted(() => ({
+  start: vi.fn(async () => {}),
+  stop: vi.fn(),
+  stopConversation: vi.fn(),
+  repeat: vi.fn(),
+  updateSilenceMs: vi.fn(),
+  updateActiveTimeout: vi.fn(),
+  pause: vi.fn(),
+  resume: vi.fn(),
+  options: null as null | {
+    onMessage: (message: AgentMessage) => void;
+    onStatus: (status: string) => void;
+  },
+}));
+vi.mock("../libs/hands-free", async () => {
+  const actual =
+    await vi.importActual<typeof import("../libs/hands-free")>(
+      "../libs/hands-free",
+    );
+  return {
+    ...actual,
+    HandsFreeSession: class {
+      constructor(options: NonNullable<typeof handsFree.options>) {
+        handsFree.options = options;
+      }
+      start = handsFree.start;
+      stop = handsFree.stop;
+      stopConversation = handsFree.stopConversation;
+      repeat = handsFree.repeat;
+      updateSilenceMs = handsFree.updateSilenceMs;
+      updateActiveTimeout = handsFree.updateActiveTimeout;
+      pause = handsFree.pause;
+      resume = handsFree.resume;
+    },
+  };
+});
 vi.mock("../libs/open-air", async () => {
   const actual =
     await vi.importActual<typeof import("../libs/open-air")>(
@@ -589,8 +625,17 @@ describe("planner chat", () => {
       name: "Включить open-air режим Ivory",
     });
     await userEvent.click(toggle);
-    expect(openAir.start).toHaveBeenCalledOnce();
+    expect(handsFree.start).toHaveBeenCalledWith();
     expect(toggle).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByText("Скажите «Айвори»")).toBeInTheDocument();
+    handsFree.options!.onStatus("hearing_wake");
+    expect(await screen.findByText("Слышу обращение…")).toBeInTheDocument();
+    handsFree.options!.onStatus("ready");
+    expect(
+      await screen.findByText("Скажите, что нужно сделать"),
+    ).toBeInTheDocument();
+    handsFree.options!.onStatus("hearing_command");
+    expect(await screen.findByText("Слушаю команду…")).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "Удерживайте для записи" }),
     ).toBeDisabled();
@@ -603,11 +648,11 @@ describe("planner chat", () => {
         open_air_silence_ms: 2000,
       }),
     );
-    expect(openAir.updateSilenceMs).toHaveBeenCalledWith(2000);
+    expect(handsFree.updateSilenceMs).toHaveBeenCalledWith(2000);
     view.unmount();
-    expect(openAir.stop).toHaveBeenCalled();
+    expect(handsFree.stop).toHaveBeenCalled();
   });
-  it("sends only an Ivory phrase through the normal message chain", async () => {
+  it("renders a message received by the hands-free session", async () => {
     const message: AgentMessage = {
       id: "m1",
       conversation_id: "s1",
@@ -622,49 +667,29 @@ describe("planner chat", () => {
     };
     localStorage.setItem("planner-token", "token");
     vi.mocked(api.syncTimeZone).mockResolvedValue({ timezone: "UTC" });
-    vi.mocked(api.transcribeAudio)
-      .mockResolvedValueOnce("обычный разговор")
-      .mockResolvedValueOnce("шум перед именем, Ivory создай задачу");
-    vi.mocked(api.getMessage).mockResolvedValue(message);
     render(<App />);
     await userEvent.click(
       await screen.findByRole("button", {
         name: "Включить open-air режим Ivory",
       }),
     );
-    vi.mocked(api.sendMessage).mockClear();
-    vi.mocked(api.sendMessage).mockResolvedValue(message);
-    openAir.options!.onPhrase(new Blob(["first"]));
-    await waitFor(() => expect(api.transcribeAudio).toHaveBeenCalledTimes(1));
-    expect(api.sendMessage).not.toHaveBeenCalled();
-    openAir.options!.onPhrase(new Blob(["second"]));
-    await waitFor(() =>
-      expect(api.sendMessage).toHaveBeenCalledWith("Ivory создай задачу", null),
-    );
+    handsFree.options!.onMessage(message);
+    expect(await screen.findByText("Ivory создай задачу")).toBeInTheDocument();
+    expect(await screen.findByText("Готово")).toBeInTheDocument();
   });
-  it("does not send an in-flight phrase after open-air is disabled", async () => {
-    let finishTranscription: (value: string) => void = () => {};
+  it("stops and releases the hands-free session", async () => {
     localStorage.setItem("planner-token", "token");
     vi.mocked(api.syncTimeZone).mockResolvedValue({ timezone: "UTC" });
-    vi.mocked(api.transcribeAudio).mockReturnValue(
-      new Promise((resolve) => {
-        finishTranscription = resolve;
-      }),
-    );
     render(<App />);
     const toggle = await screen.findByRole("button", {
       name: "Включить open-air режим Ivory",
     });
     await userEvent.click(toggle);
-    vi.mocked(api.sendMessage).mockClear();
-    openAir.options!.onPhrase(new Blob(["voice"]));
-    await waitFor(() => expect(api.transcribeAudio).toHaveBeenCalled());
     await userEvent.click(
       screen.getByRole("button", { name: "Выключить open-air режим Ivory" }),
     );
-    finishTranscription("Ivory создай задачу");
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(api.sendMessage).not.toHaveBeenCalled();
+    expect(handsFree.stop).toHaveBeenCalled();
+    expect(toggle).toHaveAttribute("aria-pressed", "false");
   });
   it("renders every known event field", () => {
     render(

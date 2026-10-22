@@ -1,4 +1,6 @@
+import io
 import json
+import wave
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 
@@ -10,6 +12,13 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()
         self.wfile.write(data)
+
+    def _bytes(self, body, content_type="audio/wav", status=200):
+        self.send_response(status)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
 
     def do_GET(self):
         if self.path.endswith("/models"):
@@ -32,6 +41,15 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"text": "создай задачу Голосовая задача"})
             return
         request = json.loads(raw or b"{}")
+        if self.path.endswith("/audio/speech"):
+            output = io.BytesIO()
+            with wave.open(output, "wb") as audio:
+                audio.setnchannels(1)
+                audio.setsampwidth(2)
+                audio.setframerate(24_000)
+                audio.writeframes(b"\0\0" * 2_400)
+            self._bytes(output.getvalue())
+            return
         if self.path.endswith("/embeddings"):
             inputs = request.get("input", [])
             if isinstance(inputs, str):

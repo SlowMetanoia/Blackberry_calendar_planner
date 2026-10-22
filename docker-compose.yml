@@ -8,6 +8,8 @@ services:
     build: .
     command: uvicorn planner.main:app --host 0.0.0.0 --port 8000
     env_file: ${ENV_FILE:-.env}
+    environment:
+      TTS_BASE_URL: ${TTS_BASE_URL:-http://tts:8081}
     ports: ["${API_PORT:-8000}:8000"]
     volumes: ["audio_data:/tmp/planner-audio"]
     extra_hosts: ["host.docker.internal:host-gateway"]
@@ -24,6 +26,8 @@ services:
     build: .
     command: arq planner.worker.WorkerSettings
     env_file: ${ENV_FILE:-.env}
+    environment:
+      TTS_BASE_URL: ${TTS_BASE_URL:-http://tts:8081}
     volumes: ["audio_data:/tmp/planner-audio"]
     extra_hosts: ["host.docker.internal:host-gateway"]
     depends_on:
@@ -45,6 +49,21 @@ services:
       interval: 10s
       timeout: 5s
       retries: 30
+  tts:
+    build: ./tts
+    environment:
+      TTS_MODEL: ${TTS_MODEL:-v5_6_ru}
+      TTS_MODEL_PATH: ${TTS_MODEL_PATH:-/models-local/v5_6_ru.pt}
+      TTS_API_KEY: ${TTS_API_KEY:-}
+    ports: ["${TTS_PORT:-8081}:8081"]
+    volumes:
+      - tts_models:/models
+      - ./models:/models-local:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8081/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 60
   indexer:
     build: .
     command: arq planner.search_worker.SearchWorkerSettings
@@ -87,3 +106,4 @@ volumes:
   postgres_data:
   audio_data:
   guard_models:
+  tts_models:
