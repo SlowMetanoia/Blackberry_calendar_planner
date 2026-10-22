@@ -53,8 +53,8 @@
     "test_agent_input_validation_rejects_bad_text": "PASS"
   },
   "summary": {
-    "total": 34,
-    "passed": 33,
+    "total": 37,
+    "passed": 29,
     "failed": 0,
     "skipped": 8
   }
