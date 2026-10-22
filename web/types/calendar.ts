@@ -1,4 +1,27 @@
 export type CalendarResource = "task" | "event";
+export type CollisionNotice = { collision_id: string; text: string };
+export type CollisionOccurrence = {
+  series_id: string;
+  occurrence_key: string;
+  scheduled_at: string;
+  data: { title: string; duration_minutes: number | null };
+};
+export type CollisionReport = {
+  checked_from: string | null;
+  checked_to: string | null;
+  groups: {
+    id: string;
+    occurrences: {
+      first: CollisionOccurrence;
+      second: CollisionOccurrence;
+      kind: "point" | "interval";
+    }[];
+  }[];
+};
+export type EventMutationResult = Event & { collision_report?: CollisionReport };
+export type EventOccurrenceMutationResult = CalendarOccurrence & {
+  collision_report?: CollisionReport;
+};
 export type Resource = CalendarResource | "reminder";
 export type OperationKind = "create" | "update" | "delete";
 export type OperationOrigin = "agent" | "rest" | "undo";

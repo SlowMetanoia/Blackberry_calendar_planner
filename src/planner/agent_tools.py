@@ -6,6 +6,7 @@ from typing import Any, Literal, Protocol
 
 from pydantic import Field
 
+from .collision_types import CollisionNotice
 from .config import get_settings
 from .models import User
 from .occurrences import OccurrenceService, occurrence_dict
@@ -53,6 +54,10 @@ class ShowCalendarItemsArgs(StrictInput):
 class FinishResponseArgs(StrictInput):
     reply: str = Field(min_length=1, max_length=10_000)
     speech_reply: str | None = Field(default=None, min_length=1, max_length=1000)
+
+
+class CollisionResponseArgs(FinishResponseArgs):
+    collision_notices: list[CollisionNotice] = Field(default_factory=list, max_length=1000)
 
 
 class RequestClarificationArgs(StrictInput):

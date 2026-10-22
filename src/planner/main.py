@@ -39,6 +39,7 @@ from .calendar import (
     CalendarValidationError,
     UndoConflict,
 )
+from .collisions import collision_report
 from .config import get_settings
 from .db import Base, SessionLocal, engine, get_session
 from .llm import verify_llm_connection
@@ -64,6 +65,8 @@ from .schemas import (
     ConversationSummary,
     CursorPage,
     EventCreate,
+    EventMutationResponse,
+    EventOccurrenceMutationResponse,
     EventResponse,
     EventUpdate,
     NotificationResponse,
@@ -405,12 +408,12 @@ async def delete_task(
     await _schedule_index(user.id)
 
 
-@app.post("/events", response_model=EventResponse, status_code=201)
+@app.post("/events", response_model=EventMutationResponse, status_code=201)
 async def create_event(
     data: EventCreate,
     user: User = Depends(current_user),
     session: AsyncSession = Depends(get_session),
-) -> Event:
+) -> EventMutationResponse:
     operation = (
         await CalendarCommandService.execute(
             session, user, [CalendarMutation("create", "event", data.model_dump())], origin="rest"
@@ -418,7 +421,11 @@ async def create_event(
     )[0]
     await session.commit()
     await _schedule_index(user.id)
-    return await EventService.get(session, user, operation.target_id)
+    report = await collision_report(session, user, [operation])
+    event = await EventService.get(session, user, operation.target_id)
+    return EventMutationResponse.model_validate(event).model_copy(
+        update={"collision_report": report}
+    )
 
 
 @app.get("/events", response_model=Page[EventResponse])
@@ -459,16 +466,16 @@ async def get_event(
     return event
 
 
-@app.patch("/events/{event_id}", response_model=EventResponse)
+@app.patch("/events/{event_id}", response_model=EventMutationResponse)
 async def update_event(
     event_id: uuid.UUID,
     data: EventUpdate,
     effective_from_occurrence_key: str | None = None,
     user: User = Depends(current_user),
     session: AsyncSession = Depends(get_session),
-) -> Event:
+) -> EventMutationResponse:
     try:
-        await CalendarCommandService.execute(
+        operations = await CalendarCommandService.execute(
             session,
             user,
             [
@@ -486,7 +493,11 @@ async def update_event(
         raise HTTPException(404, "Event not found")
     await session.commit()
     await _schedule_index(user.id)
-    return await EventService.get(session, user, event_id)
+    report = await collision_report(session, user, operations)
+    event = await EventService.get(session, user, event_id)
+    return EventMutationResponse.model_validate(event).model_copy(
+        update={"collision_report": report}
+    )
 
 
 @app.delete("/events/{event_id}", status_code=204)
@@ -829,7 +840,15 @@ async def _update_occurrence(
     data = operation.after_state or {}
     schedule_field = "deadline" if resource == "task" else "starts_at"
     scheduled_at = data[schedule_field]
-    return CalendarOccurrenceResponse(
+    response_type = (
+        EventOccurrenceMutationResponse if resource == "event" else CalendarOccurrenceResponse
+    )
+    extra = (
+        {"collision_report": await collision_report(session, user, [operation])}
+        if resource == "event"
+        else {}
+    )
+    return response_type(
         resource=resource,
         series_id=target_id,
         occurrence_key=occurrence_key,
@@ -837,6 +856,7 @@ async def _update_occurrence(
         scheduled_at=scheduled_at,
         recurring=True,
         data=data,
+        **extra,
     )
 
 
@@ -894,7 +914,8 @@ async def delete_task_occurrence(
 
 
 @app.patch(
-    "/events/{event_id}/occurrences/{occurrence_key}", response_model=CalendarOccurrenceResponse
+    "/events/{event_id}/occurrences/{occurrence_key}",
+    response_model=EventOccurrenceMutationResponse,
 )
 async def update_event_occurrence(
     event_id: uuid.UUID,
@@ -1106,6 +1127,7 @@ async def _message_response(message: AgentMessage, session: AsyncSession) -> Age
         error=message.error,
         reply=payload.get("reply"),
         speech_text=message.speech_text,
+        collision_notices=payload.get("collision_notices", []),
         display_items=unique_display_items,
         operations=payload.get("operations", []),
         requires_new_conversation=payload.get("requires_new_conversation", False),

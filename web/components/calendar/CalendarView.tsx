@@ -2,6 +2,7 @@ import { useState } from "react";
 import { createPortal } from "react-dom";
 import type {
   CalendarEntry,
+  CollisionReport,
   DayHover,
   EditorState,
   Resource,
@@ -22,6 +23,7 @@ import { DayDialog } from "./DayDialog";
 import { DayHoverPreview } from "./DayHoverPreview";
 import { UpcomingPanel } from "./UpcomingPanel";
 import { useCalendarData } from "../../libs/hooks/use-calendar-data";
+import { CollisionWarning } from "./CollisionWarning";
 
 export function CalendarView() {
   const data = useCalendarData();
@@ -36,6 +38,7 @@ export function CalendarView() {
   const [dayTime, setDayTime] = useState<string | null>(null);
   const [dayHover, setDayHover] = useState<DayHover | null>(null);
   const [editor, setEditor] = useState<EditorState | null>(null);
+  const [collisions, setCollisions] = useState<CollisionReport | null>(null);
   const [reminderLink, setReminderLink] = useState<ReminderLink>();
 
   const selectedEntries = dayOpen ? data.entriesByDate.get(dayOpen) || [] : [];
@@ -81,6 +84,7 @@ export function CalendarView() {
 
   return (
     <>
+      {collisions && <CollisionWarning report={collisions} onClose={() => setCollisions(null)} />}
       <div className="calendar-scroll min-h-0 flex-1 overflow-y-auto overscroll-y-contain xl:overflow-hidden">
         <div className="mx-auto grid min-h-full w-full max-w-[1600px] gap-3 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:gap-4 sm:p-6 xl:h-full xl:grid-cols-[minmax(0,1fr)_20rem] xl:grid-rows-[minmax(0,1fr)] 2xl:grid-cols-[minmax(0,1fr)_22rem]">
           <section className="flex min-h-0 flex-col" aria-label="Календарь месяца">
@@ -154,6 +158,7 @@ export function CalendarView() {
           onClose={() => setEditor(null)}
           onChanged={changed}
           onError={onError}
+          onCollisions={setCollisions}
           onAddReminder={(entry)=>{if(entry.resource !== "reminder")setReminderLink({resource:entry.resource,id:entry.id,title:entry.title,at:entry.startsAt});}}
         />
       )}

@@ -3,6 +3,8 @@ import type {
   CalendarOperation,
   CursorPage,
   Event,
+  EventMutationResult,
+  EventOccurrenceMutationResult,
   EventListOptions,
   OccurrenceListOptions,
   Page,
@@ -73,13 +75,13 @@ export const deleteTask = (id: string) =>
   request<void>(`/tasks/${id}`, { method: "DELETE" });
 
 export const createEvent = (data: Omit<Event, "id" | "owner_id">) =>
-  request<Event>("/events", { method: "POST", body: JSON.stringify(data) });
+  request<EventMutationResult>("/events", { method: "POST", body: JSON.stringify(data) });
 export const updateEvent = (
   id: string,
   data: Partial<Omit<Event, "id" | "owner_id">>,
   effectiveFrom?: string,
 ) =>
-  request<Event>(
+  request<EventMutationResult>(
     query(`/events/${id}`, {
       effective_from_occurrence_key: effectiveFrom,
     }),
@@ -121,7 +123,7 @@ export const updateEventOccurrence = (
   key: string,
   data: Partial<Omit<Event, "id" | "owner_id">>,
 ) =>
-  request<CalendarOccurrence>(
+  request<EventOccurrenceMutationResult>(
     `/events/${id}/occurrences/${encodeURIComponent(key)}`,
     { method: "PATCH", body: JSON.stringify(data) },
   );

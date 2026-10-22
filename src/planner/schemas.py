@@ -5,6 +5,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator, model_validator
 
+from .collision_types import CollisionNotice, CollisionReport
 from .models import MessageStatus
 
 MAX_TEXT_LENGTH = 10_000
@@ -347,6 +348,10 @@ class EventResponse(EventCreate):
     owner_id: uuid.UUID
 
 
+class EventMutationResponse(EventResponse):
+    collision_report: CollisionReport = Field(default_factory=CollisionReport)
+
+
 class AgentInput(StrictInput):
     text: str = Field(min_length=1, max_length=MAX_TEXT_LENGTH)
     conversation_id: uuid.UUID | None = None
@@ -417,6 +422,10 @@ class CalendarOccurrenceResponse(BaseModel):
     data: dict
 
 
+class EventOccurrenceMutationResponse(CalendarOccurrenceResponse):
+    collision_report: CollisionReport = Field(default_factory=CollisionReport)
+
+
 T = TypeVar("T")
 
 
@@ -436,6 +445,7 @@ class AgentMessageResponse(BaseModel):
     error: str | None = None
     reply: str | None = None
     speech_text: str | None = None
+    collision_notices: list[CollisionNotice] = Field(default_factory=list)
     display_items: list[AgentDisplayItemResponse] = Field(default_factory=list)
     operations: list[CalendarOperationResponse] = Field(default_factory=list)
     requires_new_conversation: bool = False

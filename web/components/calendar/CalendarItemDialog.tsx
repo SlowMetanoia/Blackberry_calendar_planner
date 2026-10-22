@@ -1,6 +1,6 @@
 import { FormEvent } from "react";
 import { BellPlusIcon, Trash2Icon } from "lucide-react";
-import type { CalendarEntry, EditorState } from "../../types";
+import type { CalendarEntry, CollisionReport, EditorState } from "../../types";
 import { Button } from "../ui/button";
 import {
   Dialog,
@@ -17,14 +17,16 @@ export function CalendarItemDialog({
   onChanged,
   onError,
   onAddReminder,
+  onCollisions,
 }: {
   state: EditorState;
   onClose: () => void;
   onChanged: () => Promise<void>;
   onError: (message: string) => void;
   onAddReminder?: (entry: CalendarEntry) => void;
+  onCollisions?: (report: CollisionReport) => void;
 }) {
-  const form = useCalendarItemForm({ state, onChanged, onError });
+  const form = useCalendarItemForm({ state, onChanged, onError, onCollisions });
 
   async function submit(event: FormEvent) {
     event.preventDefault();

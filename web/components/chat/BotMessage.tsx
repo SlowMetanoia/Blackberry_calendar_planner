@@ -34,6 +34,11 @@ export function BotMessage({
         {message.operations.map((item) => (
           <OperationReceipt item={item} key={item.id} />
         ))}
+        {message.collision_notices?.map((notice) => (
+          <Alert key={notice.collision_id} className="mt-2 border-amber-400 bg-amber-50 text-amber-950">
+            <AlertDescription>{notice.text}</AlertDescription>
+          </Alert>
+        ))}
         {message.requires_new_conversation && (
           <Button
             className="mt-2 w-fit max-sm:h-11"

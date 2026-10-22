@@ -34,6 +34,41 @@ def login(client, email):
     return {"Authorization": f"Bearer {response.json()['access_token']}"}
 
 
+def test_event_collisions_in_rest_and_agent_response():
+    with httpx.Client(base_url=BASE_URL, timeout=20) as client:
+        owner = register(client, "collisions-e2e@example.com")
+        other = register(client, "other-collisions-e2e@example.com")
+        event = {
+            "title": "Существующая встреча",
+            "starts_at": "2026-10-25T15:00:00+03:00",
+            "duration_minutes": 120,
+            "location": "Политех",
+        }
+        first = client.post("/events", headers=owner, json=event)
+        assert first.status_code == 201, first.text
+        assert first.json()["collision_report"]["groups"] == []
+        second = client.post("/events", headers=owner, json={**event, "title": "Другая встреча"})
+        assert len(second.json()["collision_report"]["groups"]) == 1
+        isolated = client.post("/events", headers=other, json=event)
+        assert isolated.json()["collision_report"]["groups"] == []
+        moved = client.patch(
+            f"/events/{second.json()['id']}",
+            headers=owner,
+            json={"starts_at": "2026-10-25T18:00:00+03:00"},
+        )
+        assert moved.status_code == 200, moved.text
+        assert moved.json()["collision_report"]["groups"] == []
+        submitted = client.post(
+            "/agent/messages", headers=owner, json={"text": "создай событие с коллизией"}
+        )
+        completed = wait_message(client, owner, submitted.json()["id"])
+        assert completed["status"] == "completed", completed
+        assert len(completed["operations"]) == 1
+        assert len(completed["collision_notices"]) == 1
+        assert "Возможное пересечение" in completed["speech_text"]
+        assert "collision_report" not in completed
+
+
 def _receive_voice_turn(socket):
     queued = None
     terminal = None

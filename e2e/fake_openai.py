@@ -95,7 +95,46 @@ class Handler(BaseHTTPRequestHandler):
         earlier_user_messages = [
             message["content"].lower() for message in messages[:-1] if message["role"] == "user"
         ]
-        if "создай связанное напоминание" in lowered:
+        if {item["function"]["name"] for item in request.get("tools", [])} == {
+            "finish_collision_response"
+        }:
+            report = json.loads(messages[-2]["content"])["collision_report"]
+            calls = [
+                (
+                    "finish_collision_response",
+                    {
+                        "reply": "Событие сохранено",
+                        "collision_notices": [
+                            {
+                                "collision_id": group["id"],
+                                "text": "Возможное пересечение с существующей встречей в 16:00.",
+                            }
+                            for group in report["groups"]
+                        ],
+                    },
+                )
+            ]
+        elif "создай событие с коллизией" in lowered:
+            calls = [
+                (
+                    "commit_calendar_command",
+                    {
+                        "reply": "Событие создано",
+                        "mutations": [
+                            {
+                                "operation": "create",
+                                "resource": "event",
+                                "payload": {
+                                    "title": "Новая встреча",
+                                    "starts_at": "2026-10-25T16:00:00+03:00",
+                                    "duration_minutes": 60,
+                                },
+                            }
+                        ],
+                    },
+                )
+            ]
+        elif "создай связанное напоминание" in lowered:
             if last_tool == "list_events":
                 rows = json.loads(messages[-1]["content"]).get("data", [])
                 calls = [
