@@ -36,7 +36,29 @@ The `todo/` directory may contain implementation plans waiting to be executed. W
 
 ## Commit & Pull Request Guidelines
 
-There is no Git history yet, so no existing commit convention can be inferred. Use short, imperative subjects (for example, `Add task CRUD endpoint`) and make commits represent meaningful progress; do not add the agent as an author. Pull requests should explain the behavior changed, link a relevant issue or plan item, list tests run, and include API examples or screenshots when the interface changes.
+Use short, imperative subjects (for example, `Add task CRUD endpoint`); do not add the agent as an author. Pull requests should explain the behavior changed, link a relevant issue or plan item, list tests run, and include API examples or screenshots when the interface changes.
+
+## Feature Lifecycle
+
+At the start of a new independent feature, check the worktree, switch to `master`, run
+`git pull --ff-only`, and create a dedicated feature branch from the updated `master`.
+Preserve uncommitted work; do not discard it or carry unrelated changes into a new feature.
+
+Finishing implementation or passing tests does not mean that the user has accepted the change.
+Present the result for review and keep working on the same feature branch until the user accepts
+it. User acceptance, or an explicit request to commit/push/open an MR, authorizes finalization:
+commit the accepted changes, push the branch, and open a merge request (GitHub pull request)
+against `master`. Include the actual verification results and any remaining limitations.
+Do not automatically treat the agent's own assessment of completion as acceptance. Commit/push/MR
+before acceptance only when the user explicitly requests them. Never merge an MR without user
+authorization.
+
+While an earlier feature's MR is pending, start independent work from updated `master`, preferably
+in a separate worktree when both branches need to remain available. If the next feature depends
+on the pending one, create an explicitly dependent branch from it and target the parent feature
+branch in its MR. After the parent is merged, rebase the dependent changes onto updated `master`
+and retarget the MR; account for squash merges so the parent's commits do not appear again.
+Do not merge an unaccepted feature into local `master` merely to start another feature.
 
 ## Security & Configuration Tips
 
