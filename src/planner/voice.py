@@ -115,13 +115,14 @@ def speech_text_for_payload(payload: dict[str, Any], timezone: str) -> str | Non
         display_items=payload.get("display_items", payload.get("reads", [])),
         timezone=timezone,
     )
+    notices = " ".join(item["text"] for item in payload.get("collision_notices", []))
     if structured:
-        return structured
+        return " ".join(part for part in (structured, notices) if part)
     fallback = payload.get("speech_reply") or payload.get("reply")
     if not isinstance(fallback, str):
         return None
     normalized = " ".join(fallback.split()).strip()
-    return normalized[:1000] or None
+    return " ".join(part for part in (normalized[:1000], notices) if part) or None
 
 
 def split_speech_text(text: str, *, max_chars: int = 200) -> list[str]:

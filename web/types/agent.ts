@@ -1,4 +1,4 @@
-import type { CalendarOperation } from "./calendar";
+import type { CalendarOperation, CollisionNotice } from "./calendar";
 
 export type Status =
   | "queued"
@@ -20,6 +20,7 @@ export type AgentMessage = {
   status: Status;
   reply: string | null;
   speech_text?: string | null;
+  collision_notices?: CollisionNotice[];
   display_items: DisplayItem[];
   operations: CalendarOperation[];
   error: string | null;

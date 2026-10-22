@@ -58,3 +58,10 @@ the user. Agent message responses expose those records as `display_items`; persi
 `reads` are accepted only as a backward-compatible source for deduplicated display items.
 
 The React/Vite client lives in `web/`; run `npm --prefix web test` and `npm --prefix web run build`. Full API/worker coverage uses the isolated fake LLM/STT environment through `./dev/test-e2e`.
+
+Event creation and schedule changes return an owner-scoped `collision_report` alongside the saved
+record. Overlaps are facts, not blockers: unknown duration is a point, intervals are half-open,
+and recurring series are checked for one year. REST editors show the warning directly. After an
+agent commit with overlaps, a response-only model step selects `collision_notices`; raw reports
+remain private and selected notices are rendered and spoken. Mutations are committed before this
+step and cannot be repeated by it. Run `pytest tests/test_collisions.py -q` for focused coverage.

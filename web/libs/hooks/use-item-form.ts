@@ -12,7 +12,7 @@ import {
   updateTaskOccurrence,
 } from "../../api";
 import { localDateKey } from "../format";
-import type { EditorState, Resource, TaskStatus } from "../../types";
+import type { CollisionReport, EditorState, Resource, TaskStatus } from "../../types";
 import {
   fromLocalInput,
   initialRecurrenceDraft,
@@ -25,10 +25,12 @@ export function useCalendarItemForm({
   state,
   onChanged,
   onError,
+  onCollisions,
 }: {
   state: EditorState;
   onChanged: () => Promise<void>;
   onError: (message: string) => void;
+  onCollisions?: (report: CollisionReport) => void;
 }) {
   const source = state.entry?.task || state.entry?.event;
   const existing = Boolean(state.entry);
@@ -95,11 +97,12 @@ export function useCalendarItemForm({
           location: location || null,
           ...recurrenceFields,
         };
-        if (instance) await updateEventOccurrence(state.entry!.id, key!, data);
-        else if (existing) {
-          if (boundary) await updateEvent(state.entry!.id, data, boundary);
-          else await updateEvent(state.entry!.id, data);
-        } else await createEvent(data);
+        const result = instance
+          ? await updateEventOccurrence(state.entry!.id, key!, data)
+          : existing
+            ? await updateEvent(state.entry!.id, data, boundary)
+            : await createEvent(data);
+        if (result.collision_report?.groups.length) onCollisions?.(result.collision_report);
       } else {
         const deadline = fromLocalInput(when);
         if (draft.repeat !== "none" && !deadline)
