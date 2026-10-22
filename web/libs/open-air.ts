@@ -129,7 +129,7 @@ export class OpenAirCapture {
     if (!this.stopped) return;
 
     this.stopped = false;
-    this.options.onStatus("starting");
+    this.options.onStatus("armed");
 
     try {
       this.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -157,7 +157,7 @@ export class OpenAirCapture {
       this.source.connect(this.processor);
       this.processor.connect(this.sink);
       this.sink.connect(this.context.destination);
-      this.options.onStatus("listening");
+      this.options.onStatus("armed");
     } catch (error) {
       this.stop();
       this.options.onStatus("error");
@@ -217,7 +217,7 @@ export class OpenAirCapture {
         this.phrase = this.preRoll;
         this.preRoll = [];
         this.preRollSamples = 0;
-        this.options.onStatus("hearing");
+        this.options.onStatus("hearing_wake");
       }
 
       return;
@@ -227,7 +227,7 @@ export class OpenAirCapture {
 
     const audio = encodeWave(this.phrase, this.context.sampleRate);
     this.phrase = [];
-    this.options.onStatus("recognizing");
+    this.options.onStatus("recognizing_wake");
     this.options.onPhrase(audio);
   }
 }

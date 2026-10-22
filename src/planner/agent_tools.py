@@ -52,14 +52,17 @@ class ShowCalendarItemsArgs(StrictInput):
 
 class FinishResponseArgs(StrictInput):
     reply: str = Field(min_length=1, max_length=10_000)
+    speech_reply: str | None = Field(default=None, min_length=1, max_length=1000)
 
 
 class RequestClarificationArgs(StrictInput):
     question: str = Field(min_length=1, max_length=10_000)
+    speech_reply: str | None = Field(default=None, min_length=1, max_length=1000)
 
 
 class CommitCalendarCommandArgs(StrictInput):
     reply: str = Field(min_length=1, max_length=10_000)
+    speech_reply: str | None = Field(default=None, min_length=1, max_length=1000)
     mutations: list[DecisionAction] = Field(min_length=1, max_length=50)
 
 

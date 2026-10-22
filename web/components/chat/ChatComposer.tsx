@@ -14,13 +14,18 @@ import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Label } from "../ui/label";
 import { NativeSelect } from "../ui/native-select";
+import { VoiceSettingsDialog } from "./VoiceSettingsDialog";
 
 const openAirLabels: Record<OpenAirStatus, string> = {
   off: "Ivory выключена",
-  starting: "Подключаю микрофон…",
-  listening: "Слушаю «Ivory»",
-  hearing: "Слышу речь…",
-  recognizing: "Распознаю обращение…",
+  armed: "Скажите «Айвори»",
+  hearing_wake: "Слышу обращение…",
+  recognizing_wake: "Распознаю «Айвори»…",
+  ready: "Скажите, что нужно сделать",
+  hearing_command: "Слушаю команду…",
+  processing: "Распознаю и думаю…",
+  speaking: "Отвечаю…",
+  paused: "Hands-free на паузе",
   error: "Open-air временно недоступен",
 };
 
@@ -31,6 +36,7 @@ export function ChatComposer({
   openAirSilenceMs,
   onSendText,
   onToggleOpenAir,
+  onStopConversation,
   onChangeOpenAirSilence,
   onStartRecording,
   onStopRecording,
@@ -41,6 +47,7 @@ export function ChatComposer({
   openAirSilenceMs: number;
   onSendText: (text: string) => Promise<void> | void;
   onToggleOpenAir: () => Promise<void> | void;
+  onStopConversation: () => void;
   onChangeOpenAirSilence: (value: number) => Promise<void> | void;
   onStartRecording: (event: ReactPointerEvent<HTMLButtonElement>) => void;
   onStopRecording: () => void;
@@ -76,6 +83,18 @@ export function ChatComposer({
         >
           <ArrowUpIcon aria-hidden="true" />
         </Button>
+        {openAirEnabled && openAirStatus !== "armed" && (
+          <Button
+            type="button"
+            variant="outline"
+            size="icon-lg"
+            aria-label="Завершить hands-free диалог"
+            onClick={onStopConversation}
+          >
+            <SquareIcon aria-hidden="true" />
+          </Button>
+        )}
+        <VoiceSettingsDialog />
         <Button
           type="button"
           variant={openAirEnabled ? "highlight" : "outline"}

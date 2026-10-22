@@ -1,24 +1,29 @@
 import { createStore } from "zustand/vanilla";
-import {
-  getUserPreferences,
-  sendMessage,
-  transcribeAudio,
-  updateUserPreferences,
-} from "../../api";
-import { extractIvoryCommand, OpenAirCapture } from "../open-air";
-import type { OpenAirStatus } from "../../types";
+import { getUserPreferences, updateUserPreferences } from "../../api";
+import type { OpenAirStatus, UserPreferences } from "../../types";
+import { HandsFreeSession } from "../hands-free";
 import type { SessionStore } from "./session-store";
+
+type Voice = "aidar" | "baya" | "kseniya" | "xenia" | "eugene";
 
 export type VoiceState = {
   recording: boolean;
   openAirEnabled: boolean;
   openAirStatus: OpenAirStatus;
   openAirSilenceMs: number;
+  openAirActiveTimeoutSeconds: number;
+  voiceOutputEnabled: boolean;
+  ttsVoice: Voice;
+  ttsSpeed: number;
+  openAirDefault: boolean;
   loadPreferences: () => Promise<void>;
   startRecording: () => Promise<void>;
   stopRecording: () => void;
   toggleOpenAir: () => Promise<void>;
+  stopConversation: () => void;
   stopOpenAir: () => void;
+  repeat: (messageId: string) => void;
+  updateVoicePreferences: (data: Partial<UserPreferences>) => Promise<void>;
   changeOpenAirSilence: (value: number) => Promise<void>;
   dispose: () => void;
   reset: () => void;
@@ -27,65 +32,72 @@ export type VoiceState = {
 export function createVoiceStore(session: SessionStore) {
   let recorder: MediaRecorder | null = null;
   let chunks: Blob[] = [];
-  let openAirCapture: OpenAirCapture | null = null;
-  let openAirActive = false;
-  let openAirGeneration = 0;
-  let openAirQueue: Promise<void> = Promise.resolve();
   let discardRecording = false;
+  let handsFree: HandsFreeSession | null = null;
 
   return createStore<VoiceState>()((set, get) => {
     const stopOpenAir = () => {
-      openAirGeneration++;
-      openAirActive = false;
-      openAirCapture?.stop();
-      openAirCapture = null;
+      handsFree?.stop();
+      handsFree = null;
+      document.removeEventListener("visibilitychange", visibility);
       set({ openAirEnabled: false, openAirStatus: "off" });
     };
 
-    const processOpenAirPhrase = (audio: Blob, generation: number) => {
-      openAirQueue = openAirQueue
-        .catch(() => {})
-        .then(async () => {
-          try {
-            if (!openAirActive || generation !== openAirGeneration) return;
-            const command = extractIvoryCommand(await transcribeAudio(audio));
-            if (
-              !command ||
-              !openAirActive ||
-              generation !== openAirGeneration
-            )
-              return;
-            const message = await sendMessage(
-              command,
-              session.getState().getConversationId(),
-            );
-            if (!openAirActive || generation !== openAirGeneration) return;
-            void session
-              .getState()
-              .acceptMessage(message)
-              .catch((error) =>
-                session.getState().setError((error as Error).message),
-              );
-          } catch (error) {
-            session.getState().setError((error as Error).message);
-          } finally {
-            if (openAirActive && generation === openAirGeneration)
-              set({ openAirStatus: "listening" });
-          }
-        });
+    const visibility = () => {
+      if (!handsFree) return;
+      if (document.hidden) handsFree.pause();
+      else handsFree.resume();
     };
+
+    const startHandsFree = async () => {
+      if (handsFree) return;
+      const current = new HandsFreeSession({
+        silenceMs: get().openAirSilenceMs,
+        activeTimeoutSeconds: get().openAirActiveTimeoutSeconds,
+        onStatus: (openAirStatus) => set({ openAirStatus }),
+        onTranscript: () => {},
+        onMessage: (message) => session.getState().receiveMessage(message),
+        onError: (message) => session.getState().setError(message),
+      });
+      handsFree = current;
+      set({ openAirEnabled: true, openAirStatus: "armed" });
+      document.addEventListener("visibilitychange", visibility);
+      try {
+        await current.start();
+      } catch (error) {
+        stopOpenAir();
+        session.getState().setError((error as Error).message);
+      }
+    };
+
+    const applyPreferences = (preferences: UserPreferences) =>
+      set({
+        openAirSilenceMs: preferences.open_air_silence_ms,
+        openAirActiveTimeoutSeconds:
+          preferences.open_air_active_timeout_seconds ?? 15,
+        voiceOutputEnabled: preferences.voice_output_enabled ?? false,
+        ttsVoice: preferences.tts_voice ?? "kseniya",
+        ttsSpeed: preferences.tts_speed ?? 1,
+        openAirDefault: preferences.open_air_default ?? false,
+      });
 
     return {
       recording: false,
       openAirEnabled: false,
       openAirStatus: "off",
       openAirSilenceMs: 1500,
+      openAirActiveTimeoutSeconds: 15,
+      voiceOutputEnabled: false,
+      ttsVoice: "kseniya",
+      ttsSpeed: 1,
+      openAirDefault: false,
 
       loadPreferences: async () => {
         if (!session.getState().token) return;
         try {
           const preferences = await getUserPreferences();
-          set({ openAirSilenceMs: preferences.open_air_silence_ms });
+          applyPreferences(preferences);
+          if (preferences.open_air_default) await startHandsFree();
         } catch (error) {
           session.getState().setError((error as Error).message);
         }
@@ -94,9 +106,7 @@ export function createVoiceStore(session: SessionStore) {
       startRecording: async () => {
         session.getState().setError("");
         try {
-          const stream = await navigator.mediaDevices.getUserMedia({
-            audio: true,
-          });
+          const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
           chunks = [];
           discardRecording = false;
           const media = new MediaRecorder(stream);
@@ -113,18 +123,12 @@ export function createVoiceStore(session: SessionStore) {
             }
             void session
               .getState()
-              .sendAudio(
-                new Blob(chunks, {
-                  type: media.mimeType || "audio/webm",
-                }),
-              );
+              .sendAudio(new Blob(chunks, { type: media.mimeType || "audio/webm" }));
           };
           media.start();
           set({ recording: true });
         } catch {
-          session
-            .getState()
-            .setError("Не удалось получить доступ к микрофону");
+          session.getState().setError("Не удалось получить доступ к микрофону");
         }
       },
 
@@ -133,63 +137,48 @@ export function createVoiceStore(session: SessionStore) {
       },
 
       toggleOpenAir: async () => {
-        if (openAirActive) {
-          stopOpenAir();
-          return;
-        }
-        session.getState().setError("");
-        const generation = ++openAirGeneration;
-        openAirActive = true;
-        set({ openAirEnabled: true, openAirStatus: "starting" });
-        const capture = new OpenAirCapture({
-          silenceMs: get().openAirSilenceMs,
-          onPhrase: (audio) => processOpenAirPhrase(audio, generation),
-          onStatus: (status) => {
-            if (openAirActive || status === "off")
-              set({ openAirStatus: status });
-          },
-        });
-        openAirCapture = capture;
-        try {
-          await capture.start();
-        } catch {
-          if (openAirCapture === capture) {
-            stopOpenAir();
-            session
-              .getState()
-              .setError(
-                "Не удалось запустить open-air: проверьте доступ к микрофону",
-              );
-          }
-        }
+        if (handsFree) stopOpenAir();
+        else await startHandsFree();
       },
 
+      stopConversation: () => handsFree?.stopConversation(),
       stopOpenAir,
+      repeat: (messageId) => handsFree?.repeat(messageId),
 
-      changeOpenAirSilence: async (value) => {
-        const previous = get().openAirSilenceMs;
-        set({ openAirSilenceMs: value });
-        openAirCapture?.updateSilenceMs(value);
+      updateVoicePreferences: async (data) => {
+        const previous = {
+          open_air_silence_ms: get().openAirSilenceMs,
+          open_air_active_timeout_seconds: get().openAirActiveTimeoutSeconds,
+          voice_output_enabled: get().voiceOutputEnabled,
+          tts_voice: get().ttsVoice,
+          tts_speed: get().ttsSpeed,
+          open_air_default: get().openAirDefault,
+        };
+        applyPreferences({ timezone: "UTC", upcoming_days: 7, ...previous, ...data });
+        if (data.open_air_active_timeout_seconds !== undefined) {
+          handsFree?.updateActiveTimeout(data.open_air_active_timeout_seconds);
+        }
         try {
-          const preferences = await updateUserPreferences({
-            open_air_silence_ms: value,
-          });
-          set({ openAirSilenceMs: preferences.open_air_silence_ms });
+          applyPreferences(await updateUserPreferences(data));
         } catch (error) {
-          set({ openAirSilenceMs: previous });
-          openAirCapture?.updateSilenceMs(previous);
+          applyPreferences({ timezone: "UTC", upcoming_days: 7, ...previous });
+          handsFree?.updateActiveTimeout(previous.open_air_active_timeout_seconds);
           session.getState().setError((error as Error).message);
         }
       },
 
+      changeOpenAirSilence: async (value) => {
+        handsFree?.updateSilenceMs(value);
+        await get().updateVoicePreferences({ open_air_silence_ms: value });
+      },
+
       dispose: () => {
-        openAirGeneration++;
-        openAirActive = false;
-        openAirCapture?.stop();
-        openAirCapture = null;
+        document.removeEventListener("visibilitychange", visibility);
+        stopOpenAir();
       },
 
       reset: () => {
+        document.removeEventListener("visibilitychange", visibility);
         stopOpenAir();
         discardRecording = true;
         if (recorder?.state === "recording") recorder.stop();

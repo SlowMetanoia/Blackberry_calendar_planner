@@ -33,6 +33,7 @@ export function ChatView({
   const startRecording = useVoiceStore((state) => state.startRecording);
   const stopRecording = useVoiceStore((state) => state.stopRecording);
   const toggleOpenAir = useVoiceStore((state) => state.toggleOpenAir);
+  const stopConversation = useVoiceStore((state) => state.stopConversation);
   const changeOpenAirSilence = useVoiceStore(
     (state) => state.changeOpenAirSilence,
   );
@@ -124,6 +125,7 @@ export function ChatView({
         openAirSilenceMs={openAirSilenceMs}
         onSendText={sendText}
         onToggleOpenAir={toggleOpenAir}
+        onStopConversation={stopConversation}
         onChangeOpenAirSilence={changeOpenAirSilence}
         onStartRecording={handleStartRecording}
         onStopRecording={stopRecording}

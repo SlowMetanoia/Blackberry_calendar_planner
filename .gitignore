@@ -13,7 +13,10 @@ build/
 dist/
 .venv/
 .venv-gigaam/
+.venv-silero/
 .gigaam-cache/
+.silero-models/
+/models/
 venv/
 
 # Python tooling and test output

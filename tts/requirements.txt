@@ -1,0 +1,4 @@
+fastapi>=0.115,<1
+numpy>=1.26,<2
+omegaconf>=2.3,<3
+uvicorn[standard]>=0.32,<1

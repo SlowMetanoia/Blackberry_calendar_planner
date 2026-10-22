@@ -1,18 +1,35 @@
+import asyncio
+import hashlib
 import json
 import logging
+import secrets
+import tempfile
 import uuid
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
 
+import httpx
 from arq import create_pool
 from arq.connections import RedisSettings
-from fastapi import Depends, FastAPI, File, Header, HTTPException, Query, Request, UploadFile
+from fastapi import (
+    Depends,
+    FastAPI,
+    File,
+    Header,
+    HTTPException,
+    Query,
+    Request,
+    UploadFile,
+    WebSocket,
+    WebSocketDisconnect,
+)
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.websockets import WebSocketDisconnected
 
 from .agent import TranscriptionError, transcribe
 from .calendar import (
@@ -23,7 +40,7 @@ from .calendar import (
     UndoConflict,
 )
 from .config import get_settings
-from .db import Base, engine, get_session
+from .db import Base, SessionLocal, engine, get_session
 from .llm import verify_llm_connection
 from .models import (
     AgentMessage,
@@ -80,6 +97,12 @@ from .security import (
     verify_password,
 )
 from .services import EventService, TaskService, normalize_datetime
+from .voice import (
+    HandsFreeProtocolError,
+    VoiceConversation,
+    pcm16_wave_bytes,
+    split_speech_text,
+)
 
 AUDIO_DIR = Path("/tmp/planner-audio")
 logger = logging.getLogger(__name__)
@@ -1082,6 +1105,7 @@ async def _message_response(message: AgentMessage, session: AsyncSession) -> Age
         status=message.status,
         error=message.error,
         reply=payload.get("reply"),
+        speech_text=message.speech_text,
         display_items=unique_display_items,
         operations=payload.get("operations", []),
         requires_new_conversation=payload.get("requires_new_conversation", False),
@@ -1146,6 +1170,249 @@ async def transcribe_audio(
         logger.warning("Open-air transcription unavailable: %s", type(exc).__name__)
         raise HTTPException(503, "Сервис распознавания речи временно недоступен") from exc
     return TranscriptionResponse(text=text)
+
+
+def _voice_ticket_key(ticket: str) -> str:
+    return f"voice-ticket:{hashlib.sha256(ticket.encode()).hexdigest()}"
+
+
+async def _redis_pool():
+    return await create_pool(RedisSettings.from_dsn(get_settings().redis_url))
+
+
+@app.get("/voice/capabilities")
+async def voice_capabilities(_user: User = Depends(current_user)) -> dict:
+    settings = get_settings()
+    return {
+        "stt": {"configured": bool(settings.stt_base_url), "sample_rate": 16_000},
+        "tts": {
+            "configured": bool(settings.tts_base_url),
+            "model": settings.tts_model,
+            "voices": ["aidar", "baya", "kseniya", "xenia", "eugene"],
+            "sample_rate": 24_000,
+        },
+    }
+
+
+@app.post("/voice/session-tickets", status_code=201)
+async def create_voice_session_ticket(user: User = Depends(current_user)) -> dict:
+    settings = get_settings()
+    ticket = secrets.token_urlsafe(32)
+    pool = await _redis_pool()
+    try:
+        await pool.setex(
+            _voice_ticket_key(ticket),
+            settings.voice_ticket_ttl_seconds,
+            str(user.id),
+        )
+    finally:
+        await pool.close()
+    return {"ticket": ticket, "expires_in": settings.voice_ticket_ttl_seconds}
+
+
+async def _consume_voice_ticket(ticket: str) -> uuid.UUID | None:
+    pool = await _redis_pool()
+    try:
+        raw = await pool.execute_command("GETDEL", _voice_ticket_key(ticket))
+    finally:
+        await pool.close()
+    if raw is None:
+        return None
+    try:
+        return uuid.UUID(raw.decode() if isinstance(raw, bytes) else str(raw))
+    except ValueError:
+        return None
+
+
+async def _tts_audio(text: str, *, voice: str, speed: float) -> bytes:
+    settings = get_settings()
+    if not settings.tts_base_url:
+        raise RuntimeError("TTS is not configured")
+    headers = {"Content-Type": "application/json"}
+    if settings.tts_api_key:
+        headers["Authorization"] = f"Bearer {settings.tts_api_key}"
+    async with httpx.AsyncClient(timeout=settings.tts_request_timeout_seconds) as client:
+        response = await client.post(
+            f"{settings.tts_base_url.rstrip('/')}/v1/audio/speech",
+            headers=headers,
+            json={"model": settings.tts_model, "voice": voice, "speed": speed, "input": text},
+        )
+        response.raise_for_status()
+        return response.content
+
+
+async def _transcribe_pcm(pcm: bytes) -> str:
+    path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as output:
+            output.write(pcm16_wave_bytes(pcm))
+            path = Path(output.name)
+        return await transcribe(str(path))
+    finally:
+        if path is not None:
+            path.unlink(missing_ok=True)
+
+
+async def _wait_for_terminal_message(message_id: uuid.UUID) -> AgentMessage:
+    deadline = asyncio.get_running_loop().time() + get_settings().voice_terminal_wait_seconds
+    while asyncio.get_running_loop().time() < deadline:
+        async with SessionLocal() as session:
+            message = await session.get(AgentMessage, message_id)
+            if message is not None and message.status in {
+                MessageStatus.completed,
+                MessageStatus.needs_clarification,
+                MessageStatus.failed,
+            }:
+                return message
+        await asyncio.sleep(0.5)
+    raise TimeoutError("voice turn timed out")
+
+
+async def _send_tts(websocket: WebSocket, user: User, message: AgentMessage) -> bool:
+    if not user.voice_output_enabled or not message.speech_text:
+        return False
+    chunks = split_speech_text(message.speech_text)
+    audio_sent = False
+    try:
+        for index, phrase in enumerate(chunks):
+            audio = await _tts_audio(phrase, voice=user.tts_voice, speed=user.tts_speed)
+            await websocket.send_json(
+                {"type": "tts_phrase", "index": index, "count": len(chunks), "text": phrase}
+            )
+            await websocket.send_bytes(audio)
+            audio_sent = True
+    except (httpx.HTTPError, RuntimeError):
+        logger.warning("TTS unavailable for message %s", message.id)
+        await websocket.send_json(
+            {"type": "tts_unavailable", "message": "Голосовой вывод временно недоступен"}
+        )
+    return audio_sent
+
+
+async def _finish_tts(websocket: WebSocket, user: User, message: AgentMessage) -> None:
+    event_type = (
+        "playback_ready" if await _send_tts(websocket, user, message) else "playback_skipped"
+    )
+    await websocket.send_json({"type": event_type})
+
+
+@app.websocket("/voice/session")
+async def voice_session(websocket: WebSocket, ticket: str) -> None:
+    owner_id = await _consume_voice_ticket(ticket)
+    if owner_id is None:
+        await websocket.close(code=4401, reason="Invalid or expired voice ticket")
+        return
+    await websocket.accept()
+    settings = get_settings()
+    state = VoiceConversation(
+        max_pcm_bytes=settings.voice_max_pcm_bytes,
+        max_duration_seconds=settings.voice_max_duration_seconds,
+    )
+    conversation_id: uuid.UUID | None = None
+    utterance_phase: Literal["wake", "command"] | None = None
+    await websocket.send_json({"type": "state", "state": "armed"})
+    try:
+        while True:
+            incoming = await websocket.receive()
+            if incoming.get("type") == "websocket.disconnect":
+                return
+            if incoming.get("bytes") is not None:
+                state.add_pcm(incoming["bytes"])
+                continue
+            raw = incoming.get("text")
+            if raw is None:
+                continue
+            event = json.loads(raw)
+            event_type = event.get("type")
+            if event_type == "start":
+                state.activate()
+                await websocket.send_json({"type": "state", "state": "ready"})
+            elif event_type == "utterance_start":
+                logger.info("Voice utterance started for owner %s", owner_id)
+                utterance_phase = "command" if state.active else "wake"
+                state.begin_utterance(sample_rate=int(event.get("sample_rate", 16_000)))
+                await websocket.send_json(
+                    {"type": "state", "state": "capturing", "phase": utterance_phase}
+                )
+            elif event_type == "utterance_end":
+                logger.info("Voice utterance ended for owner %s", owner_id)
+                if utterance_phase is None:
+                    raise HandsFreeProtocolError("voice utterance was not started")
+                phase = utterance_phase
+                state.start_turn()
+                await websocket.send_json({"type": "state", "state": "processing", "phase": phase})
+                try:
+                    transcript = await _transcribe_pcm(state.finish_utterance())
+                    logger.info("Voice utterance transcribed for owner %s", owner_id)
+                    await websocket.send_json({"type": "transcript", "text": transcript})
+                    command = state.accept_transcript(transcript)
+                    if command is None:
+                        await websocket.send_json(
+                            {"type": "state", "state": "ready" if state.active else "armed"}
+                        )
+                        continue
+                    if not command:
+                        await websocket.send_json({"type": "state", "state": "ready"})
+                        continue
+                    async with SessionLocal() as session:
+                        user = await session.get(User, owner_id)
+                        if user is None:
+                            await websocket.close(code=4401)
+                            return
+                        message = await _new_message(
+                            user,
+                            session,
+                            text=command,
+                            audio_path=None,
+                            conversation_id=conversation_id,
+                            idempotency_key=None,
+                        )
+                        conversation_id = message.conversation_id
+                        queued_response = await _message_response(message, session)
+                    await websocket.send_json(
+                        {"type": "message", "message": queued_response.model_dump(mode="json")}
+                    )
+                    terminal = await _wait_for_terminal_message(message.id)
+                    async with SessionLocal() as session:
+                        response = await _message_response(terminal, session)
+                        user = await session.get(User, owner_id)
+                    await websocket.send_json(
+                        {"type": "message", "message": response.model_dump(mode="json")}
+                    )
+                    await websocket.send_json({"type": "state", "state": "speaking"})
+                    if user is not None:
+                        await _finish_tts(websocket, user, terminal)
+                    else:
+                        await websocket.send_json({"type": "playback_skipped"})
+                finally:
+                    utterance_phase = None
+                    state.finish_turn()
+            elif event_type == "playback_complete":
+                await websocket.send_json(
+                    {"type": "state", "state": "ready" if state.active else "armed"}
+                )
+            elif event_type == "repeat":
+                async with SessionLocal() as session:
+                    message = await session.scalar(
+                        select(AgentMessage).where(
+                            AgentMessage.id == uuid.UUID(str(event.get("message_id"))),
+                            AgentMessage.owner_id == owner_id,
+                        )
+                    )
+                    user = await session.get(User, owner_id)
+                if message is None or user is None or not message.speech_text:
+                    await websocket.send_json({"type": "error", "message": "Ответ не найден"})
+                else:
+                    await _finish_tts(websocket, user, message)
+            elif event_type == "stop":
+                state.active = False
+                utterance_phase = None
+                await websocket.send_json({"type": "state", "state": "armed"})
+    except HandsFreeProtocolError as exc:
+        await websocket.send_json({"type": "error", "message": str(exc)})
+        await websocket.close(code=1009)
+    except (WebSocketDisconnect, WebSocketDisconnected, json.JSONDecodeError):
+        return
 
 
 @app.get("/agent/messages/{message_id}", response_model=AgentMessageResponse)

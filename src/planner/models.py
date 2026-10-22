@@ -10,6 +10,7 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     Enum,
+    Float,
     ForeignKey,
     Index,
     String,
@@ -40,6 +41,15 @@ class User(Base):
             "open_air_silence_ms BETWEEN 500 AND 5000",
             name="ck_users_open_air_silence_range",
         ),
+        CheckConstraint(
+            "open_air_active_timeout_seconds BETWEEN 5 AND 300",
+            name="ck_users_open_air_active_timeout_range",
+        ),
+        CheckConstraint("tts_speed BETWEEN 0.75 AND 1.5", name="ck_users_tts_speed_range"),
+        CheckConstraint(
+            "tts_voice IN ('aidar', 'baya', 'kseniya', 'xenia', 'eugene')",
+            name="ck_users_tts_voice",
+        ),
     )
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     email: Mapped[str] = mapped_column(String(320), unique=True, index=True)
@@ -47,6 +57,13 @@ class User(Base):
     timezone: Mapped[str] = mapped_column(String(64), default="UTC")
     upcoming_days: Mapped[int] = mapped_column(default=7, server_default="7")
     open_air_silence_ms: Mapped[int] = mapped_column(default=1500, server_default="1500")
+    open_air_active_timeout_seconds: Mapped[int] = mapped_column(default=15, server_default="15")
+    voice_output_enabled: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="false"
+    )
+    tts_voice: Mapped[str] = mapped_column(String(32), default="kseniya", server_default="kseniya")
+    tts_speed: Mapped[float] = mapped_column(Float, default=1.0, server_default="1.0")
+    open_air_default: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -339,6 +356,7 @@ class AgentMessage(Base):
     audio_path: Mapped[str | None] = mapped_column(String(1000))
     status: Mapped[MessageStatus] = mapped_column(Enum(MessageStatus), default=MessageStatus.queued)
     result: Mapped[str | None] = mapped_column(Text())
+    speech_text: Mapped[str | None] = mapped_column(Text())
     error: Mapped[str | None] = mapped_column(Text())
     idempotency_key: Mapped[str | None] = mapped_column(String(255))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

@@ -6,3 +6,4 @@ export * from "./client";
 export * from "./users";
 export * from "./notifications";
 export * from "./reminders";
+export * from "./voice";

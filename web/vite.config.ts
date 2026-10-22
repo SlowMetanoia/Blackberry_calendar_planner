@@ -14,6 +14,7 @@ export default defineConfig({
     proxy: {
       "/api": {
         target: "http://localhost:8000",
+        ws: true,
         rewrite: (p) => p.replace(/^\/api/, ""),
         // The source folder `web/api` is imported as `/api/index.ts` in dev.
         // Let Vite serve those modules instead of forwarding them to FastAPI.
