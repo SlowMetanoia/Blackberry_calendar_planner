@@ -60,10 +60,10 @@ export function WeekHeatmap() {
   return (
     <section aria-label="Занятость недели" className="grid gap-2">
       <div className="grid min-w-0 gap-0.5">
-        <h3 className="truncate text-[10px] font-medium uppercase tracking-[0.08em] text-sidebar-foreground/40">
+        <h3 className="truncate text-[11px] font-medium uppercase tracking-[0.08em] text-sidebar-foreground/40">
           Занятость недели
         </h3>
-        <p className="truncate text-[10.5px] text-sidebar-foreground/50">
+        <p className="truncate text-[11.5px] text-sidebar-foreground/50">
           {loading
             ? "Загружаем…"
             : error ||
@@ -85,17 +85,17 @@ export function WeekHeatmap() {
               HEAT_CELL[busyLevel(day.busyMinutes)]
             } ${day.isToday ? "ring-1 ring-sidebar-primary/80" : ""}`}
           >
-            <span className="text-[9px] font-medium uppercase tracking-wide opacity-70">
+            <span className="text-[10px] font-medium uppercase tracking-wide opacity-70">
               {day.weekday}
             </span>
-            <span className="text-[11px] font-semibold tabular-nums">
+            <span className="text-[12px] font-semibold tabular-nums">
               {day.dayNumber}
             </span>
           </div>
         ))}
       </div>
 
-      <div className="flex items-center justify-end gap-1 text-[9px] text-sidebar-foreground/35">
+      <div className="flex items-center justify-end gap-1 text-[10px] text-sidebar-foreground/35">
         <span>меньше</span>
         {HEAT_SWATCH.map((className) => (
           <span key={className} className={`size-2 rounded-[2px] ${className}`} />
