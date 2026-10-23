@@ -20,7 +20,7 @@ export function BotMessage({
   return (
     <Card
       size="sm"
-      className="bubble bot relative max-w-[88%] gap-0 rounded-bl-sm bg-muted/60 px-3.5 pt-3 pb-7 break-words ring-border/60 sm:max-w-[82%] sm:px-4 sm:pt-3.5"
+      className="bubble bot relative min-w-[8.5rem] max-w-[88%] gap-0 rounded-bl-sm bg-muted/60 px-3.5 pt-3 pb-7 break-words ring-border/60 sm:max-w-[82%] sm:px-4 sm:pt-3.5"
     >
       <CardContent className="grid min-w-0 gap-1 px-0">
         {message.reply ? (

@@ -130,8 +130,7 @@ export function useCalendarItemForm({
   }
 
   async function remove() {
-    if (!state.entry || !window.confirm(`Удалить «${state.entry.title}»?`))
-      return;
+    if (!state.entry) return;
     setSaving(true);
     try {
       const key = state.entry.occurrenceKey;

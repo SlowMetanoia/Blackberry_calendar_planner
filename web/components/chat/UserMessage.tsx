@@ -11,9 +11,9 @@ export function UserMessage({
   return (
     <Card
       size="sm"
-      className="bubble user relative ml-auto max-w-[88%] gap-0 rounded-br-sm bg-primary px-3.5 pt-3 pb-7 break-words text-primary-foreground ring-primary/20 sm:max-w-[82%] sm:px-4 sm:pt-3.5"
+      className="bubble user relative ml-auto min-w-[8.5rem] max-w-[88%] gap-0 rounded-br-sm bg-primary px-3.5 pt-3 pb-7 break-words text-primary-foreground ring-primary/20 sm:max-w-[82%] sm:px-4 sm:pt-3.5"
     >
-      <CardContent className="px-0 text-sm leading-relaxed whitespace-pre-wrap">
+      <CardContent className="min-w-0 px-0 text-sm leading-relaxed break-words whitespace-pre-wrap">
         {text}
       </CardContent>
       <MessageTime

@@ -202,6 +202,29 @@ describe("planner chat", () => {
     await userEvent.click(within(dialog).getByRole("button",{name:"Сохранить"}));
     await waitFor(()=>expect(api.updateReminder).toHaveBeenCalledWith("reminder-1",expect.objectContaining({title:"Позвонить в клинику"})));
   });
+  it("prefills a new reminder with the clicked week time", async () => {
+    localStorage.setItem("planner-token", "token");
+    render(<App />);
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Календарь" }),
+    );
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Неделя" }),
+    );
+    const day = document.querySelector<HTMLElement>("[data-week-date]");
+    expect(day).not.toBeNull();
+    const date = day!.dataset.weekDate!;
+    fireEvent.click(day!, { clientY: 48 * 10 + 1 });
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Напоминание" }),
+    );
+    const dialog = await screen.findByRole("dialog", {
+      name: "Новое напоминание",
+    });
+    expect(within(dialog).getByLabelText("Напомнить в")).toHaveValue(
+      `${date}T10:00`,
+    );
+  });
   it("switches chat, calendar and history from the sidebar", async () => {
     localStorage.setItem("planner-token", "token");
     vi.mocked(api.syncTimeZone).mockResolvedValue({ timezone: "UTC" });
@@ -415,7 +438,7 @@ describe("planner chat", () => {
       offset: 0,
     });
     render(<App />);
-    const panel = screen.getByRole("complementary", { name: "Диалоги" });
+    const panel = screen.getByRole("complementary", { name: "Диалоги и задачи" });
     expect(
       within(panel).getByRole("button", { name: "Новый диалог" }),
     ).toBeInTheDocument();
@@ -431,12 +454,12 @@ describe("planner chat", () => {
       screen.getByText(/запланировано на 15 октября 2026/),
     ).toBeInTheDocument();
     expect(
-      screen.queryByRole("complementary", { name: "Диалоги" }),
+      screen.queryByRole("complementary", { name: "Диалоги и задачи" }),
     ).not.toBeInTheDocument();
 
     await userEvent.click(screen.getByRole("button", { name: "Чат" }));
     const reopenedPanel = screen.getByRole("complementary", {
-      name: "Диалоги",
+      name: "Диалоги и задачи",
     });
 
     const session = within(reopenedPanel).getByRole("button", {
@@ -447,20 +470,81 @@ describe("planner chat", () => {
       expect(api.getConversationHistory).toHaveBeenCalledWith("s1", 100, 0),
     );
     expect(
-      screen.getByRole("complementary", { name: "Диалоги" }),
+      screen.getByRole("complementary", { name: "Диалоги и задачи" }),
     ).toBeInTheDocument();
   });
+  it("shows upcoming tasks in a collapsible lower sidebar section", async () => {
+    localStorage.setItem("planner-token", "token");
+    vi.mocked(api.syncTimeZone).mockResolvedValue({ timezone: "UTC" });
+    const deadline = new Date(Date.now() + 2 * 86_400_000);
+    deadline.setHours(15, 30, 0, 0);
+    vi.mocked(api.getTasks).mockResolvedValue({
+      items: [
+        {
+          id: "t-near",
+          owner_id: "u1",
+          title: "Подготовить отчёт",
+          description: null,
+          deadline: deadline.toISOString(),
+          estimated_minutes: 45,
+          status: "open",
+        },
+      ],
+      total: 1,
+      limit: 100,
+      offset: 0,
+    });
+
+    render(<App />);
+    const tasksRegion = await screen.findByRole("region", {
+      name: "Ближайшие задачи",
+    });
+    expect(
+      within(tasksRegion).getByText("Подготовить отчёт"),
+    ).toBeInTheDocument();
+    expect(within(tasksRegion).getByText(/15:30/)).toBeInTheDocument();
+
+    await userEvent.click(
+      within(tasksRegion).getByRole("button", {
+        name: "Свернуть раздел «Ближайшие задачи»",
+      }),
+    );
+    expect(
+      within(tasksRegion).queryByRole("list"),
+    ).not.toBeInTheDocument();
+    expect(
+      within(tasksRegion).getByRole("button", {
+        name: "Развернуть раздел «Ближайшие задачи»",
+      }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("region", { name: "Занятость недели" }),
+    ).toBeInTheDocument();
+
+    const sessionsRegion = screen.getByRole("region", { name: "Диалоги" });
+    await userEvent.click(
+      within(sessionsRegion).getByRole("button", {
+        name: "Свернуть раздел «Диалоги»",
+      }),
+    );
+    expect(
+      within(sessionsRegion).queryByRole("button", {
+        name: "Новый диалог",
+      }),
+    ).not.toBeInTheDocument();
+  });
+
   it("keeps the chat sessions panel open when starting a new conversation", async () => {
     localStorage.setItem("planner-token", "token");
     vi.mocked(api.syncTimeZone).mockResolvedValue({ timezone: "UTC" });
     render(<App />);
     await screen.findByRole("heading", { name: "Что запланируем?" });
-    const panel = screen.getByRole("complementary", { name: "Диалоги" });
+    const panel = screen.getByRole("complementary", { name: "Диалоги и задачи" });
     await userEvent.click(
       within(panel).getByRole("button", { name: "Новый диалог" }),
     );
     expect(
-      screen.getByRole("complementary", { name: "Диалоги" }),
+      screen.getByRole("complementary", { name: "Диалоги и задачи" }),
     ).toBeInTheDocument();
     expect(
       screen.getByRole("heading", { name: "Что запланируем?" }),

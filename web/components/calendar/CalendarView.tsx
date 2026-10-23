@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type {
   CalendarEntry,
@@ -40,23 +40,54 @@ export function CalendarView() {
   const [editor, setEditor] = useState<EditorState | null>(null);
   const [collisions, setCollisions] = useState<CollisionReport | null>(null);
   const [reminderLink, setReminderLink] = useState<ReminderLink>();
+  const hoverCloseTimer = useRef<number | null>(null);
 
   const selectedEntries = dayOpen ? data.entriesByDate.get(dayOpen) || [] : [];
+
+  function cancelHoverClose() {
+    if (hoverCloseTimer.current !== null) {
+      window.clearTimeout(hoverCloseTimer.current);
+      hoverCloseTimer.current = null;
+    }
+  }
+
+  useEffect(() => cancelHoverClose, []);
 
   function openEntry(entry: CalendarEntry) {
     setEditor({ resource: entry.resource, entry });
   }
 
   function openDate(date: string, time?: string) {
+    cancelHoverClose();
     setDayHover(null);
     setDayOpen(date);
     setDayTime(time ?? null);
   }
 
   function handleDayHover(hover: DayHover | null, date: string | null) {
-    setDayHover((current) =>
-      hover ? hover : current?.date === date ? null : current,
-    );
+    cancelHoverClose();
+    if (hover) {
+      setDayHover(hover);
+      return;
+    }
+    // Leaving a day cell towards the preview would otherwise unmount it mid-hover
+    // and the cell would immediately re-open it, making the preview flicker.
+    hoverCloseTimer.current = window.setTimeout(() => {
+      hoverCloseTimer.current = null;
+      setDayHover((current) => (current?.date === date ? null : current));
+    }, 120);
+  }
+
+  function keepHoverPreview() {
+    cancelHoverClose();
+  }
+
+  function closeHoverPreview() {
+    cancelHoverClose();
+    hoverCloseTimer.current = window.setTimeout(() => {
+      hoverCloseTimer.current = null;
+      setDayHover(null);
+    }, 120);
   }
 
   async function changed() {
@@ -115,6 +146,8 @@ export function CalendarView() {
             entries={data.entriesByDate.get(dayHover.date) || []}
             x={dayHover.x}
             y={dayHover.y}
+            onMouseEnter={keepHoverPreview}
+            onMouseLeave={closeHoverPreview}
           />,
           document.body,
         )}
@@ -151,7 +184,7 @@ export function CalendarView() {
           }
         />
       )}
-      {(editor?.resource === "reminder" || reminderLink) && <ReminderDialog reminder={editor?.entry?.reminder} date={editor?.date} link={reminderLink} onClose={()=>{setEditor(null);setReminderLink(undefined);}} onChanged={changed} onError={onError} />}
+      {(editor?.resource === "reminder" || reminderLink) && <ReminderDialog reminder={editor?.entry?.reminder} date={editor?.date} time={editor?.time} link={reminderLink} onClose={()=>{setEditor(null);setReminderLink(undefined);}} onChanged={changed} onError={onError} />}
       {editor && editor.resource !== "reminder" && !reminderLink && (
         <CalendarItemDialog
           state={editor}
