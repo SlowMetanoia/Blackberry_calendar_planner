@@ -40,6 +40,7 @@ export function ChatComposer({
   onChangeOpenAirSilence,
   onStartRecording,
   onStopRecording,
+  onTextActivity,
 }: {
   recording: boolean;
   openAirEnabled: boolean;
@@ -51,6 +52,7 @@ export function ChatComposer({
   onChangeOpenAirSilence: (value: number) => Promise<void> | void;
   onStartRecording: (event: ReactPointerEvent<HTMLButtonElement>) => void;
   onStopRecording: () => void;
+  onTextActivity: () => void;
 }) {
   const [text, setText] = useState("");
 
@@ -73,7 +75,10 @@ export function ChatComposer({
           placeholder="Задача или вопрос…"
           className="h-11 flex-1 bg-card"
           value={text}
-          onChange={(e) => setText(e.target.value)}
+          onChange={(e) => {
+            setText(e.target.value);
+            if (e.target.value.trim()) onTextActivity();
+          }}
         />
         <Button
           type="submit"

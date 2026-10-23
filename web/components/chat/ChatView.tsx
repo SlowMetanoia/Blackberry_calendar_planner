@@ -2,6 +2,7 @@ import {
   useCallback,
   useEffect,
   useRef,
+  useState,
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import {
@@ -12,7 +13,7 @@ import { useSessionStore, useVoiceStore } from "../../libs/stores";
 import { Button } from "../ui/button";
 import { ScrollArea } from "../ui/scroll-area";
 import { ChatComposer } from "./ChatComposer";
-import { Mascot } from "./Mascot";
+import { Mascot, type MascotMode } from "./Mascot";
 import { MessageExchange } from "./MessageExchange";
 
 export function ChatView({
@@ -37,6 +38,28 @@ export function ChatView({
   const stopConversation = useVoiceStore((state) => state.stopConversation);
   const changeOpenAirSilence = useVoiceStore(
     (state) => state.changeOpenAirSilence,
+  );
+  const [textActive, setTextActive] = useState(false);
+  const pending = messages.some((message) =>
+    ["queued", "transcribing", "processing"].includes(message.status),
+  );
+  const mascotMode: MascotMode =
+    pending || openAirStatus === "processing"
+      ? "processing"
+      : recording ||
+          ["hearing_wake", "recognizing_wake", "hearing_command"].includes(
+            openAirStatus,
+          ) ||
+          textActive
+        ? "listen"
+        : "idle";
+
+  const handleSendText = useCallback(
+    async (text: string) => {
+      setTextActive(false);
+      await sendText(text);
+    },
+    [sendText],
   );
 
   const handleStartRecording = useCallback(
@@ -124,14 +147,15 @@ export function ChatView({
         openAirEnabled={openAirEnabled}
         openAirStatus={openAirStatus}
         openAirSilenceMs={openAirSilenceMs}
-        onSendText={sendText}
+        onSendText={handleSendText}
         onToggleOpenAir={toggleOpenAir}
         onStopConversation={stopConversation}
         onChangeOpenAirSilence={changeOpenAirSilence}
         onStartRecording={handleStartRecording}
         onStopRecording={stopRecording}
+        onTextActivity={() => setTextActive(true)}
       />
-      <Mascot />
+      <Mascot mode={mascotMode} />
     </div>
   );
 }
