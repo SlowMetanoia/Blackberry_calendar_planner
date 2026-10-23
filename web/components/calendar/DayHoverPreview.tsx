@@ -7,11 +7,15 @@ export function DayHoverPreview({
   entries,
   x,
   y,
+  onMouseEnter,
+  onMouseLeave,
 }: {
   date: string;
   entries: CalendarEntry[];
   x: number;
   y: number;
+  onMouseEnter?: () => void;
+  onMouseLeave?: () => void;
 }) {
   const label = new Intl.DateTimeFormat("ru-RU", {
     weekday: "long",
@@ -23,6 +27,8 @@ export function DayHoverPreview({
       className="day-hover-preview fixed z-[110] w-[300px] max-w-[calc(100vw-16px)] gap-2 p-3 shadow-lg"
       role="tooltip"
       style={{ left: Math.max(8, x), top: y }}
+      onMouseEnter={onMouseEnter}
+      onMouseLeave={onMouseLeave}
     >
       <CardHeader className="gap-0 px-0">
         <CardTitle className="text-sm first-letter:uppercase">

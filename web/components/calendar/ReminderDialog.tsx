@@ -12,13 +12,13 @@ import { Textarea } from "../ui/textarea";
 
 export type ReminderLink = {resource:"task"|"event";id:string;title:string;at:string};
 
-export function ReminderDialog({reminder,date,link,onClose,onChanged,onError}:{
-  reminder?:Reminder; date?:string; link?:ReminderLink;
+export function ReminderDialog({reminder,date,time,link,onClose,onChanged,onError}:{
+  reminder?:Reminder; date?:string; time?:string; link?:ReminderLink;
   onClose:()=>void; onChanged:()=>Promise<void>; onError:(message:string)=>void;
 }) {
   const [title,setTitle] = useState(reminder?.title || link?.title || "");
   const [description,setDescription] = useState(reminder?.description || "");
-  const [when,setWhen] = useState(reminder ? toLocalInput(reminder.remind_at) : link ? toLocalInput(link.at) : `${date || localDateKey(new Date())}T09:00`);
+  const [when,setWhen] = useState(reminder ? toLocalInput(reminder.remind_at) : link ? toLocalInput(link.at) : `${date || localDateKey(new Date())}T${time || "09:00"}`);
   const [relative,setRelative] = useState(reminder?.relative_offset_minutes != null || Boolean(link));
   const [offset,setOffset] = useState(reminder?.relative_offset_minutes ?? -60);
   const [saving,setSaving] = useState(false);

@@ -7,63 +7,65 @@ import { deleteNotification, deletePushSubscription, getNotifications, getPushCo
 import { ReminderDialog } from "../calendar/ReminderDialog";
 import type { Notification as PlannerNotification, Reminder } from "../../types";
 
-function subscriptionData(subscription:PushSubscription){const value=subscription.toJSON();if(!value.endpoint||!value.keys?.p256dh||!value.keys.auth)throw new Error("Браузер вернул неполную подписку");return {endpoint:value.endpoint,p256dh:value.keys.p256dh,auth:value.keys.auth};}
+function subscriptionData(subscription: PushSubscription) { const value = subscription.toJSON(); if (!value.endpoint || !value.keys?.p256dh || !value.keys.auth) throw new Error("Браузер вернул неполную подписку"); return { endpoint: value.endpoint, p256dh: value.keys.p256dh, auth: value.keys.auth }; }
 
-export async function detachPushSubscription(){
-  if(!("serviceWorker" in navigator))return;
-  const registration=await navigator.serviceWorker.getRegistration();
-  const subscription=await registration?.pushManager?.getSubscription();
-  if(subscription){await deletePushSubscription(subscriptionData(subscription));await subscription.unsubscribe();}
+export async function detachPushSubscription() {
+  if (!("serviceWorker" in navigator)) return;
+  const registration = await navigator.serviceWorker.getRegistration();
+  const subscription = await registration?.pushManager?.getSubscription();
+  if (subscription) { await deletePushSubscription(subscriptionData(subscription)); await subscription.unsubscribe(); }
 }
 
-export function NotificationCenter({onError}:{onError:(message:string)=>void}){
-  const [open,setOpen]=useState(false),[items,setItems]=useState<PlannerNotification[]>([]),[unread,setUnread]=useState(0),[total,setTotal]=useState(0);
-  const [push,setPush]=useState(false),[busy,setBusy]=useState(false),[reminder,setReminder]=useState<Reminder>();
-  const refresh=useCallback(async()=>{const [page,count]=await Promise.all([getNotifications(),getNotifications(true,1)]);setItems(page.items);setTotal(page.total);setUnread(count.total);},[]);
-  const showReminder=useCallback(async(id:string)=>{try{setReminder(await request<Reminder>(`/reminders/${encodeURIComponent(id)}`));}catch(error){onError((error as Error).message);}},[onError]);
-  useEffect(()=>{
-    let mounted=true;
-    const update=()=>{if(mounted)void refresh().catch(()=>{});};
-    update();const timer=window.setInterval(update,15000);window.addEventListener("focus",update);
-    const message=(event:MessageEvent)=>{update();if(event.data?.type==="open-reminder"&&typeof event.data.reminderId==="string")void showReminder(event.data.reminderId);};
-    if("serviceWorker" in navigator){navigator.serviceWorker.addEventListener("message",message);void navigator.serviceWorker.register("/sw.js").then(registration=>registration.pushManager?.getSubscription()).then(subscription=>{if(mounted)setPush(Boolean(subscription));}).catch(()=>{});}
-    const id=new URLSearchParams(location.search).get("reminder");if(id)void showReminder(id);
-    return()=>{mounted=false;clearInterval(timer);window.removeEventListener("focus",update);navigator.serviceWorker?.removeEventListener("message",message);};
-  },[refresh,showReminder]);
-  async function action(work:()=>Promise<unknown>){try{await work();await refresh();}catch(error){onError((error as Error).message);}}
-  async function togglePush(){setBusy(true);try{
-    if(!("serviceWorker" in navigator)||!("PushManager" in window)||!("Notification" in window))throw new Error("Этот браузер не поддерживает push-уведомления");
-    const registration=await navigator.serviceWorker.ready,existing=await registration.pushManager.getSubscription();
-    if(push&&existing){await deletePushSubscription(subscriptionData(existing));await existing.unsubscribe();setPush(false);return;}
-    const config=await getPushConfig();if(!config.enabled||!config.public_key)throw new Error("Push-уведомления пока не настроены на сервере");
-    if(await window.Notification.requestPermission()!=="granted")throw new Error("Разрешите уведомления в настройках браузера");
-    const key=config.public_key.replace(/-/g,"+").replace(/_/g,"/"),bytes=Uint8Array.from(atob(key+"=".repeat((4-key.length%4)%4)),char=>char.charCodeAt(0));
-    const subscription=existing||await registration.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:bytes});
-    try{await upsertPushSubscription(subscriptionData(subscription));}catch(error){if(!existing)await subscription.unsubscribe();throw error;}
-    setPush(true);
-  }catch(error){onError((error as Error).message);}finally{setBusy(false);}}
-  async function more(){try{const page=await getNotifications(false,100,items.length);setItems(current=>[...current,...page.items]);setTotal(page.total);}catch(error){onError((error as Error).message);}}
+export function NotificationCenter({ onError }: { onError: (message: string) => void }) {
+  const [open, setOpen] = useState(false), [items, setItems] = useState<PlannerNotification[]>([]), [unread, setUnread] = useState(0), [total, setTotal] = useState(0);
+  const [push, setPush] = useState(false), [busy, setBusy] = useState(false), [reminder, setReminder] = useState<Reminder>();
+  const refresh = useCallback(async () => { const [page, count] = await Promise.all([getNotifications(), getNotifications(true, 1)]); setItems(page.items); setTotal(page.total); setUnread(count.total); }, []);
+  const showReminder = useCallback(async (id: string) => { try { setReminder(await request<Reminder>(`/reminders/${encodeURIComponent(id)}`)); } catch (error) { onError((error as Error).message); } }, [onError]);
+  useEffect(() => {
+    let mounted = true;
+    const update = () => { if (mounted) void refresh().catch(() => { }); };
+    update(); const timer = window.setInterval(update, 15000); window.addEventListener("focus", update);
+    const message = (event: MessageEvent) => { update(); if (event.data?.type === "open-reminder" && typeof event.data.reminderId === "string") void showReminder(event.data.reminderId); };
+    if ("serviceWorker" in navigator) { navigator.serviceWorker.addEventListener("message", message); void navigator.serviceWorker.register("/sw.js").then(registration => registration.pushManager?.getSubscription()).then(subscription => { if (mounted) setPush(Boolean(subscription)); }).catch(() => { }); }
+    const id = new URLSearchParams(location.search).get("reminder"); if (id) void showReminder(id);
+    return () => { mounted = false; clearInterval(timer); window.removeEventListener("focus", update); navigator.serviceWorker?.removeEventListener("message", message); };
+  }, [refresh, showReminder]);
+  async function action(work: () => Promise<unknown>) { try { await work(); await refresh(); } catch (error) { onError((error as Error).message); } }
+  async function togglePush() {
+    setBusy(true); try {
+      if (!("serviceWorker" in navigator) || !("PushManager" in window) || !("Notification" in window)) throw new Error("Этот браузер не поддерживает push-уведомления");
+      const registration = await navigator.serviceWorker.ready, existing = await registration.pushManager.getSubscription();
+      if (push && existing) { await deletePushSubscription(subscriptionData(existing)); await existing.unsubscribe(); setPush(false); return; }
+      const config = await getPushConfig(); if (!config.enabled || !config.public_key) throw new Error("Push-уведомления пока не настроены на сервере");
+      if (await window.Notification.requestPermission() !== "granted") throw new Error("Разрешите уведомления в настройках браузера");
+      const key = config.public_key.replace(/-/g, "+").replace(/_/g, "/"), bytes = Uint8Array.from(atob(key + "=".repeat((4 - key.length % 4) % 4)), char => char.charCodeAt(0));
+      const subscription = existing || await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: bytes });
+      try { await upsertPushSubscription(subscriptionData(subscription)); } catch (error) { if (!existing) await subscription.unsubscribe(); throw error; }
+      setPush(true);
+    } catch (error) { onError((error as Error).message); } finally { setBusy(false); }
+  }
+  async function more() { try { const page = await getNotifications(false, 100, items.length); setItems(current => [...current, ...page.items]); setTotal(page.total); } catch (error) { onError((error as Error).message); } }
   return <>
-    <Button variant="ghost" size="sm" className="max-sm:size-9" aria-label={`Уведомления${unread ? `: ${unread} непрочитанных` : ""}`} aria-expanded={open} onClick={()=>setOpen(value=>!value)}>
-      <BellIcon aria-hidden="true"/><span className="hidden lg:inline">Уведомления</span>{unread > 0 && <Badge variant="secondary" className="px-1 text-[10px]">{unread}</Badge>}
+    <Button variant="ghost" size="sm" className="max-sm:size-9" aria-label={`Уведомления${unread ? `: ${unread} непрочитанных` : ""}`} aria-expanded={open} onClick={() => setOpen(value => !value)}>
+      <BellIcon aria-hidden="true" /><span className="hidden lg:inline">Уведомления</span>{unread > 0 && <Badge variant="secondary" className="px-1 text-[10px]">{unread}</Badge>}
     </Button>
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogContent closeLabel="Закрыть уведомления" className="flex max-h-[92dvh] flex-col gap-4 sm:max-w-lg">
         <DialogHeader><DialogTitle>Центр уведомлений</DialogTitle></DialogHeader>
-        <div className="flex flex-wrap gap-2"><Button variant="outline" size="sm" disabled={busy} onClick={()=>void togglePush()}>{push?"Выключить push":"Включить push"}</Button><Button variant="ghost" size="sm" onClick={()=>void action(markAllNotificationsRead)}>Прочитать все</Button></div>
+        <div className="flex flex-wrap gap-2"><Button variant="outline" size="sm" disabled={busy} onClick={() => void togglePush()}>{push ? "Выключить push" : "Включить push"}</Button><Button variant="ghost" size="sm" onClick={() => void action(markAllNotificationsRead)}>Прочитать все</Button></div>
         <div className="min-h-0 overflow-y-auto">
-          {items.map(item=><article key={item.id} className={`flex items-start gap-2 border-b border-border py-3 ${item.read_at?"":"border-l-2 border-l-primary pl-3"}`}>
-            <button className="grid min-w-0 flex-1 gap-1 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={()=>void action(async()=>{await markNotificationRead(item.id);await showReminder(item.reminder_id);})}>
-              <strong className="text-sm">{item.title}</strong>{item.body&&<span className="text-sm text-muted-foreground">{item.body}</span>}
+          {items.map(item => <article key={item.id} className={`flex items-start gap-2 border-b border-border py-3 ${item.read_at ? "" : "border-l-2 border-l-primary pl-3"}`}>
+            <button className="grid min-w-0 flex-1 gap-1 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => void action(async () => { await markNotificationRead(item.id); await showReminder(item.reminder_id); })}>
+              <strong className="text-sm">{item.title}</strong>{item.body && <span className="text-sm text-muted-foreground">{item.body}</span>}
               <time className="text-xs text-muted-foreground">{new Date(item.created_at).toLocaleString("ru-RU")}</time>
             </button>
-            <Button variant="ghost" size="icon-sm" aria-label={`Удалить уведомление ${item.title}`} onClick={()=>void action(()=>deleteNotification(item.id))}><Trash2Icon aria-hidden="true"/></Button>
+            <Button variant="ghost" size="icon-sm" aria-label={`Удалить уведомление ${item.title}`} onClick={() => void action(() => deleteNotification(item.id))}><Trash2Icon aria-hidden="true" /></Button>
           </article>)}
-          {!items.length&&<p className="py-6 text-center text-sm text-muted-foreground">Уведомлений пока нет.</p>}
-          {items.length<total&&<Button variant="outline" className="mt-3 w-full" onClick={()=>void more()}>Показать ещё</Button>}
+          {!items.length && <p className="py-6 text-center text-sm text-muted-foreground">Уведомлений пока нет.</p>}
+          {items.length < total && <Button variant="outline" className="mt-3 w-full" onClick={() => void more()}>Показать ещё</Button>}
         </div>
       </DialogContent>
     </Dialog>
-    {reminder&&<ReminderDialog reminder={reminder} onClose={()=>setReminder(undefined)} onChanged={async()=>{setReminder(undefined);await refresh();}} onError={onError}/>}
+    {reminder && <ReminderDialog reminder={reminder} onClose={() => setReminder(undefined)} onChanged={async () => { setReminder(undefined); await refresh(); }} onError={onError} />}
   </>;
 }

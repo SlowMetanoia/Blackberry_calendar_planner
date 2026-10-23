@@ -9,7 +9,10 @@ export function MessageTime({
 }) {
   const label = formatMessageTimestamp(value);
   return label ? (
-    <time className={`text-[11px] leading-none ${className}`} dateTime={value}>
+    <time
+      className={`whitespace-nowrap text-[11px] leading-none tabular-nums ${className}`}
+      dateTime={value}
+    >
       {label}
     </time>
   ) : null;

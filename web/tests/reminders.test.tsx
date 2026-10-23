@@ -18,6 +18,10 @@ describe("reminders",()=>{
     expect(api.createReminder).toHaveBeenCalledWith(expect.objectContaining({linked_resource:"event",linked_id:"event-1",relative_offset_minutes:-60}));
     expect(changed).toHaveBeenCalledOnce();
   });
+  it("prefills a new reminder with the selected time",()=>{
+    render(<ReminderDialog date="2030-01-01" time="14:30" onClose={vi.fn()} onChanged={vi.fn(async()=>{})} onError={vi.fn()}/>);
+    expect(screen.getByLabelText("Напомнить в")).toHaveValue("2030-01-01T14:30");
+  });
   it("keeps fired reminders read-only",()=>{
     render(<ReminderDialog reminder={{id:"r1",owner_id:"u1",title:"Already fired",description:null,remind_at:"2020-01-01T10:00:00Z",status:"fired",linked_resource:null,linked_id:null,relative_offset_minutes:null,cancelled_reason:null,cancelled_at:null,fired_at:"2020-01-01T10:00:01Z",created_at:"2020-01-01T09:00:00Z"}} onClose={vi.fn()} onChanged={vi.fn(async()=>{})} onError={vi.fn()}/>);
     expect(screen.getByLabelText("Название")).toBeDisabled();
