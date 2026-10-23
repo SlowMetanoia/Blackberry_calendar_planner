@@ -1,6 +1,7 @@
 import {
   FormEvent,
   useState,
+  useRef,
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import {
@@ -41,6 +42,7 @@ export function ChatComposer({
   onStartRecording,
   onStopRecording,
   onTextActivity,
+  onTextIdle,
 }: {
   recording: boolean;
   openAirEnabled: boolean;
@@ -53,14 +55,28 @@ export function ChatComposer({
   onStartRecording: (event: ReactPointerEvent<HTMLButtonElement>) => void;
   onStopRecording: () => void;
   onTextActivity: () => void;
+  onTextIdle: () => void;
 }) {
   const [text, setText] = useState("");
+  const textIdleTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
+  function notifyTextActivity(value: string) {
+    if (textIdleTimer.current) clearTimeout(textIdleTimer.current);
+    if (!value.trim()) {
+      onTextIdle();
+      return;
+    }
+    onTextActivity();
+    textIdleTimer.current = setTimeout(onTextIdle, 700);
+  }
 
   async function submit(event: FormEvent) {
     event.preventDefault();
     if (!text.trim()) return;
     const value = text;
     setText("");
+    if (textIdleTimer.current) clearTimeout(textIdleTimer.current);
+    onTextIdle();
     await onSendText(value);
   }
 
@@ -77,7 +93,7 @@ export function ChatComposer({
           value={text}
           onChange={(e) => {
             setText(e.target.value);
-            if (e.target.value.trim()) onTextActivity();
+            notifyTextActivity(e.target.value);
           }}
         />
         <Button

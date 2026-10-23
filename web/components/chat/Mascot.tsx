@@ -50,6 +50,19 @@ export function Mascot({ mode = "idle" }: { mode?: MascotMode }) {
           timer = undefined;
           setAnimation("idle");
           setFrame(1);
+          idleTimer = setInterval(() => {
+            let idleIndex = 0;
+            setFrame(idleFrames[idleIndex]);
+            timer = setInterval(() => {
+              idleIndex += 1;
+              if (idleIndex >= idleFrames.length) {
+                if (timer) clearInterval(timer);
+                timer = undefined;
+                return;
+              }
+              setFrame(idleFrames[idleIndex]);
+            }, FRAME_INTERVAL_MS);
+          }, IDLE_INTERVAL_MS);
           return;
         }
         setFrame(listenFrames[index]);

@@ -87,4 +87,30 @@ describe("Mascot", () => {
       "/mascot/blackberry/idle/1.png",
     );
   });
+
+  it("switches directly from listen to processing without reverse animation", () => {
+    const view = render(<Mascot mode="listen" />);
+    act(() => vi.advanceTimersByTime(180 * 4));
+
+    view.rerender(<Mascot mode="processing" />);
+    expect(getMascotImage()).toHaveAttribute(
+      "src",
+      "/mascot/blackberry/processing/1.png",
+    );
+  });
+
+  it("returns through reverse listen after processing completes", () => {
+    const view = render(<Mascot mode="processing" />);
+
+    view.rerender(<Mascot mode="idle" />);
+    expect(getMascotImage()).toHaveAttribute(
+      "src",
+      "/mascot/blackberry/listen/5.png",
+    );
+    act(() => vi.advanceTimersByTime(180 * 5));
+    expect(getMascotImage()).toHaveAttribute(
+      "src",
+      "/mascot/blackberry/idle/1.png",
+    );
+  });
 });

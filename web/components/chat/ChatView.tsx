@@ -29,6 +29,8 @@ export function ChatView({
   const messages = useSessionStore((state) => state.messages);
   const sendText = useSessionStore((state) => state.sendText);
   const recording = useVoiceStore((state) => state.recording);
+  const audioRequestPending = useVoiceStore((state) => state.audioRequestPending);
+  const mascotVisible = useVoiceStore((state) => state.mascotVisible);
   const openAirEnabled = useVoiceStore((state) => state.openAirEnabled);
   const openAirStatus = useVoiceStore((state) => state.openAirStatus);
   const openAirSilenceMs = useVoiceStore((state) => state.openAirSilenceMs);
@@ -44,7 +46,7 @@ export function ChatView({
     ["queued", "transcribing", "processing"].includes(message.status),
   );
   const mascotMode: MascotMode =
-    pending || openAirStatus === "processing"
+    pending || audioRequestPending || openAirStatus === "processing"
       ? "processing"
       : recording ||
           ["hearing_wake", "recognizing_wake", "hearing_command"].includes(
@@ -154,8 +156,9 @@ export function ChatView({
         onStartRecording={handleStartRecording}
         onStopRecording={stopRecording}
         onTextActivity={() => setTextActive(true)}
+        onTextIdle={() => setTextActive(false)}
       />
-      <Mascot mode={mascotMode} />
+      {mascotVisible && <Mascot mode={mascotMode} />}
     </div>
   );
 }

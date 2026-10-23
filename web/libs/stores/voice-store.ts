@@ -8,6 +8,7 @@ type Voice = "aidar" | "baya" | "kseniya" | "xenia" | "eugene";
 
 export type VoiceState = {
   recording: boolean;
+  audioRequestPending: boolean;
   openAirEnabled: boolean;
   openAirStatus: OpenAirStatus;
   openAirSilenceMs: number;
@@ -16,6 +17,7 @@ export type VoiceState = {
   ttsVoice: Voice;
   ttsSpeed: number;
   openAirDefault: boolean;
+  mascotVisible: boolean;
   loadPreferences: () => Promise<void>;
   startRecording: () => Promise<void>;
   stopRecording: () => void;
@@ -79,10 +81,12 @@ export function createVoiceStore(session: SessionStore) {
         ttsVoice: preferences.tts_voice ?? "kseniya",
         ttsSpeed: preferences.tts_speed ?? 1,
         openAirDefault: preferences.open_air_default ?? false,
+        mascotVisible: preferences.mascot_visible ?? true,
       });
 
     return {
       recording: false,
+      audioRequestPending: false,
       openAirEnabled: false,
       openAirStatus: "off",
       openAirSilenceMs: 1500,
@@ -91,6 +95,7 @@ export function createVoiceStore(session: SessionStore) {
       ttsVoice: "kseniya",
       ttsSpeed: 1,
       openAirDefault: false,
+      mascotVisible: true,
 
       loadPreferences: async () => {
         if (!session.getState().token) return;
@@ -121,9 +126,11 @@ export function createVoiceStore(session: SessionStore) {
               chunks = [];
               return;
             }
+            set({ audioRequestPending: true });
             void session
               .getState()
-              .sendAudio(new Blob(chunks, { type: media.mimeType || "audio/webm" }));
+              .sendAudio(new Blob(chunks, { type: media.mimeType || "audio/webm" }))
+              .finally(() => set({ audioRequestPending: false }));
           };
           media.start();
           set({ recording: true });
@@ -153,6 +160,7 @@ export function createVoiceStore(session: SessionStore) {
           tts_voice: get().ttsVoice,
           tts_speed: get().ttsSpeed,
           open_air_default: get().openAirDefault,
+          mascot_visible: get().mascotVisible,
         };
         applyPreferences({ timezone: "UTC", upcoming_days: 7, ...previous, ...data });
         if (data.open_air_active_timeout_seconds !== undefined) {
@@ -184,7 +192,7 @@ export function createVoiceStore(session: SessionStore) {
         if (recorder?.state === "recording") recorder.stop();
         recorder = null;
         chunks = [];
-        set({ recording: false });
+        set({ recording: false, audioRequestPending: false });
       },
     };
   });
