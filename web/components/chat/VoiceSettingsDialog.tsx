@@ -19,6 +19,7 @@ export function VoiceSettingsDialog() {
   const voice = useVoiceStore((state) => state.ttsVoice);
   const speed = useVoiceStore((state) => state.ttsSpeed);
   const openAirDefault = useVoiceStore((state) => state.openAirDefault);
+  const mascotVisible = useVoiceStore((state) => state.mascotVisible);
   const silence = useVoiceStore((state) => state.openAirSilenceMs);
   const activeTimeout = useVoiceStore(
     (state) => state.openAirActiveTimeoutSeconds,
@@ -81,6 +82,15 @@ export function VoiceSettingsDialog() {
               onCheckedChange={(value) => void update({ open_air_default: value === true })}
             />
             Ждать «Айвори» после открытия
+          </Label>
+          <Label className="flex items-center gap-2">
+            <Checkbox
+              checked={mascotVisible}
+              onCheckedChange={(value) =>
+                void update({ mascot_visible: value === true })
+              }
+            />
+            Показывать ЕжеВику
           </Label>
           <Label className="grid gap-1.5">
             Пауза между фразами

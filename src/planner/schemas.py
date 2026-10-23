@@ -59,6 +59,7 @@ class UserPreferencesResponse(BaseModel):
     tts_voice: Literal["aidar", "baya", "kseniya", "xenia", "eugene"]
     tts_speed: float
     open_air_default: bool
+    mascot_visible: bool
 
 
 class UserPreferencesUpdate(StrictInput):
@@ -70,6 +71,7 @@ class UserPreferencesUpdate(StrictInput):
     tts_voice: Literal["aidar", "baya", "kseniya", "xenia", "eugene"] | None = None
     tts_speed: float | None = Field(default=None, ge=0.75, le=1.5)
     open_air_default: bool | None = Field(default=None, strict=True)
+    mascot_visible: bool | None = Field(default=None, strict=True)
 
     @field_validator("timezone")
     @classmethod

@@ -64,6 +64,7 @@ class User(Base):
     tts_voice: Mapped[str] = mapped_column(String(32), default="kseniya", server_default="kseniya")
     tts_speed: Mapped[float] = mapped_column(Float, default=1.0, server_default="1.0")
     open_air_default: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    mascot_visible: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 

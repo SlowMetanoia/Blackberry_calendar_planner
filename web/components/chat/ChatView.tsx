@@ -2,6 +2,7 @@ import {
   useCallback,
   useEffect,
   useRef,
+  useState,
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import {
@@ -12,6 +13,7 @@ import { useSessionStore, useVoiceStore } from "../../libs/stores";
 import { Button } from "../ui/button";
 import { ScrollArea } from "../ui/scroll-area";
 import { ChatComposer } from "./ChatComposer";
+import { Mascot, type MascotMode } from "./Mascot";
 import { MessageExchange } from "./MessageExchange";
 
 export function ChatView({
@@ -27,6 +29,8 @@ export function ChatView({
   const messages = useSessionStore((state) => state.messages);
   const sendText = useSessionStore((state) => state.sendText);
   const recording = useVoiceStore((state) => state.recording);
+  const audioRequestPending = useVoiceStore((state) => state.audioRequestPending);
+  const mascotVisible = useVoiceStore((state) => state.mascotVisible);
   const openAirEnabled = useVoiceStore((state) => state.openAirEnabled);
   const openAirStatus = useVoiceStore((state) => state.openAirStatus);
   const openAirSilenceMs = useVoiceStore((state) => state.openAirSilenceMs);
@@ -36,6 +40,28 @@ export function ChatView({
   const stopConversation = useVoiceStore((state) => state.stopConversation);
   const changeOpenAirSilence = useVoiceStore(
     (state) => state.changeOpenAirSilence,
+  );
+  const [textActive, setTextActive] = useState(false);
+  const pending = messages.some((message) =>
+    ["queued", "transcribing", "processing"].includes(message.status),
+  );
+  const mascotMode: MascotMode =
+    pending || audioRequestPending || openAirStatus === "processing"
+      ? "processing"
+      : recording ||
+          ["hearing_wake", "recognizing_wake", "hearing_command"].includes(
+            openAirStatus,
+          ) ||
+          textActive
+        ? "listen"
+        : "idle";
+
+  const handleSendText = useCallback(
+    async (text: string) => {
+      setTextActive(false);
+      await sendText(text);
+    },
+    [sendText],
   );
 
   const handleStartRecording = useCallback(
@@ -57,7 +83,7 @@ export function ChatView({
   }, [messages]);
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div className="relative flex min-h-0 flex-1 flex-col">
       <div className="flex shrink-0 items-center gap-2 border-b border-border/60 bg-background px-3 py-2 md:hidden">
         <Button
           variant="outline"
@@ -123,13 +149,16 @@ export function ChatView({
         openAirEnabled={openAirEnabled}
         openAirStatus={openAirStatus}
         openAirSilenceMs={openAirSilenceMs}
-        onSendText={sendText}
+        onSendText={handleSendText}
         onToggleOpenAir={toggleOpenAir}
         onStopConversation={stopConversation}
         onChangeOpenAirSilence={changeOpenAirSilence}
         onStartRecording={handleStartRecording}
         onStopRecording={stopRecording}
+        onTextActivity={() => setTextActive(true)}
+        onTextIdle={() => setTextActive(false)}
       />
+      {mascotVisible && <Mascot mode={mascotMode} />}
     </div>
   );
 }

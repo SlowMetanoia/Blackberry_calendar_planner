@@ -1,6 +1,7 @@
 import {
   FormEvent,
   useState,
+  useRef,
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import {
@@ -40,6 +41,8 @@ export function ChatComposer({
   onChangeOpenAirSilence,
   onStartRecording,
   onStopRecording,
+  onTextActivity,
+  onTextIdle,
 }: {
   recording: boolean;
   openAirEnabled: boolean;
@@ -51,14 +54,29 @@ export function ChatComposer({
   onChangeOpenAirSilence: (value: number) => Promise<void> | void;
   onStartRecording: (event: ReactPointerEvent<HTMLButtonElement>) => void;
   onStopRecording: () => void;
+  onTextActivity: () => void;
+  onTextIdle: () => void;
 }) {
   const [text, setText] = useState("");
+  const textIdleTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
+  function notifyTextActivity(value: string) {
+    if (textIdleTimer.current) clearTimeout(textIdleTimer.current);
+    if (!value.trim()) {
+      onTextIdle();
+      return;
+    }
+    onTextActivity();
+    textIdleTimer.current = setTimeout(onTextIdle, 700);
+  }
 
   async function submit(event: FormEvent) {
     event.preventDefault();
     if (!text.trim()) return;
     const value = text;
     setText("");
+    if (textIdleTimer.current) clearTimeout(textIdleTimer.current);
+    onTextIdle();
     await onSendText(value);
   }
 
@@ -73,7 +91,10 @@ export function ChatComposer({
           placeholder="Задача или вопрос…"
           className="h-11 flex-1 bg-card"
           value={text}
-          onChange={(e) => setText(e.target.value)}
+          onChange={(e) => {
+            setText(e.target.value);
+            notifyTextActivity(e.target.value);
+          }}
         />
         <Button
           type="submit"
