@@ -90,7 +90,7 @@ export function VoiceSettingsDialog() {
                 void update({ mascot_visible: value === true })
               }
             />
-            Показывать маскота
+            Показывать ЕжеВику
           </Label>
           <Label className="grid gap-1.5">
             Пауза между фразами
