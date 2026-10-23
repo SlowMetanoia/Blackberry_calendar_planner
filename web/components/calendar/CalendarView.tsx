@@ -151,7 +151,7 @@ export function CalendarView() {
           }
         />
       )}
-      {(editor?.resource === "reminder" || reminderLink) && <ReminderDialog reminder={editor?.entry?.reminder} date={editor?.date} link={reminderLink} onClose={()=>{setEditor(null);setReminderLink(undefined);}} onChanged={changed} onError={onError} />}
+      {(editor?.resource === "reminder" || reminderLink) && <ReminderDialog reminder={editor?.entry?.reminder} date={editor?.date} time={editor?.time} link={reminderLink} onClose={()=>{setEditor(null);setReminderLink(undefined);}} onChanged={changed} onError={onError} />}
       {editor && editor.resource !== "reminder" && !reminderLink && (
         <CalendarItemDialog
           state={editor}

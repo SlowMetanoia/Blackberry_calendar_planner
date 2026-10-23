@@ -1,5 +1,10 @@
-import { MessageSquarePlusIcon, MessagesSquareIcon } from "lucide-react";
+import {
+  ListTodoIcon,
+  MessageSquarePlusIcon,
+  MessagesSquareIcon,
+} from "lucide-react";
 import { formatSessionTimestamp } from "../../libs/format";
+import { useUpcomingTasks } from "../../libs/hooks/use-upcoming-tasks";
 import type { ConversationSummary } from "../../types";
 import { Button } from "../ui/button";
 import {
@@ -11,6 +16,8 @@ import {
 } from "../ui/dialog";
 import { ScrollArea } from "../ui/scroll-area";
 import { WeekHeatmap } from "../calendar/WeekHeatmap";
+import { ChatSidebarSection } from "./ChatSidebarSection";
+import { SidebarUpcomingTasks } from "./SidebarUpcomingTasks";
 
 type ChatSidebarProps = {
   sessions: ConversationSummary[];
@@ -26,44 +33,31 @@ function ChatSidebarBody({
   onSelect,
   sheet = false,
 }: ChatSidebarProps & { sheet?: boolean }) {
+  const { items: upcomingTasks, loading, error } = useUpcomingTasks();
+
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div
-        className={`flex items-start gap-2.5 px-4 pt-5 pb-3 ${
-          sheet ? "pr-12" : ""
-        }`}
+      <ChatSidebarSection
+        storageKey="planner-chat-sidebar-sessions"
+        title="Диалоги"
+        icon={MessagesSquareIcon}
+        count={sessions.length}
+        grow={3}
       >
-        <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-sidebar-accent text-sidebar-accent-foreground">
-          <MessagesSquareIcon aria-hidden="true" className="size-4" />
-        </span>
-        <div className="grid min-w-0 flex-1 gap-0.5">
-          <h2 className="truncate font-heading text-sm font-semibold">
-            Диалоги
-          </h2>
-          <p className="truncate text-[10.5px] text-sidebar-foreground/50">
-            История ваших разговоров
-          </p>
+        <div className={`px-2 pb-1 ${sheet ? "pr-11" : ""}`}>
+          <Button
+            variant="ghost"
+            className="h-10 w-full justify-start gap-2 rounded-lg bg-sidebar-accent px-2.5 text-[14px] font-medium text-sidebar-accent-foreground hover:bg-sidebar-accent/90 hover:text-sidebar-accent-foreground md:h-9"
+            aria-label="Новый диалог"
+            onClick={onNew}
+          >
+            <MessageSquarePlusIcon aria-hidden="true" className="size-4" />
+            Новый диалог
+          </Button>
         </div>
-      </div>
 
-      <div className="px-3 pb-1">
-        <Button
-          variant="ghost"
-          className="h-10 w-full justify-start gap-2 rounded-lg bg-sidebar-accent px-2.5 text-[13px] font-medium text-sidebar-accent-foreground hover:bg-sidebar-accent/90 hover:text-sidebar-accent-foreground md:h-9"
-          aria-label="Новый диалог"
-          onClick={onNew}
-        >
-          <MessageSquarePlusIcon aria-hidden="true" className="size-4" />
-          Новый диалог
-        </Button>
-      </div>
-
-      <div className="flex min-h-0 flex-1 flex-col px-3 pt-3 pb-3">
-        <p className="px-2 pb-1 text-[10px] font-medium uppercase tracking-[0.08em] text-sidebar-foreground/40">
-          Недавние
-        </p>
-        <ScrollArea className="min-h-0 flex-1" viewportClassName="pr-1">
-          <div className="grid gap-1 pb-2">
+        <ScrollArea className="min-h-0 flex-1" viewportClassName="px-2 pb-2">
+          <div className="grid gap-1">
             {sessions.map((session) => {
               const active = conversation === session.id;
               return (
@@ -88,15 +82,15 @@ function ChatSidebarBody({
                   />
                   <MessagesSquareIcon
                     aria-hidden="true"
-                    className={`mt-0.5 size-3.5 shrink-0 ${
+                    className={`mt-0.5 size-4 shrink-0 ${
                       active ? "text-sidebar-primary" : ""
                     }`}
                   />
                   <span className="grid min-w-0 flex-1 gap-0.5">
-                    <span className="truncate text-[12.5px] font-medium leading-4">
+                    <span className="truncate text-[13.5px] font-medium leading-[1.15rem]">
                       {session.preview}
                     </span>
-                    <time className="truncate text-[10.5px] text-sidebar-foreground/45">
+                    <time className="truncate text-[11.5px] text-sidebar-foreground/45">
                       {formatSessionTimestamp(session.last_activity_at)}
                     </time>
                   </span>
@@ -105,9 +99,30 @@ function ChatSidebarBody({
             })}
           </div>
         </ScrollArea>
-      </div>
+      </ChatSidebarSection>
 
-      <div className="shrink-0 border-t border-sidebar-border/70 px-3 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] md:border-t-0 md:pb-3">
+      <ChatSidebarSection
+        storageKey="planner-chat-sidebar-tasks"
+        title="Ближайшие задачи"
+        icon={ListTodoIcon}
+        count={upcomingTasks.length}
+        grow={2}
+        className="border-t border-sidebar-border/70"
+      >
+        <ScrollArea
+          className="min-h-0 flex-1"
+          viewportClassName="pb-1"
+          aria-label="Список ближайших задач"
+        >
+          <SidebarUpcomingTasks
+            items={upcomingTasks}
+            loading={loading}
+            error={error}
+          />
+        </ScrollArea>
+      </ChatSidebarSection>
+
+      <div className="shrink-0 border-t border-sidebar-border/70 px-3 pt-2 pb-[max(0.75rem,env(safe-area-inset-bottom))] md:pb-2">
         <WeekHeatmap />
       </div>
     </div>
@@ -118,7 +133,7 @@ export function ChatSidebar(props: ChatSidebarProps) {
   return (
     <aside
       id="chat-sidebar"
-      aria-label="Диалоги"
+      aria-label="Диалоги и задачи"
       className="hidden w-[16rem] shrink-0 flex-col border-l border-sidebar-border bg-sidebar text-sidebar-foreground md:flex"
     >
       <ChatSidebarBody {...props} />
@@ -142,9 +157,9 @@ export function ChatHistorySheet({
         className="top-auto bottom-0 left-0 flex h-[88dvh] max-h-[92dvh] w-full max-w-none translate-x-0 translate-y-0 flex-col gap-0 overflow-hidden rounded-t-2xl rounded-b-none border-0 bg-sidebar p-0 pt-0 pb-0 text-sidebar-foreground ring-sidebar-border sm:max-w-none data-open:slide-in-from-bottom-4 data-closed:slide-out-to-bottom-4"
       >
         <DialogHeader className="sr-only">
-          <DialogTitle>Диалоги и занятость недели</DialogTitle>
+          <DialogTitle>Диалоги и задачи</DialogTitle>
           <DialogDescription>
-            История разговоров и распределение занятости по дням.
+            История разговоров, ближайшие задачи и занятость по дням.
           </DialogDescription>
         </DialogHeader>
         <div
