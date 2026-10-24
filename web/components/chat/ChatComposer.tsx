@@ -81,7 +81,7 @@ export function ChatComposer({
   }
 
   return (
-    <footer className="shrink-0 border-t bg-muted/30 px-3 pt-2.5 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-6 sm:py-3">
+    <footer className="h-24 shrink-0 border-t bg-muted/30 px-3 pt-2.5 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-6 sm:py-3">
       <form
         className="mx-auto flex w-full max-w-3xl items-center gap-1.5 sm:gap-2"
         onSubmit={submit}

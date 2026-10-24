@@ -100,7 +100,7 @@ export function Mascot({ mode = "idle" }: { mode?: MascotMode }) {
 
   return (
     <div
-      className="pointer-events-none absolute bottom-0 left-1/2 z-10 hidden w-[min(15rem,92%)] -translate-x-1/2 sm:block md:w-[min(17rem,92%)]"
+      className="pointer-events-none absolute bottom-full left-1/2 z-10 hidden w-[min(15rem,92%)] -translate-x-1/2 sm:block md:w-[min(17rem,92%)]"
       data-testid="blackberry-mascot"
       aria-hidden="true"
     >
