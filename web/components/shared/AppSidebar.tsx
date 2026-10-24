@@ -1,6 +1,7 @@
 import type { PlannerView } from "../../types";
 import { SidebarBrand } from "./SidebarBrand";
 import { SidebarNav } from "./SidebarNav";
+import { Mascot, type MascotMode } from "../chat/Mascot";
 
 const todayFormat = new Intl.DateTimeFormat("ru-RU", {
   weekday: "long",
@@ -16,6 +17,8 @@ export function AppSidebar({
   onSelect,
   onClose,
   onToggleCollapsed,
+  mascotMode,
+  mascotVisible,
 }: {
   view: PlannerView;
   open: boolean;
@@ -24,6 +27,8 @@ export function AppSidebar({
   onSelect: (view: PlannerView) => void;
   onClose: () => void;
   onToggleCollapsed: () => void;
+  mascotMode: MascotMode;
+  mascotVisible: boolean;
 }) {
   const today = todayFormat.format(new Date());
 
@@ -41,13 +46,19 @@ export function AppSidebar({
         onClose={onClose}
         onToggleCollapsed={onToggleCollapsed}
       />
-      <div className="pt-16">
+      <div className="min-h-0 flex-1 pt-16">
         <SidebarNav
           view={view}
           collapsed={collapsed}
           historyCount={historyCount}
           onSelect={onSelect}
         />
+      </div>
+      <div
+        className="relative h-56 shrink-0 border-t border-sidebar-foreground/25"
+        data-testid="sidebar-mascot-line"
+      >
+        {mascotVisible && <Mascot mode={mascotMode} />}
       </div>
     </aside>
   );
