@@ -19,7 +19,7 @@ export function SidebarBrand({
 }) {
   return (
     <div
-      className={`flex items-center gap-2.5 px-4 pt-5 pb-4 ${
+      className={`flex h-16 shrink-0 items-center gap-2.5 px-4 ${
         collapsed ? "md:justify-center md:px-0" : ""
       }`}
     >

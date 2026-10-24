@@ -55,7 +55,7 @@ export function AppSidebar({
         />
       </div>
       <div
-        className="relative h-56 shrink-0 border-t border-sidebar-foreground/25"
+        className="relative h-24 shrink-0 border-t border-sidebar-foreground/25"
         data-testid="sidebar-mascot-line"
       >
         {mascotVisible && <Mascot mode={mascotMode} />}
