@@ -35,7 +35,7 @@ export function BotMessage({
           <OperationReceipt item={item} key={item.id} />
         ))}
         {message.collision_notices?.map((notice) => (
-          <Alert key={notice.collision_id} className="mt-2 border-amber-400 bg-amber-50 text-amber-950">
+          <Alert key={notice.collision_id} className="mt-2 border-lime-400 bg-lime-50 text-lime-950">
             <AlertDescription>{notice.text}</AlertDescription>
           </Alert>
         ))}

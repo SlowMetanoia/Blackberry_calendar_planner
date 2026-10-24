@@ -5,19 +5,19 @@ import {
 } from "../../libs/hooks/use-week-occupancy";
 
 const HEAT_CELL = [
-  "bg-sidebar-foreground/[0.06] text-sidebar-foreground/45",
-  "bg-sidebar-accent/15 text-sidebar-foreground/80",
-  "bg-sidebar-accent/30 text-sidebar-foreground",
-  "bg-sidebar-accent/50 text-sidebar-accent-foreground",
-  "bg-sidebar-accent/80 text-sidebar-accent-foreground",
+  "bg-[#272638] text-[#c8c4cf]/65",
+  "bg-[#3b3552] text-[#d8d2df]/80",
+  "bg-[#504568] text-[#e4ddea]",
+  "bg-[#665575] text-[#f0eaf4]",
+  "bg-[#7d6a89] text-white",
 ];
 
 const HEAT_SWATCH = [
-  "bg-sidebar-foreground/[0.08]",
-  "bg-sidebar-accent/15",
-  "bg-sidebar-accent/30",
-  "bg-sidebar-accent/50",
-  "bg-sidebar-accent/80",
+  "bg-[#272638]",
+  "bg-[#3b3552]",
+  "bg-[#504568]",
+  "bg-[#665575]",
+  "bg-[#7d6a89]",
 ];
 
 const dayFormatter = new Intl.DateTimeFormat("ru-RU", {
@@ -83,7 +83,7 @@ export function WeekHeatmap() {
             key={day.key}
             className={`flex h-12 min-w-0 flex-col items-center justify-center gap-0.5 rounded-md ${
               HEAT_CELL[busyLevel(day.busyMinutes)]
-            } ${day.isToday ? "ring-1 ring-sidebar-primary/80" : ""}`}
+            } ${day.isToday ? "ring-1 ring-[#b7a5c5]" : ""}`}
           >
             <span className="text-[10px] font-medium uppercase tracking-wide opacity-70">
               {day.weekday}
