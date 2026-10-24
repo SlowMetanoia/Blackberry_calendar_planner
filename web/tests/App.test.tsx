@@ -409,6 +409,38 @@ describe("planner chat", () => {
       expect(localStorage.getItem("planner-sidebar-collapsed")).toBe("false"),
     );
   });
+  it("keeps the mascot and decorative line inside the app sidebar", async () => {
+    localStorage.setItem("planner-token", "token");
+    render(<App />);
+
+    const sidebar = screen.getByLabelText("Разделы ежедневника");
+    expect(
+      await within(sidebar).findByTestId("blackberry-mascot"),
+    ).toBeInTheDocument();
+    expect(
+      within(sidebar).getByTestId("sidebar-mascot-line"),
+    ).toBeInTheDocument();
+  });
+  it("keeps the sidebar line when the mascot is hidden", async () => {
+    localStorage.setItem("planner-token", "token");
+    vi.mocked(api.getUserPreferences).mockResolvedValue({
+      timezone: "Europe/Moscow",
+      upcoming_days: 7,
+      open_air_silence_ms: 1500,
+      mascot_visible: false,
+    });
+    render(<App />);
+
+    const sidebar = screen.getByLabelText("Разделы ежедневника");
+    expect(
+      within(sidebar).getByTestId("sidebar-mascot-line"),
+    ).toBeInTheDocument();
+    await waitFor(() =>
+      expect(
+        within(sidebar).queryByTestId("blackberry-mascot"),
+      ).not.toBeInTheDocument(),
+    );
+  });
   it("shows calendar history and opens chat sessions from the always-open right panel", async () => {
     localStorage.setItem("planner-token", "token");
     vi.mocked(api.syncTimeZone).mockResolvedValue({ timezone: "UTC" });

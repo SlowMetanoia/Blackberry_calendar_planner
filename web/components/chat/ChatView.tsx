@@ -13,24 +13,25 @@ import { useSessionStore, useVoiceStore } from "../../libs/stores";
 import { Button } from "../ui/button";
 import { ScrollArea } from "../ui/scroll-area";
 import { ChatComposer } from "./ChatComposer";
-import { Mascot, type MascotMode } from "./Mascot";
+import type { MascotMode } from "./Mascot";
 import { MessageExchange } from "./MessageExchange";
 
 export function ChatView({
   startNewConversation,
   sessionCount,
   onOpenHistory,
+  onMascotModeChange,
 }: {
   startNewConversation: () => void;
   sessionCount: number;
   onOpenHistory: () => void;
+  onMascotModeChange: (mode: MascotMode) => void;
 }) {
   const chat = useRef<HTMLDivElement | null>(null);
   const messages = useSessionStore((state) => state.messages);
   const sendText = useSessionStore((state) => state.sendText);
   const recording = useVoiceStore((state) => state.recording);
   const audioRequestPending = useVoiceStore((state) => state.audioRequestPending);
-  const mascotVisible = useVoiceStore((state) => state.mascotVisible);
   const openAirEnabled = useVoiceStore((state) => state.openAirEnabled);
   const openAirStatus = useVoiceStore((state) => state.openAirStatus);
   const openAirSilenceMs = useVoiceStore((state) => state.openAirSilenceMs);
@@ -55,6 +56,10 @@ export function ChatView({
           textActive
         ? "listen"
         : "idle";
+
+  useEffect(() => {
+    onMascotModeChange(mascotMode);
+  }, [mascotMode, onMascotModeChange]);
 
   const handleSendText = useCallback(
     async (text: string) => {
@@ -158,7 +163,6 @@ export function ChatView({
         onTextActivity={() => setTextActive(true)}
         onTextIdle={() => setTextActive(false)}
       />
-      {mascotVisible && <Mascot mode={mascotMode} />}
     </div>
   );
 }

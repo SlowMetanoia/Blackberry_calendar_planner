@@ -6,6 +6,7 @@ import {
   createPlannerStores,
   usePlannerStores,
   useSessionStore,
+  useVoiceStore,
   useUiStore,
 } from "../libs/stores";
 import type { PlannerView } from "../types";
@@ -14,6 +15,7 @@ import { LoginScreen } from "./auth/LoginScreen";
 import { CalendarView } from "./calendar/CalendarView";
 import { ChatHistorySheet, ChatSidebar } from "./chat/ChatSidebar";
 import { ChatView } from "./chat/ChatView";
+import type { MascotMode } from "./chat/Mascot";
 import { HistoryPanel } from "./history/HistoryPanel";
 import { AppSidebar } from "./shared/AppSidebar";
 import { ErrorToast } from "./shared/ErrorToast";
@@ -52,6 +54,8 @@ function PlannerApp() {
   const setNavOpen = useUiStore((state) => state.setNavOpen);
   const toggleSidebar = useUiStore((state) => state.toggleSidebar);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [mascotMode, setMascotMode] = useState<MascotMode>("idle");
+  const mascotVisible = useVoiceStore((state) => state.mascotVisible);
 
   useEffect(() => {
     if (view !== "chat") setHistoryOpen(false);
@@ -125,6 +129,8 @@ function PlannerApp() {
           onSelect={selectView}
           onClose={() => setNavOpen(false)}
           onToggleCollapsed={toggleSidebar}
+          mascotMode={mascotMode}
+          mascotVisible={mascotVisible}
         />
 
         <section className="flex min-h-0 min-w-0 flex-1 flex-col md:border-l md:border-border/60">
@@ -150,6 +156,7 @@ function PlannerApp() {
               startNewConversation={handleNewConversation}
               sessionCount={sessions.length}
               onOpenHistory={() => setHistoryOpen(true)}
+              onMascotModeChange={setMascotMode}
             />
           </ViewPanel>
 
