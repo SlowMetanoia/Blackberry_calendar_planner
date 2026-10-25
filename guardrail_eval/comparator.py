@@ -18,6 +18,10 @@ def compare_reports(before: dict[str, Any], after: dict[str, Any]) -> dict[str, 
     - critical_regressions: кейсы, ставшие very_bad из ok/acceptable.
     - unchanged: кейсы без изменений.
     """
+    if before.get("mode", "mock") != after.get("mode", "mock"):
+        raise ValueError("Cannot compare mock and live reports")
+    if not before.get("complete", True) or not after.get("complete", True):
+        raise ValueError("Cannot compare incomplete evaluation reports")
     before_cases = {c["case_id"]: c for c in before.get("cases", [])}
     after_cases = {c["case_id"]: c for c in after.get("cases", [])}
 
@@ -27,6 +31,7 @@ def compare_reports(before: dict[str, Any], after: dict[str, Any]) -> dict[str, 
     regressions: list[dict[str, Any]] = []
     critical_regressions: list[dict[str, Any]] = []
     unchanged: list[dict[str, Any]] = []
+    behavior_changes: list[dict[str, Any]] = []
     case_deltas: list[dict[str, Any]] = []
 
     for case_id in sorted(all_case_ids):
@@ -69,6 +74,24 @@ def compare_reports(before: dict[str, Any], after: dict[str, Any]) -> dict[str, 
         b_sev = b["severity"]
         a_sev = a["severity"]
 
+        changed_fields = [
+            key
+            for key in ("actual", "guard", "issues")
+            if _behavior(b.get(key), key) != _behavior(a.get(key), key)
+        ]
+        if b_sev == a_sev and changed_fields:
+            change = {
+                "case_id": case_id,
+                "status": "behavior_changed",
+                "before_severity": b_sev,
+                "after_severity": a_sev,
+                "changed_fields": changed_fields,
+                "before": b,
+                "after": a,
+            }
+            behavior_changes.append(change)
+            case_deltas.append(change)
+            continue
         if b_sev == a_sev:
             unchanged.append({"case_id": case_id, "severity": b_sev})
             case_deltas.append(
@@ -159,6 +182,7 @@ def compare_reports(before: dict[str, Any], after: dict[str, Any]) -> dict[str, 
     return {
         "summary_delta": summary_delta,
         "case_deltas": case_deltas,
+        "behavior_changes": behavior_changes,
         "improvements": improvements,
         "regressions": regressions,
         "critical_regressions": critical_regressions,
@@ -168,7 +192,32 @@ def compare_reports(before: dict[str, Any], after: dict[str, Any]) -> dict[str, 
             "regressed": len(regressions),
             "critical_regressions": len(critical_regressions),
             "unchanged": len(unchanged),
+            "behavior_changed": len(behavior_changes),
             "new": len([d for d in case_deltas if d["status"] == "new"]),
             "removed": len([d for d in case_deltas if d["status"] == "removed"]),
         },
     }
+
+
+def _behavior(value: Any, key: str) -> Any:
+    if not isinstance(value, dict):
+        return value
+    if key == "guard":
+        return {k: value.get(k) for k in ("action", "label", "status", "source")}
+    if key == "actual":
+        stable = {k: value.get(k) for k in ("state", "action", "reply", "mutation_count")}
+        stable["mutations"] = _without_generated_fields(value.get("mutations", []))
+        return stable
+    return value
+
+
+def _without_generated_fields(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {
+            key: _without_generated_fields(item)
+            for key, item in value.items()
+            if key not in {"id", "target_id", "owner_id", "created_at", "updated_at"}
+        }
+    if isinstance(value, list):
+        return [_without_generated_fields(item) for item in value]
+    return value

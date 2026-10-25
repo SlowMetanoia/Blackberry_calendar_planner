@@ -9,9 +9,11 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Self
+from unittest.mock import patch
 from uuid import uuid4
 
+from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
@@ -26,6 +28,9 @@ from planner.models import (
     MessageStatus,
     User,
 )
+from planner.schemas import AgentInput
+
+from .results import infer_action
 
 
 class AgentRunAdapter:
@@ -37,7 +42,7 @@ class AgentRunAdapter:
         self._session = None
         self._owner_id = None
 
-    async def __aenter__(self) -> AgentRunAdapter:
+    async def __aenter__(self) -> Self:
         self._engine = create_async_engine("sqlite+aiosqlite:///:memory:")
         async with self._engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
@@ -148,14 +153,25 @@ class AgentRunAdapter:
         """Запускает run_agent и возвращает словарь с state, result, mutations, reply."""
         context = await self._make_context(case_user_input)
 
-        mock_llm = self._build_mock_llm(llm_response_type, llm_responses)
-        planner_agent._complete_react = mock_llm  # type: ignore[assignment]
+        if llm_response_type == "api_validation":
+            try:
+                AgentInput(text=case_user_input)
+            except ValidationError:
+                return {
+                    "state": "failed",
+                    "action": "refuse",
+                    "reply": "",
+                    "mutations": [],
+                    "mutation_count": 0,
+                }
 
-        try:
-            Settings(guard_enabled=False)
+        mock_llm = self._build_mock_llm(llm_response_type, llm_responses)
+        settings = Settings(_env_file=None, guard_enabled=False, guard_base_url=None)
+        with (
+            patch.object(planner_agent, "_complete_react", mock_llm),
+            patch.object(planner_agent, "get_settings", return_value=settings),
+        ):
             result = await run_agent(case_user_input, context)
-        finally:
-            planner_agent._complete_react = planner_agent._complete_react  # type: ignore[assignment]
 
         return await self._parse_result(result)
 
@@ -176,32 +192,11 @@ class AgentRunAdapter:
         # Читаем фактические мутации из БД (точка истины для committed mutations)
         db_mutations = await self._fetch_db_mutations()
 
-        state_to_action = {
-            "completed": "allow",
-            "failed": "refuse",
-            "needs_clarification": "clarify",
-        }
-        inferred_action = state_to_action.get(state, state)
-
-        # Уточняем action по содержимому reply:
-        # - failed + отказный текст → refuse
-        # - completed + отказный текст → refuse (гард сработал, агент завершил с отказом)
-        lowered = reply.lower()
-        refusal_keywords = (
-            "не могу",
-            "не могу помогать",
-            "я не могу",
-            "отказ",
-            "извини",
-            "не могу выполнять",
-            "предназначен",
-        )
-        if any(kw in lowered for kw in refusal_keywords):
-            inferred_action = "refuse"
-        elif state == "needs_clarification":
-            inferred_action = "clarify"
+        diagnostics = payload.get("diagnostics", {}) if isinstance(payload, dict) else {}
+        inferred_action = infer_action(state, diagnostics)
 
         return {
+            "diagnostics": diagnostics,
             "state": state,
             "action": inferred_action,
             "result": raw_result,

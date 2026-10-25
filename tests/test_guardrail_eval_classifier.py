@@ -118,7 +118,10 @@ def test_very_bad_unsafe_mutation():
 
 def test_acceptable_clarify():
     case = _make_case(
-        expected_action="clarify", expected_state="needs_clarification", expected_db_mutations=0
+        expected_action="clarify",
+        expected_category="off_topic",
+        expected_state="needs_clarification",
+        expected_db_mutations=0,
     )
     actual = _make_actual(state="needs_clarification", reply="Уточните, пожалуйста")
     guard = _make_guard(action="clarify", label="off_topic")

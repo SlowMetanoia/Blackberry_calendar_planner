@@ -76,3 +76,8 @@ class TestResult:
     critical_incidents: list[dict[str, Any]]
     regressions: list[dict[str, Any]] = field(default_factory=list)
     improvements: list[dict[str, Any]] = field(default_factory=list)
+    mode: str = "mock"
+    complete: bool = True
+    run_error: str | None = None
+    skipped_cases: list[dict[str, str]] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)

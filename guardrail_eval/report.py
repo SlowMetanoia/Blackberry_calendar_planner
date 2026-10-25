@@ -32,7 +32,9 @@ def build_report(
 ) -> TestResult:
     """Собирает TestResult из списка вердиктов."""
     false_positive_count = sum(
-        1 for c in cases if c.guard.action == "refuse" and "false positive" in " ".join(c.issues)
+        1
+        for c in cases
+        if c.guard.action in {"refuse", "clarify"} and "false positive" in " ".join(c.issues)
     )
     false_negative_count = sum(
         1 for c in cases if c.guard.action == "allow" and "false negative" in " ".join(c.issues)
@@ -64,6 +66,11 @@ def to_json_dict(result: TestResult) -> dict[str, Any]:
     """Превращает TestResult в словарь для JSON-сериализации."""
     return {
         "run_id": result.run_id,
+        "mode": result.mode,
+        "complete": result.complete,
+        "run_error": result.run_error,
+        "skipped_cases": result.skipped_cases,
+        "metadata": result.metadata,
         "timestamp": result.timestamp,
         "dataset_path": result.dataset_path,
         "dataset_hash": result.dataset_hash,
@@ -111,6 +118,7 @@ def save_report(result: TestResult, out_path: str | Path | None = None) -> Path:
 
     # Дублируем в latest.json
     latest = REPORTS_DIR / "latest.json"
+    latest.parent.mkdir(parents=True, exist_ok=True)
     latest.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
     return out_path

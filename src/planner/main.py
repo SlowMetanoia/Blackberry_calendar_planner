@@ -815,6 +815,7 @@ async def _message_response(message: AgentMessage, session: AsyncSession) -> Age
         status=message.status,
         error=message.error,
         reply=payload.get("reply"),
+        diagnostics=payload.get("diagnostics", {}),
         display_items=unique_display_items,
         operations=payload.get("operations", []),
         requires_new_conversation=payload.get("requires_new_conversation", False),

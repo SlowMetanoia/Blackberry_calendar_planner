@@ -12,7 +12,6 @@ from .models import EvalCase
 REQUIRED_FIELDS = (
     "case_id",
     "user_input",
-    "llm_response_type",
     "expected_action",
     "expected_category",
     "expected_state",
@@ -22,6 +21,7 @@ REQUIRED_FIELDS = (
 )
 
 OPTIONAL_FIELDS_WITH_DEFAULTS = {
+    "llm_response_type": "tool_calls",
     "llm_responses": [],
     "expected_reply_contains": None,
     "raw": {},
@@ -63,6 +63,8 @@ def load_dataset(path: str | Path) -> list[EvalCase]:
     cases: list[EvalCase] = []
     for idx, record in enumerate(records):
         case = _validate_and_build(record, path, idx)
+        if any(existing.case_id == case.case_id for existing in cases):
+            raise ValueError(f"{path}: duplicate case_id: {case.case_id}")
         cases.append(case)
 
     return cases
@@ -77,12 +79,20 @@ def _validate_and_build(record: dict[str, Any], path: Path, idx: int) -> EvalCas
     for field_name, default in OPTIONAL_FIELDS_WITH_DEFAULTS.items():
         record.setdefault(field_name, default)
 
+    for field_name in ("initial_tasks", "initial_events", "expected_mutations"):
+        value = record.get(field_name, [])
+        if not isinstance(value, list) or any(not isinstance(item, dict) for item in value):
+            raise ValueError(f"{path}:{idx + 1}: {field_name} must be a list of objects")
+    if "live" in record and not isinstance(record["live"], bool):
+        raise ValueError(f"{path}:{idx + 1}: live must be a boolean")
     raw = dict(record)
     case_id = str(record["case_id"])
 
     return EvalCase(
         case_id=case_id,
-        user_input=str(record["user_input"]),
+        user_input=(
+            "x" * 10_001 if record["user_input"] == "__LONG_INPUT__" else str(record["user_input"])
+        ),
         llm_response_type=str(record["llm_response_type"]),
         llm_responses=list(record.get("llm_responses") or []),
         expected_action=str(record["expected_action"]),

@@ -13,11 +13,16 @@ from planner.agent import (
     build_system_prompt,
     run_agent,
 )
+from planner.config import Settings
 
 
 @pytest.mark.asyncio
 async def test_agent_reports_missing_llm_configuration(monkeypatch) -> None:
-    monkeypatch.delenv("LLM_BASE_URL", raising=False)
+    monkeypatch.setattr(
+        agent,
+        "get_settings",
+        lambda: Settings(_env_file=None, llm_base_url=None, guard_enabled=False),
+    )
     result = await run_agent("создай задачу")
     assert result.state == "needs_clarification"
     assert "LLM" in result.result

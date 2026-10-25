@@ -3,7 +3,7 @@ import json
 import logging
 import time
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from functools import lru_cache
 from pathlib import Path
@@ -39,8 +39,8 @@ from .llm import (
 from .models import AgentMessage, CalendarOperation, User
 from .occurrences import OccurrenceService
 from .prompts_manager import get_prompts_manager
-from .search import SearchIndexUnavailable
 from .safety import GuardDecision, classify, refusal_for
+from .search import SearchIndexUnavailable
 from .services import EventService, TaskService
 
 logger = logging.getLogger(__name__)
@@ -88,6 +88,8 @@ class AgentState(TypedDict, total=False):
     operations: list[dict]
     known_resources: list[str]
     guard_decision: GuardDecision
+    blocking_guard: dict[str, Any]
+    execution_error: str
 
 
 class LLMProtocolError(RuntimeError):
@@ -461,7 +463,12 @@ async def _call_model(state: AgentState) -> AgentState:
         }
     except LLMProtocolError as exc:
         logger.warning("LLM protocol validation failed: %s", exc)
-        return {"state": "failed", "result": INVALID_DECISION_RESULT, "route": "failed"}
+        return {
+            "state": "failed",
+            "result": INVALID_DECISION_RESULT,
+            "route": "failed",
+            "execution_error": "llm_protocol_error",
+        }
     except httpx.HTTPError as exc:
         logger.warning("LLM request failed: %s", type(exc).__name__)
         return {
@@ -470,10 +477,16 @@ async def _call_model(state: AgentState) -> AgentState:
                 {"reply": "Не удалось связаться с моделью. Попробуйте ещё раз."},
                 ensure_ascii=False,
             ),
+            "execution_error": "llm_http_error",
             "route": "failed",
         }
     except RuntimeError as exc:
-        return {"state": "needs_clarification", "result": str(exc), "route": "failed"}
+        return {
+            "state": "needs_clarification",
+            "result": str(exc),
+            "route": "failed",
+            "execution_error": "llm_configuration_error",
+        }
 
 
 def _route_after_model(state: AgentState) -> Literal["process_model", "clarify", "failed"]:
@@ -740,13 +753,21 @@ async def _validate_terminal(state: AgentState) -> AgentState:
         parsed = FinishResponseArgs.model_validate(args)
         decision = await classify(parsed.reply, get_settings(), source="model_output")
         if decision.action != "allow":
-            return {"reply": refusal_for(decision), "route": "finish"}
+            return {
+                "reply": refusal_for(decision),
+                "route": "finish",
+                "blocking_guard": {**asdict(decision), "source": "model_output"},
+            }
         return {"reply": parsed.reply, "route": "finish"}
     if name == "request_clarification":
         parsed = RequestClarificationArgs.model_validate(args)
         decision = await classify(parsed.question, get_settings(), source="model_output")
         if decision.action != "allow":
-            return {"reply": refusal_for(decision), "route": "clarify"}
+            return {
+                "reply": refusal_for(decision),
+                "route": "clarify",
+                "blocking_guard": {**asdict(decision), "source": "model_output"},
+            }
         return {"reply": parsed.question, "route": "clarify"}
     if name != "commit_calendar_command":
         return {"state": "failed", "result": INVALID_DECISION_RESULT, "route": "failed"}
@@ -756,14 +777,18 @@ async def _validate_terminal(state: AgentState) -> AgentState:
     texts_to_check = [parsed.reply]
     for mutation in parsed.mutations:
         payload = mutation.payload
-        for field in ("title", "description", "location"):
-            value = getattr(payload, field, None)
+        for field_name in ("title", "description", "location"):
+            value = getattr(payload, field_name, None)
             if isinstance(value, str):
                 texts_to_check.append(value)
     for value in texts_to_check:
         decision = await classify(value, settings, source="mutation_payload")
         if decision.action != "allow":
-            return {"reply": refusal_for(decision), "route": "finish"}
+            return {
+                "reply": refusal_for(decision),
+                "route": "finish",
+                "blocking_guard": {**asdict(decision), "source": "mutation_payload"},
+            }
     known = set(state.get("known_resources", []))
     context = state.get("context")
     user = await context.session.get(User, context.owner_id) if context else None
@@ -856,7 +881,9 @@ async def _failed(state: AgentState) -> AgentState:
 async def _blocked(state: AgentState) -> AgentState:
     return {
         "state": state.get("state", "needs_clarification"),
-        "result": state.get("result", json.dumps({"reply": "Запрос отклонён."}, ensure_ascii=False)),
+        "result": state.get(
+            "result", json.dumps({"reply": "Запрос отклонён."}, ensure_ascii=False)
+        ),
     }
 
 
@@ -1018,4 +1045,23 @@ async def run_agent(text: str, context: AgentRunContext | None = None) -> AgentR
     if context is not None:
         initial["context"] = context
     final_state = await _compiled_graph().ainvoke(initial)
-    return AgentResult(final_state["state"], final_state["result"])
+    settings = get_settings()
+    try:
+        payload = json.loads(final_state["result"])
+    except (ValueError, TypeError):
+        payload = {"reply": final_state["result"]}
+    if not isinstance(payload, dict):
+        payload = {"reply": final_state["result"]}
+    decision = final_state.get("guard_decision")
+    payload["diagnostics"] = {
+        "llm_model": settings.llm_model,
+        "model_turns": final_state.get("model_turns", 0),
+        "tool_calls": final_state.get("tool_call_count", 0),
+        "guard_enabled": settings.guard_enabled,
+        "guard_model": settings.guard_model,
+        "input_guard": {**asdict(decision), "source": "user_input"} if decision else {},
+        "blocking_guard": final_state.get("blocking_guard"),
+        "execution_error": final_state.get("execution_error"),
+        "terminal_tool": final_state.get("terminal_call", {}).get("name"),
+    }
+    return AgentResult(final_state["state"], json.dumps(payload, ensure_ascii=False))

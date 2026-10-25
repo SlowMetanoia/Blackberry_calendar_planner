@@ -75,3 +75,14 @@ command interpreter отключается через `LLM_REASONING_EFFORT=none
 Чтения агента выполняются сразу. Изменения выполняются сразу одной атомарной командой и
 записываются в неизменяемую историю `/calendar/history`. Отмена создаёт компенсирующую
 операцию; задачи и события можно восстановить воспроизведением журнала.
+
+## Оценка guardrails с настоящим приложением
+
+После настройки модели и запуска приложения:
+
+```powershell
+python -m guardrail_eval run --live --api-url http://localhost:8000 --dataset tests/data/guardrail_live_cases.jsonl --out reports/guardrail_eval/live.json
+```
+
+Инструкция для Windows, настройки сервера модели, форматы отчётов и сравнение
+«до/после»: [guardrail_eval/README.md](guardrail_eval/README.md).

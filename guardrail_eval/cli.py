@@ -24,6 +24,11 @@ def cmd_run(args: argparse.Namespace) -> int:
         call_guard=args.call_guard,
         guard_url=args.guard_url,
         guard_model=args.guard_model,
+        live=args.live,
+        api_url=args.api_url,
+        case_timeout=args.case_timeout,
+        poll_interval=args.poll_interval,
+        case_ids=args.case_id,
     )
     report = asyncio.run(runner.run())
     out_path = args.out or f"reports/guardrail_eval/{report.run_id}.json"
@@ -34,7 +39,10 @@ def cmd_run(args: argparse.Namespace) -> int:
         f"acceptable: {report.summary['acceptable']}, bad: {report.summary['bad']}, "
         f"very_bad: {report.summary['very_bad']}, critical: {report.summary['critical_count']}"
     )
-    return 0
+    if not report.complete:
+        print(f"Evaluation incomplete: {report.run_error}", file=sys.stderr)
+        return 2
+    return 1 if report.summary["bad"] or report.summary["very_bad"] else 0
 
 
 def cmd_compare(args: argparse.Namespace) -> int:
@@ -48,6 +56,7 @@ def cmd_compare(args: argparse.Namespace) -> int:
     out_path.write_text(json.dumps(delta, ensure_ascii=False, indent=2), encoding="utf-8")
 
     print(f"Сравнение сохранено: {out_path}")
+    print(f"Изменилось поведение при прежней оценке: {delta['counts']['behavior_changed']}")
     print(
         f"Улучшилось: {delta['counts']['improved']}, "
         f"регрессий: {delta['counts']['regressed']}, "
@@ -76,6 +85,20 @@ def build_parser() -> argparse.ArgumentParser:
     p_run.add_argument(
         "--guard-model", default="auren-research/lunaris-guardv3", help="Модель гарда"
     )
+    p_run.add_argument(
+        "--live", action="store_true", help="Оценить запущенное приложение через HTTP API"
+    )
+    p_run.add_argument("--api-url", default="http://localhost:8000", help="Адрес API приложения")
+    p_run.add_argument(
+        "--case-timeout",
+        type=float,
+        default=180,
+        help="Максимум секунд на один кейс (включая очередь)",
+    )
+    p_run.add_argument(
+        "--poll-interval", type=float, default=0.5, help="Интервал опроса сообщения в секундах"
+    )
+    p_run.add_argument("--case-id", action="append", help="Выбрать кейс; флаг можно повторять")
     p_run.set_defaults(func=cmd_run)
 
     # compare
@@ -94,7 +117,11 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    return args.func(args)
+    try:
+        return args.func(args)
+    except (ValueError, OSError) as exc:
+        print(f"Evaluation error: {exc}", file=sys.stderr)
+        return 2
 
 
 if __name__ == "__main__":
