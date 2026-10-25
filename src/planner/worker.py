@@ -11,6 +11,7 @@ from sqlalchemy import select
 from .agent import AgentRunContext, TranscriptionError, run_agent, transcribe
 from .config import get_settings
 from .db import SessionLocal
+from .google_sync_worker import schedule_google_sync
 from .models import AgentMessage, Conversation, MessageStatus, User
 from .schemas import AgentInput
 from .voice import speech_text_for_payload
@@ -124,6 +125,8 @@ async def process_message(ctx: dict, message_id: str) -> None:
                 )
             except Exception:  # noqa: BLE001 - indexing is repaired by the next search
                 logger.warning("Calendar index enqueue failed for owner %s", message.owner_id)
+            if payload.get("operations"):
+                await schedule_google_sync(message.owner_id, get_settings())
         except Retry:
             raise
         except TranscriptionError as exc:

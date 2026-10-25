@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { LogOutIcon } from "lucide-react";
 import { AUTH_EXPIRED_EVENT } from "../api";
+import { googleErrorMessage, takeGoogleReturn } from "../libs/google-return";
 import {
   PlannerStoresProvider,
   createPlannerStores,
@@ -22,6 +23,7 @@ import { ErrorToast } from "./shared/ErrorToast";
 import { PlannerHeader } from "./shared/PlannerHeader";
 import { ViewPanel } from "./shared/ViewPanel";
 import { detachPushSubscription, NotificationCenter } from "./notifications/NotificationCenter";
+import { GoogleCalendarButton } from "./integrations/GoogleCalendarButton";
 
 const viewTitles: Record<PlannerView, string> = {
   chat: "Что запланируем?",
@@ -56,6 +58,23 @@ function PlannerApp() {
   const [historyOpen, setHistoryOpen] = useState(false);
   const [mascotMode, setMascotMode] = useState<MascotMode>("idle");
   const mascotVisible = useVoiceStore((state) => state.mascotVisible);
+  const [googleConnected, setGoogleConnected] = useState(false);
+
+  useEffect(() => {
+    const result = takeGoogleReturn();
+    if (result.loginCode)
+      void stores.session.getState().completeGoogleLogin(result.loginCode);
+    if (result.error)
+      stores.session.getState().setError(googleErrorMessage(result.error));
+    if (result.connected) setGoogleConnected(true);
+  }, [stores]);
+
+  const handleCalendarChanged = useCallback(() => {
+    void stores.session
+      .getState()
+      .handleCalendarChanged()
+      .catch(() => {});
+  }, [stores]);
 
   useEffect(() => {
     if (view !== "chat") setHistoryOpen(false);
@@ -138,6 +157,11 @@ function PlannerApp() {
             title={viewTitles[view]}
             onOpenNav={() => setNavOpen(true)}
           >
+            <GoogleCalendarButton
+              openOnMount={googleConnected}
+              onError={stores.session.getState().setError}
+              onCalendarChanged={handleCalendarChanged}
+            />
             <NotificationCenter onError={stores.session.getState().setError} />
             <Button
               variant="ghost"

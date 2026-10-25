@@ -11,3 +11,14 @@ export type UserPreferences = {
 };
 export type AuthResponse = { access_token: string };
 export type TimezoneResponse = { timezone: string };
+export type GoogleSyncStatus = "idle" | "syncing" | "ok" | "error" | "reauth";
+export type GoogleIntegration = {
+  available: boolean;
+  linked: boolean;
+  email: string | null;
+  calendar_enabled: boolean;
+  sync_status: GoogleSyncStatus | null;
+  last_synced_at: string | null;
+  last_error: string | null;
+  skipped_events: number;
+};

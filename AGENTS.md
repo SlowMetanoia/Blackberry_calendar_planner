@@ -87,3 +87,11 @@ and recurring series are checked for one year. REST editors show the warning dir
 agent commit with overlaps, a response-only model step selects `collision_notices`; raw reports
 remain private and selected notices are rendered and spoken. Mutations are committed before this
 step and cannot be repeated by it. Run `pytest tests/test_collisions.py -q` for focused coverage.
+
+Google sign-in and two-way Google Calendar sync are optional (`GOOGLE_CALENDAR_*`,
+`CALENDAR_TOKEN_KEY`). The `calendar-sync` ARQ service pulls Google changes by `syncToken`
+every minute and pushes planner changes found past `GoogleAccount.pushed_sequence` in the
+operation log. Inbound changes go through `CalendarCommandService` with origin `google`;
+`GoogleEventLink` maps each schedule version (and occurrence override) to a Google event.
+Keep Google HTTP behind `GoogleClient` and test sync against `tests/google_fake.py`. Focused
+checks: `.venv/bin/python -m pytest tests/test_google_mapping.py tests/test_google_sync.py tests/test_google_auth.py -q`.

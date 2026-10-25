@@ -65,7 +65,7 @@ DATETIME_FIELDS = {"task": {"deadline"}, "event": {"starts_at"}, "reminder": {"r
 CREATE_SCHEMAS = {"task": TaskCreate, "event": EventCreate, "reminder": ReminderCreate}
 UPDATE_SCHEMAS = {"task": TaskUpdate, "event": EventUpdate, "reminder": ReminderUpdate}
 OPERATIONS = {"create", "update", "delete"}
-ORIGINS = {"agent", "rest", "undo"}
+ORIGINS = {"agent", "rest", "undo", "google"}
 
 
 def _json_value(value: Any) -> Any:

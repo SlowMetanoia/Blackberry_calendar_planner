@@ -380,7 +380,7 @@ class CalendarOperationResponse(BaseModel):
     before: dict | None
     after: dict | None
     changes: dict
-    origin: Literal["agent", "rest", "undo"]
+    origin: Literal["agent", "rest", "undo", "google"]
     source_message_id: uuid.UUID | None
     reverts_operation_id: uuid.UUID | None
     created_at: datetime
