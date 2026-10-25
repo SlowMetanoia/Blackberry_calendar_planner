@@ -70,6 +70,16 @@ _HARMFUL_PATTERNS = (
     ("violence", r"(как|способ)\s+(убить|взорвать|совершить\s+теракт)"),
 )
 
+_OFF_TOPIC_PATTERNS = (
+    r"рецепт",
+    r"борщ",
+    r"погода",
+    r"новости",
+    r"фильм",
+    r"музыка",
+    r"курс валют",
+)
+
 
 def _contains(patterns: tuple[str, ...], text: str) -> bool:
     return any(re.search(pattern, text, re.IGNORECASE) for pattern in patterns)
@@ -82,6 +92,11 @@ def _deterministic_decision(text: str) -> GuardDecision | None:
             return GuardDecision("refuse", category, 1.0, "deterministic_harmful_pattern")
     if _contains(_INJECTION_PATTERNS, normalized):
         return GuardDecision("refuse", "prompt_injection", 1.0, "deterministic_injection_pattern")
+
+    # === ВАШ НОВЫЙ ГАРД: оффтоп ===
+    if _contains(_OFF_TOPIC_PATTERNS, normalized):
+        return GuardDecision("clarify", "off_topic", 1.0, "deterministic_off_topic")
+    
     return None
 
 
