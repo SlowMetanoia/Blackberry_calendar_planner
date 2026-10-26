@@ -58,6 +58,7 @@ async def test_embedding_client_formats_query_and_validates_dimensions(monkeypat
     assert result == [1.0, 0.0, 0.0]
     assert seen["url"] == "http://lm.test/v1/embeddings"
     assert seen["json"]["input"] == ["task: search result | query: французский"]
+    assert seen["json"]["dimensions"] == 3
 
 
 @pytest.mark.asyncio
