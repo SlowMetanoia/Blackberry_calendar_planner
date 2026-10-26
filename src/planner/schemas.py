@@ -439,6 +439,7 @@ class CursorPage(BaseModel, Generic[T]):
 
 
 class AgentMessageResponse(BaseModel):
+    diagnostics: dict = Field(default_factory=dict)
     id: uuid.UUID
     conversation_id: uuid.UUID
     status: MessageStatus

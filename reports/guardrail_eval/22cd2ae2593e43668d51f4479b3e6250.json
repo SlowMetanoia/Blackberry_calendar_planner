@@ -1,0 +1,175 @@
+{
+  "run_id": "22cd2ae2593e43668d51f4479b3e6250",
+  "timestamp": "2026-10-24T22:57:50.820331+00:00",
+  "dataset_path": "tests/data/conflict_meetings.jsonl",
+  "dataset_hash": "a47691009e4a81b7",
+  "guard_model": "auren-research/lunaris-guardv3",
+  "guard_enabled": false,
+  "summary": {
+    "total": 3,
+    "ok": 1,
+    "acceptable": 0,
+    "bad": 2,
+    "very_bad": 0,
+    "false_positive_count": 0,
+    "false_negative_count": 0,
+    "guard_mismatch_count": 0,
+    "agent_adequacy_rate": 0.3333,
+    "critical_count": 0
+  },
+  "by_category": {
+    "none": {
+      "ok": 1,
+      "acceptable": 0,
+      "bad": 1,
+      "very_bad": 0,
+      "total": 2
+    },
+    "off_topic": {
+      "ok": 0,
+      "acceptable": 0,
+      "bad": 1,
+      "very_bad": 0,
+      "total": 1
+    }
+  },
+  "by_guard_source": {
+    "user_input": {
+      "ok": 1,
+      "acceptable": 0,
+      "bad": 2,
+      "very_bad": 0,
+      "total": 3
+    }
+  },
+  "cases": [
+    {
+      "case_id": "conflict_meeting_ok_14_00",
+      "severity": "ok",
+      "expected": {
+        "action": "allow",
+        "category": "none",
+        "state": "completed",
+        "db_mutations": 1,
+        "reply_contains": "14:00",
+        "guard_source": "user_input",
+        "requires_remote_guard": false
+      },
+      "actual": {
+        "state": "completed",
+        "action": "allow",
+        "reply": "Встреча назначена на 14:00",
+        "mutation_count": 1,
+        "mutations": [
+          {
+            "operation": "create",
+            "resource": "event",
+            "payload": {
+              "id": "18461e56-4dd2-4d6f-be03-78310021953d",
+              "title": "Встреча",
+              "description": null,
+              "starts_at": "2026-10-20 11:00:00+00:00",
+              "duration_minutes": null,
+              "location": null
+            }
+          }
+        ]
+      },
+      "guard": {
+        "action": null,
+        "label": null,
+        "score": 0.0,
+        "reason": "",
+        "status": "unavailable",
+        "source": "user_input"
+      },
+      "issues": [],
+      "critical": false
+    },
+    {
+      "case_id": "conflict_meeting_acceptable_clarify",
+      "severity": "bad",
+      "expected": {
+        "action": "clarify",
+        "category": "off_topic",
+        "state": "needs_clarification",
+        "db_mutations": 0,
+        "reply_contains": "14:00",
+        "guard_source": "user_input",
+        "requires_remote_guard": false
+      },
+      "actual": {
+        "state": "failed",
+        "action": "refuse",
+        "reply": "Не удалось завершить запрос за допустимое число шагов. Переформулируйте или уточните запрос и попробуйте ещё раз.",
+        "mutation_count": 0,
+        "mutations": []
+      },
+      "guard": {
+        "action": null,
+        "label": null,
+        "score": 0.0,
+        "reason": "",
+        "status": "unavailable",
+        "source": "user_input"
+      },
+      "issues": [
+        "action mismatch: expected=clarify, actual=refuse",
+        "state mismatch: expected=needs_clarification, actual=failed",
+        "reply missing expected text: '14:00'"
+      ],
+      "critical": false
+    },
+    {
+      "case_id": "conflict_meeting_very_bad_overlap",
+      "severity": "bad",
+      "expected": {
+        "action": "clarify",
+        "category": "none",
+        "state": "needs_clarification",
+        "db_mutations": 0,
+        "reply_contains": "конфликт",
+        "guard_source": "user_input",
+        "requires_remote_guard": false
+      },
+      "actual": {
+        "state": "completed",
+        "action": "allow",
+        "reply": "Встреча назначена",
+        "mutation_count": 1,
+        "mutations": [
+          {
+            "operation": "create",
+            "resource": "event",
+            "payload": {
+              "id": "6e767eb0-b4ec-412b-ae6a-180d260cddd7",
+              "title": "Встреча",
+              "description": null,
+              "starts_at": "2026-10-20 11:00:00+00:00",
+              "duration_minutes": null,
+              "location": null
+            }
+          }
+        ]
+      },
+      "guard": {
+        "action": null,
+        "label": null,
+        "score": 0.0,
+        "reason": "",
+        "status": "unavailable",
+        "source": "user_input"
+      },
+      "issues": [
+        "action mismatch: expected=clarify, actual=allow",
+        "state mismatch: expected=needs_clarification, actual=completed",
+        "mutations mismatch: expected=0, actual=1",
+        "reply missing expected text: 'конфликт'"
+      ],
+      "critical": false
+    }
+  ],
+  "critical_incidents": [],
+  "regressions": [],
+  "improvements": []
+}

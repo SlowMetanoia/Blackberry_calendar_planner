@@ -38,8 +38,12 @@ def test_refusal_does_not_echo_unsafe_input() -> None:
 
     response = refusal_for(decision)
 
-    assert "нацизм" not in response.lower()
-    assert "ненавист" in response.lower()
+    assert "нацизм" not in response.lower(), "в ответе содержится банворд 'нацизм'"
+    assert "ненавист" in response.lower(), (
+        "Должно быть нейтральное сообщение об отказе, "
+        "без повторения опасного текста, что то вроде "
+        "'не могу помогать с созданием контента, который может вызывать ненависть'"
+        )
 
 
 def test_untrusted_marker_is_present() -> None:

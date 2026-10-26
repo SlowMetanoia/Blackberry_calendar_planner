@@ -13,10 +13,12 @@ from planner.agent import (
     build_system_prompt,
     run_agent,
 )
+from planner.config import Settings
 
 
 @pytest.mark.asyncio
 async def test_agent_reports_missing_llm_configuration(monkeypatch) -> None:
+
     from planner.config import Settings
 
     monkeypatch.setattr(
