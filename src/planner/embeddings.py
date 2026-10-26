@@ -35,7 +35,11 @@ class EmbeddingClient:
                 response = await client.post(
                     url,
                     headers=self._headers(),
-                    json={"model": self.settings.embedding_model, "input": list(texts)},
+                    json={
+                        "model": self.settings.embedding_model,
+                        "input": list(texts),
+                        "dimensions": self.settings.embedding_dimensions,
+                    },
                 )
                 response.raise_for_status()
                 payload = response.json()

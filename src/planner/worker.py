@@ -1,3 +1,4 @@
+import json
 import logging
 import uuid
 from datetime import UTC, datetime
@@ -10,8 +11,10 @@ from sqlalchemy import select
 from .agent import AgentRunContext, TranscriptionError, run_agent, transcribe
 from .config import get_settings
 from .db import SessionLocal
-from .models import AgentMessage, Conversation, MessageStatus
+from .google_sync_worker import schedule_google_sync
+from .models import AgentMessage, Conversation, MessageStatus, User
 from .schemas import AgentInput
+from .voice import speech_text_for_payload
 
 TERMINAL_MESSAGE_STATUSES = {
     MessageStatus.needs_clarification,
@@ -91,11 +94,23 @@ async def process_message(ctx: dict, message_id: str) -> None:
             if result.state != "completed":
                 message.status = MessageStatus(result.state)
                 message.result = result.result
+                try:
+                    owner = await session.get(User, message.owner_id)
+                    message.speech_text = speech_text_for_payload(
+                        json.loads(result.result), owner.timezone if owner else "UTC"
+                    )
+                except (json.JSONDecodeError, TypeError, ValueError, AttributeError):
+                    message.speech_text = None
                 await session.commit()
                 return
 
             message.status = MessageStatus.completed
             message.result = result.result
+            payload = json.loads(result.result)
+            owner = await session.get(User, message.owner_id)
+            message.speech_text = speech_text_for_payload(
+                payload, owner.timezone if owner else "UTC"
+            )
             conversation = await session.get(Conversation, message.conversation_id)
             if conversation is not None:
                 from sqlalchemy import func
@@ -110,6 +125,8 @@ async def process_message(ctx: dict, message_id: str) -> None:
                 )
             except Exception:  # noqa: BLE001 - indexing is repaired by the next search
                 logger.warning("Calendar index enqueue failed for owner %s", message.owner_id)
+            if payload.get("operations"):
+                await schedule_google_sync(message.owner_id, get_settings())
         except Retry:
             raise
         except TranscriptionError as exc:
@@ -119,6 +136,7 @@ async def process_message(ctx: dict, message_id: str) -> None:
             if message is not None:
                 message.status = MessageStatus.failed
                 message.error = str(exc)
+                message.speech_text = str(exc)
                 await session.commit()
         except Exception:
             logger.exception("Agent processing failed for message %s", message_id)
@@ -127,6 +145,7 @@ async def process_message(ctx: dict, message_id: str) -> None:
             if message is not None:
                 message.status = MessageStatus.failed
                 message.error = "Не удалось обработать сообщение. Попробуйте ещё раз."
+                message.speech_text = message.error
                 await session.commit()
             raise
         finally:

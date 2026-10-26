@@ -18,6 +18,9 @@ from planner.config import Settings
 
 @pytest.mark.asyncio
 async def test_agent_reports_missing_llm_configuration(monkeypatch) -> None:
+
+    from planner.config import Settings
+
     monkeypatch.setattr(
         agent,
         "get_settings",
@@ -174,7 +177,7 @@ async def test_system_prompt_contains_local_clock_and_timezone() -> None:
     assert "2026-10-14T19:30:00+03:00" in prompt
     assert "Europe/Moscow" in prompt
     assert "absolute ISO-8601" in prompt
-    assert "both list_tasks and list_events" in prompt
+    assert "list_tasks, list_events, and list_reminders" in prompt
     assert "time_range" in prompt
     assert "complete resulting title" in prompt
     assert "preserve every unrequested part" in prompt

@@ -6,12 +6,13 @@ from typing import Any, Literal, Protocol
 
 from pydantic import Field
 
+from .collision_types import CollisionNotice
 from .config import get_settings
 from .models import User
 from .occurrences import OccurrenceService, occurrence_dict
 from .schemas import DecisionAction, DecisionTimeRange, StrictInput
 from .search import CalendarRetriever
-from .services import EventService, TaskService
+from .services import EventService, ReminderService, TaskService
 
 
 class ToolRuntimeContext(Protocol):
@@ -24,19 +25,25 @@ class ListResourcesArgs(StrictInput):
     limit: int = Field(default=100, ge=1, le=100)
 
 
+class ListTasksArgs(ListResourcesArgs):
+    include_overdue: bool = True
+    include_undated: bool = False
+    status: Literal["open", "completed"] = "open"
+
+
 class GetResourceArgs(StrictInput):
     target_id: uuid.UUID
 
 
 class SearchCalendarArgs(StrictInput):
     query: str = Field(min_length=1, max_length=1000)
-    resource: Literal["all", "task", "event"] = "all"
+    resource: Literal["all", "task", "event", "reminder"] = "all"
     time_range: DecisionTimeRange | None = None
     cursor: str | None = Field(default=None, max_length=4096)
 
 
 class CalendarItemReference(StrictInput):
-    resource: Literal["task", "event"]
+    resource: Literal["task", "event", "reminder"]
     target_id: uuid.UUID
 
 
@@ -46,14 +53,21 @@ class ShowCalendarItemsArgs(StrictInput):
 
 class FinishResponseArgs(StrictInput):
     reply: str = Field(min_length=1, max_length=10_000)
+    speech_reply: str | None = Field(default=None, min_length=1, max_length=1000)
+
+
+class CollisionResponseArgs(FinishResponseArgs):
+    collision_notices: list[CollisionNotice] = Field(default_factory=list, max_length=1000)
 
 
 class RequestClarificationArgs(StrictInput):
     question: str = Field(min_length=1, max_length=10_000)
+    speech_reply: str | None = Field(default=None, min_length=1, max_length=1000)
 
 
 class CommitCalendarCommandArgs(StrictInput):
     reply: str = Field(min_length=1, max_length=10_000)
+    speech_reply: str | None = Field(default=None, min_length=1, max_length=1000)
     mutations: list[DecisionAction] = Field(min_length=1, max_length=50)
 
 
@@ -106,17 +120,59 @@ def _resource_dict(resource: str, row: Any) -> dict[str, Any]:
     )
 
 
-def _list_executor(resource: Literal["task", "event"]) -> ToolExecutor:
+def _list_executor(resource: Literal["task", "event", "reminder"]) -> ToolExecutor:
     async def execute(
         context: ToolRuntimeContext, raw_args: StrictInput, observation_limit: int
     ) -> list[dict[str, Any]]:
-        args = ListResourcesArgs.model_validate(raw_args)
+        args = raw_args
         user = await context.session.get(User, context.owner_id)
         if user is None:
             raise LookupError("agent owner not found")
-        service = TaskService if resource == "task" else EventService
+        service = {"task": TaskService, "event": EventService, "reminder": ReminderService}[
+            resource
+        ]
         time_range = args.time_range
+        if resource == "task" and time_range is not None:
+            from datetime import UTC, datetime
+
+            task_args = ListTasksArgs.model_validate(args)
+            page = await OccurrenceService.page(
+                context.session,
+                user,
+                resource="task",
+                from_datetime=datetime(1970, 1, 1, tzinfo=UTC)
+                if task_args.include_overdue
+                else time_range.from_datetime,
+                to_datetime=time_range.to_datetime,
+                status=task_args.status,
+                limit=min(args.limit, observation_limit),
+            )
+            result = [
+                {"resource": "task", "id": str(item.series_id), "data": occurrence_dict(item)}
+                for item in page.items
+            ]
+            if task_args.include_undated and len(result) < min(args.limit, observation_limit):
+                rows, _ = await TaskService.page(
+                    context.session,
+                    user,
+                    limit=min(args.limit, observation_limit) - len(result),
+                    offset=0,
+                    status=task_args.status,
+                    deadline_presence="undated",
+                )
+                result.extend(_resource_dict("task", row) for row in rows)
+            return result
         if time_range is not None:
+            if resource == "reminder":
+                rows, _total = await service.page(
+                    context.session,
+                    user,
+                    limit=min(args.limit, observation_limit),
+                    offset=0,
+                    from_datetime=time_range.from_datetime,
+                    to_datetime=time_range.to_datetime,
+                )
+                return [_resource_dict(resource, row) for row in rows]
             page = await OccurrenceService.page(
                 context.session,
                 user,
@@ -140,13 +196,14 @@ def _list_executor(resource: Literal["task", "event"]) -> ToolExecutor:
             offset=0,
             from_datetime=time_range.from_datetime if time_range else None,
             to_datetime=time_range.to_datetime if time_range else None,
+            **({"status": args.status} if resource == "task" else {}),
         )
         return [_resource_dict(resource, row) for row in rows]
 
     return execute
 
 
-def _get_executor(resource: Literal["task", "event"]) -> ToolExecutor:
+def _get_executor(resource: Literal["task", "event", "reminder"]) -> ToolExecutor:
     async def execute(
         context: ToolRuntimeContext, raw_args: StrictInput, _observation_limit: int
     ) -> list[dict[str, Any]]:
@@ -154,7 +211,9 @@ def _get_executor(resource: Literal["task", "event"]) -> ToolExecutor:
         user = await context.session.get(User, context.owner_id)
         if user is None:
             raise LookupError("agent owner not found")
-        service = TaskService if resource == "task" else EventService
+        service = {"task": TaskService, "event": EventService, "reminder": ReminderService}[
+            resource
+        ]
         row = await service.get(context.session, user, args.target_id)
         return [] if row is None else [_resource_dict(resource, row)]
 
@@ -196,8 +255,8 @@ def default_tool_registry() -> Mapping[str, AgentTool]:
     tools = [
         AgentTool(
             "list_tasks",
-            "List the current user's tasks, optionally in a half-open deadline range.",
-            ListResourcesArgs,
+            "List actionable tasks before time_range.to, including overdue open tasks by default. Set include_overdue=false for exact dated ranges; include_undated=true only when requested.",
+            ListTasksArgs,
             "read",
             _list_executor("task"),
         ),
@@ -216,6 +275,20 @@ def default_tool_registry() -> Mapping[str, AgentTool]:
             _list_executor("event"),
         ),
         AgentTool(
+            "list_reminders",
+            "List the current user's reminders, optionally in a half-open remind_at range.",
+            ListResourcesArgs,
+            "read",
+            _list_executor("reminder"),
+        ),
+        AgentTool(
+            "get_reminder",
+            "Get one current-user reminder by its UUID.",
+            GetResourceArgs,
+            "read",
+            _get_executor("reminder"),
+        ),
+        AgentTool(
             "get_event",
             "Get one current-user event by its UUID.",
             GetResourceArgs,
@@ -225,7 +298,7 @@ def default_tool_registry() -> Mapping[str, AgentTool]:
         AgentTool(
             "search_calendar",
             (
-                "Search the current user's tasks and events by approximate title or description. "
+                "Search the current user's tasks, events and reminders by approximate title or description. "
                 "Returns threshold-matched exact, substring, fuzzy and semantic evidence. "
                 "Follow next_cursor while has_more is true if no confident match has been found."
             ),

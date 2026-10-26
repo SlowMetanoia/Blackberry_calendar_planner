@@ -5,6 +5,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator, model_validator
 
+from .collision_types import CollisionNotice, CollisionReport
 from .models import MessageStatus
 
 MAX_TEXT_LENGTH = 10_000
@@ -53,12 +54,24 @@ class UserPreferencesResponse(BaseModel):
     timezone: str
     upcoming_days: int
     open_air_silence_ms: int
+    open_air_active_timeout_seconds: int
+    voice_output_enabled: bool
+    tts_voice: Literal["aidar", "baya", "kseniya", "xenia", "eugene"]
+    tts_speed: float
+    open_air_default: bool
+    mascot_visible: bool
 
 
 class UserPreferencesUpdate(StrictInput):
     timezone: str | None = Field(default=None, min_length=1, max_length=64)
     upcoming_days: int | None = Field(default=None, strict=True, ge=1, le=90)
     open_air_silence_ms: int | None = Field(default=None, strict=True, ge=500, le=5000)
+    open_air_active_timeout_seconds: int | None = Field(default=None, strict=True, ge=5, le=300)
+    voice_output_enabled: bool | None = Field(default=None, strict=True)
+    tts_voice: Literal["aidar", "baya", "kseniya", "xenia", "eugene"] | None = None
+    tts_speed: float | None = Field(default=None, ge=0.75, le=1.5)
+    open_air_default: bool | None = Field(default=None, strict=True)
+    mascot_visible: bool | None = Field(default=None, strict=True)
 
     @field_validator("timezone")
     @classmethod
@@ -214,6 +227,117 @@ class EventUpdate(StrictInput):
         return self
 
 
+class ReminderCreate(StrictInput):
+    title: str = Field(min_length=1, max_length=500)
+    description: str | None = Field(default=None, max_length=MAX_TEXT_LENGTH)
+    remind_at: datetime | None = None
+    linked_resource: Literal["task", "event"] | None = None
+    linked_id: uuid.UUID | None = None
+    relative_offset_minutes: int | None = Field(default=None, strict=True)
+
+    @field_validator("remind_at")
+    @classmethod
+    def aware_remind_at(cls, value: datetime | None) -> datetime | None:
+        return _require_aware(value)
+
+    @model_validator(mode="after")
+    def valid_link(self):
+        if self.remind_at is None and self.relative_offset_minutes is None:
+            raise ValueError("remind_at is required for absolute reminders")
+        if self.relative_offset_minutes is not None and (
+            self.linked_resource is None or self.linked_id is None
+        ):
+            raise ValueError("relative reminders require a linked resource")
+        if (self.linked_resource is None) != (self.linked_id is None):
+            raise ValueError("linked_resource and linked_id must be provided together")
+        return self
+
+
+class ReminderUpdate(StrictInput):
+    title: str | None = Field(default=None, min_length=1, max_length=500)
+    description: str | None = Field(default=None, max_length=MAX_TEXT_LENGTH)
+    remind_at: datetime | None = None
+    status: Literal["active", "cancelled"] | None = None
+    relative_offset_minutes: int | None = Field(default=None, strict=True)
+
+    @field_validator("remind_at")
+    @classmethod
+    def aware_remind_at(cls, value: datetime | None) -> datetime | None:
+        return _require_aware(value)
+
+    @model_validator(mode="after")
+    def non_empty(self):
+        if not self.model_fields_set:
+            raise ValueError("update payload must contain at least one field")
+        for name in {"title", "remind_at", "status"} & self.model_fields_set:
+            if getattr(self, name) is None:
+                raise ValueError(f"{name} cannot be null")
+        return self
+
+
+class ReminderResponse(ReminderCreate):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    owner_id: uuid.UUID
+    remind_at: datetime
+    status: Literal["active", "fired", "cancelled"]
+    cancelled_reason: str | None = None
+    fired_at: datetime | None = None
+    cancelled_at: datetime | None = None
+    created_at: datetime
+
+    @field_validator("remind_at")
+    @classmethod
+    def aware_remind_at(cls, value: datetime) -> datetime:
+        from datetime import UTC
+
+        return value if value.tzinfo else value.replace(tzinfo=UTC)
+
+
+class NotificationResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    reminder_id: uuid.UUID
+    title: str
+    body: str | None
+    read_at: datetime | None
+    created_at: datetime
+
+
+class PushSubscriptionPayload(StrictInput):
+    endpoint: str = Field(min_length=1, max_length=4096)
+    p256dh: str = Field(min_length=1, max_length=512)
+    auth: str = Field(min_length=1, max_length=512)
+
+    @field_validator("endpoint")
+    @classmethod
+    def valid_push_service(cls, value: str) -> str:
+        from urllib.parse import urlsplit
+
+        url = urlsplit(value)
+        providers = (
+            "googleapis.com",
+            "push.services.mozilla.com",
+            "notify.windows.com",
+            "push.apple.com",
+        )
+        host = (url.hostname or "").lower()
+        if (
+            url.scheme != "https"
+            or url.username
+            or url.password
+            or url.port not in {None, 443}
+            or not any(host == provider or host.endswith("." + provider) for provider in providers)
+        ):
+            raise ValueError("endpoint must belong to a supported HTTPS browser push service")
+        return value
+
+
+class PushConfigResponse(BaseModel):
+    enabled: bool
+    public_key: str | None = None
+
+
 class TaskResponse(TaskCreate):
     model_config = ConfigDict(from_attributes=True)
     id: uuid.UUID
@@ -224,6 +348,10 @@ class EventResponse(EventCreate):
     model_config = ConfigDict(from_attributes=True)
     id: uuid.UUID
     owner_id: uuid.UUID
+
+
+class EventMutationResponse(EventResponse):
+    collision_report: CollisionReport = Field(default_factory=CollisionReport)
 
 
 class AgentInput(StrictInput):
@@ -244,7 +372,7 @@ class CalendarOperationResponse(BaseModel):
     command_id: uuid.UUID
     ordinal: int
     operation: Literal["create", "update", "delete"]
-    resource: Literal["task", "event"]
+    resource: Literal["task", "event", "reminder"]
     target_id: uuid.UUID
     scope: Literal["series", "occurrence"] = "series"
     occurrence_key: str | None = None
@@ -252,7 +380,7 @@ class CalendarOperationResponse(BaseModel):
     before: dict | None
     after: dict | None
     changes: dict
-    origin: Literal["agent", "rest", "undo"]
+    origin: Literal["agent", "rest", "undo", "google"]
     source_message_id: uuid.UUID | None
     reverts_operation_id: uuid.UUID | None
     created_at: datetime
@@ -281,7 +409,7 @@ class CalendarOperationResponse(BaseModel):
 
 
 class AgentDisplayItemResponse(BaseModel):
-    resource: Literal["task", "event"]
+    resource: Literal["task", "event", "reminder"]
     id: uuid.UUID
     data: dict
 
@@ -294,6 +422,10 @@ class CalendarOccurrenceResponse(BaseModel):
     scheduled_at: datetime
     recurring: bool
     data: dict
+
+
+class EventOccurrenceMutationResponse(CalendarOccurrenceResponse):
+    collision_report: CollisionReport = Field(default_factory=CollisionReport)
 
 
 T = TypeVar("T")
@@ -315,6 +447,8 @@ class AgentMessageResponse(BaseModel):
     input_text: str | None = None
     error: str | None = None
     reply: str | None = None
+    speech_text: str | None = None
+    collision_notices: list[CollisionNotice] = Field(default_factory=list)
     display_items: list[AgentDisplayItemResponse] = Field(default_factory=list)
     operations: list[CalendarOperationResponse] = Field(default_factory=list)
     requires_new_conversation: bool = False
@@ -457,6 +591,27 @@ class DecisionEventDeleteAction(StrictInput):
     occurrence_key: str | None = None
 
 
+class DecisionReminderCreateAction(StrictInput):
+    operation: Literal["create"]
+    resource: Literal["reminder"]
+    target_id: None = None
+    payload: ReminderCreate
+
+
+class DecisionReminderUpdateAction(StrictInput):
+    operation: Literal["update"]
+    resource: Literal["reminder"]
+    target_id: uuid.UUID
+    payload: ReminderUpdate
+
+
+class DecisionReminderDeleteAction(StrictInput):
+    operation: Literal["delete"]
+    resource: Literal["reminder"]
+    target_id: uuid.UUID
+    payload: DecisionDeletePayload
+
+
 DecisionAction = (
     DecisionTaskCreateAction
     | DecisionTaskUpdateAction
@@ -464,4 +619,7 @@ DecisionAction = (
     | DecisionEventCreateAction
     | DecisionEventUpdateAction
     | DecisionEventDeleteAction
+    | DecisionReminderCreateAction
+    | DecisionReminderUpdateAction
+    | DecisionReminderDeleteAction
 )

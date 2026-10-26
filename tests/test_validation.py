@@ -49,6 +49,12 @@ def test_user_preferences_reject_invalid_open_air_silence(value: int) -> None:
         UserPreferencesUpdate(open_air_silence_ms=value)
 
 
+@pytest.mark.parametrize("value", [4, 301, 15.5, "15"])
+def test_user_preferences_reject_invalid_open_air_timeout(value) -> None:
+    with pytest.raises(ValidationError):
+        UserPreferencesUpdate(open_air_active_timeout_seconds=value)
+
+
 def test_user_preferences_reject_empty_patch() -> None:
     with pytest.raises(ValidationError):
         UserPreferencesUpdate()

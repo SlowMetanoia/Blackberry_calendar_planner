@@ -119,17 +119,28 @@ async def test_user_preferences_default_and_partial_update(session, user) -> Non
     assert current.timezone == "Europe/Moscow"
     assert current.upcoming_days == 7
     assert current.open_air_silence_ms == 1500
+    assert current.open_air_active_timeout_seconds == 15
+    assert current.voice_output_enabled is False
+    assert current.tts_voice == "kseniya"
+    assert current.tts_speed == 1.0
+    assert current.open_air_default is False
 
     updated = await update_user_preferences(
-        data=UserPreferencesUpdate(upcoming_days=14, open_air_silence_ms=2000),
+        data=UserPreferencesUpdate(
+            upcoming_days=14,
+            open_air_silence_ms=2000,
+            open_air_active_timeout_seconds=30,
+        ),
         user=user,
         session=session,
     )
     assert updated.timezone == "Europe/Moscow"
     assert updated.upcoming_days == 14
     assert updated.open_air_silence_ms == 2000
+    assert updated.open_air_active_timeout_seconds == 30
     assert user.upcoming_days == 14
     assert user.open_air_silence_ms == 2000
+    assert user.open_air_active_timeout_seconds == 30
 
 
 @pytest.mark.asyncio

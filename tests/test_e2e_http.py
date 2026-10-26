@@ -1,8 +1,11 @@
+import json
 import os
 import time
+from urllib.parse import urlsplit
 
 import httpx
 import pytest
+from websockets.sync.client import connect
 
 BASE_URL = os.getenv("E2E_BASE_URL")
 pytestmark = pytest.mark.skipif(not BASE_URL, reason="requires Compose e2e environment")
@@ -31,6 +34,166 @@ def login(client, email):
     return {"Authorization": f"Bearer {response.json()['access_token']}"}
 
 
+def test_event_collisions_in_rest_and_agent_response():
+    with httpx.Client(base_url=BASE_URL, timeout=20) as client:
+        owner = register(client, "collisions-e2e@example.com")
+        other = register(client, "other-collisions-e2e@example.com")
+        event = {
+            "title": "Существующая встреча",
+            "starts_at": "2026-10-25T15:00:00+03:00",
+            "duration_minutes": 120,
+            "location": "Политех",
+        }
+        first = client.post("/events", headers=owner, json=event)
+        assert first.status_code == 201, first.text
+        assert first.json()["collision_report"]["groups"] == []
+        second = client.post("/events", headers=owner, json={**event, "title": "Другая встреча"})
+        assert len(second.json()["collision_report"]["groups"]) == 1
+        isolated = client.post("/events", headers=other, json=event)
+        assert isolated.json()["collision_report"]["groups"] == []
+        moved = client.patch(
+            f"/events/{second.json()['id']}",
+            headers=owner,
+            json={"starts_at": "2026-10-25T18:00:00+03:00"},
+        )
+        assert moved.status_code == 200, moved.text
+        assert moved.json()["collision_report"]["groups"] == []
+        submitted = client.post(
+            "/agent/messages", headers=owner, json={"text": "создай событие с коллизией"}
+        )
+        completed = wait_message(client, owner, submitted.json()["id"])
+        assert completed["status"] == "completed", completed
+        assert len(completed["operations"]) == 1
+        assert len(completed["collision_notices"]) == 1
+        assert "Возможное пересечение" in completed["speech_text"]
+        assert "collision_report" not in completed
+
+
+def _receive_voice_turn(socket):
+    queued = None
+    terminal = None
+    audio = []
+    for _ in range(30):
+        incoming = socket.recv(timeout=10)
+        if isinstance(incoming, bytes):
+            audio.append(incoming)
+            continue
+        event = json.loads(incoming)
+        if event["type"] == "message":
+            if event["message"]["status"] in {"completed", "needs_clarification", "failed"}:
+                terminal = event["message"]
+            else:
+                queued = event["message"]
+        if event["type"] == "playback_ready":
+            return queued, terminal, audio
+    raise AssertionError("voice turn did not finish")
+
+
+def test_hands_free_stream_accepts_follow_up_without_second_wake_word():
+    with httpx.Client(base_url=BASE_URL, timeout=10) as client:
+        owner = register(client, "hands-free-e2e@example.com")
+        preferences = client.patch(
+            "/users/me/preferences", headers=owner, json={"voice_output_enabled": True}
+        )
+        preferences.raise_for_status()
+        ticket_response = client.post("/voice/session-tickets", headers=owner)
+        ticket_response.raise_for_status()
+        parts = urlsplit(BASE_URL)
+        websocket_url = (
+            f"ws://{parts.netloc}/voice/session?ticket={ticket_response.json()['ticket']}"
+        )
+        with connect(websocket_url, open_timeout=10) as socket:
+            assert json.loads(socket.recv())["state"] == "armed"
+            socket.send(json.dumps({"type": "start"}))
+            assert json.loads(socket.recv())["state"] == "ready"
+            for _ in range(2):
+                socket.send(json.dumps({"type": "utterance_start", "sample_rate": 16_000}))
+                assert json.loads(socket.recv()) == {
+                    "type": "state",
+                    "state": "capturing",
+                    "phase": "command",
+                }
+                socket.send(b"\0\0" * 1_600)
+                socket.send(json.dumps({"type": "utterance_end"}))
+                assert json.loads(socket.recv()) == {
+                    "type": "state",
+                    "state": "processing",
+                    "phase": "command",
+                }
+                transcript = json.loads(socket.recv())
+                assert transcript == {
+                    "type": "transcript",
+                    "text": "создай задачу Голосовая задача",
+                }
+                queued, terminal, audio = _receive_voice_turn(socket)
+                assert queued["input_text"] == "создай задачу Голосовая задача"
+                assert terminal["status"] == "completed", terminal
+                assert terminal["speech_text"].startswith("Создана задача")
+                assert audio and audio[0].startswith(b"RIFF")
+                socket.send(json.dumps({"type": "playback_complete"}))
+                assert json.loads(socket.recv())["state"] == "ready"
+            socket.send(json.dumps({"type": "stop"}))
+            assert json.loads(socket.recv())["state"] == "armed"
+
+        assert client.get("/tasks", headers=owner).json()["total"] == 2
+
+
+def test_reminders_agent_notifier_search_and_linked_undo():
+    with httpx.Client(base_url=BASE_URL, timeout=20) as client:
+        owner = register(client, "reminders-e2e@example.com")
+        other = register(client, "reminders-other@example.com")
+        submitted = client.post(
+            "/agent/messages", headers=owner, json={"text": "создай напоминание"}
+        )
+        submitted.raise_for_status()
+        completed = wait_message(client, owner, submitted.json()["id"])
+        assert completed["status"] == "completed", completed
+        reminder_id = completed["operations"][0]["target_id"]
+        for _ in range(60):
+            inbox = client.get("/notifications", headers=owner).json()
+            if inbox["total"]:
+                break
+            time.sleep(0.2)
+        assert inbox["total"] == 1
+        notice = inbox["items"][0]
+        assert notice["reminder_id"] == reminder_id
+        assert client.get("/notifications", headers=other).json()["total"] == 0
+        assert client.get(f"/reminders/{reminder_id}", headers=other).status_code == 404
+        assert client.get(f"/reminders/{reminder_id}", headers=owner).json()["status"] == "fired"
+        assert client.patch(f"/notifications/{notice['id']}/read", headers=owner).status_code == 200
+        assert client.get("/notifications?unread=true", headers=owner).json()["total"] == 0
+        search = client.post("/agent/messages", headers=owner, json={"text": "найди напоминание"})
+        found = wait_message(client, owner, search.json()["id"])
+        assert found["status"] == "completed", found
+        assert any(item["id"] == reminder_id for item in found["display_items"])
+        event = client.post(
+            "/events", headers=owner, json={"title": "Урок", "starts_at": "2030-01-01T10:00:00Z"}
+        ).json()
+        linked = client.post(
+            "/agent/messages", headers=owner, json={"text": "создай связанное напоминание"}
+        )
+        linked_message = wait_message(client, owner, linked.json()["id"])
+        assert linked_message["status"] == "completed", linked_message
+        ident = linked_message["operations"][0]["target_id"]
+        assert "09:00:00" in client.get(f"/reminders/{ident}", headers=owner).json()["remind_at"]
+        moved = client.patch(
+            f"/events/{event['id']}", headers=owner, json={"starts_at": "2030-01-01T12:00:00Z"}
+        )
+        assert moved.status_code == 200, moved.text
+        assert "11:00:00" in client.get(f"/reminders/{ident}", headers=owner).json()["remind_at"]
+        assert client.delete(f"/events/{event['id']}", headers=owner).status_code == 204
+        assert client.get(f"/reminders/{ident}", headers=owner).json()["status"] == "cancelled"
+        history = client.get("/calendar/history", headers=owner).json()["items"]
+        deleted = next(
+            item
+            for item in history
+            if item["resource"] == "event" and item["operation"] == "delete"
+        )
+        undo = client.post(f"/calendar/history/{deleted['id']}/undo", headers=owner)
+        assert undo.status_code == 201, undo.text
+        assert client.get(f"/reminders/{ident}", headers=owner).json()["status"] == "active"
+
+
 def test_text_voice_history_undo_and_owner_isolation():
     with httpx.Client(base_url=BASE_URL, timeout=10) as client:
         owner = register(client, "owner-e2e@example.com")
@@ -53,17 +216,31 @@ def test_text_voice_history_undo_and_owner_isolation():
             "timezone": "Europe/Moscow",
             "upcoming_days": 7,
             "open_air_silence_ms": 1500,
+            "open_air_active_timeout_seconds": 15,
+            "voice_output_enabled": False,
+            "tts_voice": "kseniya",
+            "tts_speed": 1.0,
+            "open_air_default": False,
         }
         preferences = client.patch(
             "/users/me/preferences",
             headers=owner,
-            json={"upcoming_days": 14, "open_air_silence_ms": 2000},
+            json={
+                "upcoming_days": 14,
+                "open_air_silence_ms": 2000,
+                "open_air_active_timeout_seconds": 30,
+            },
         )
         assert preferences.status_code == 200
         assert preferences.json() == {
             "timezone": "Europe/Moscow",
             "upcoming_days": 14,
             "open_air_silence_ms": 2000,
+            "open_air_active_timeout_seconds": 30,
+            "voice_output_enabled": False,
+            "tts_voice": "kseniya",
+            "tts_speed": 1.0,
+            "open_air_default": False,
         }
         assert (
             client.put(

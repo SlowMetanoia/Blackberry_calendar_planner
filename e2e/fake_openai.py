@@ -1,4 +1,6 @@
+import io
 import json
+import wave
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 
@@ -10,6 +12,13 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()
         self.wfile.write(data)
+
+    def _bytes(self, body, content_type="audio/wav", status=200):
+        self.send_response(status)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
 
     def do_GET(self):
         if self.path.endswith("/models"):
@@ -32,6 +41,15 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"text": "создай задачу Голосовая задача"})
             return
         request = json.loads(raw or b"{}")
+        if self.path.endswith("/audio/speech"):
+            output = io.BytesIO()
+            with wave.open(output, "wb") as audio:
+                audio.setnchannels(1)
+                audio.setsampwidth(2)
+                audio.setframerate(24_000)
+                audio.writeframes(b"\0\0" * 2_400)
+            self._bytes(output.getvalue())
+            return
         if self.path.endswith("/embeddings"):
             inputs = request.get("input", [])
             if isinstance(inputs, str):
@@ -67,13 +85,109 @@ class Handler(BaseHTTPRequestHandler):
                 continue
             for item in tool_payload.get("data", []):
                 key = (item.get("resource"), item.get("id"))
-                if key[0] in {"task", "event"} and key[1] and key not in seen_references:
+                if (
+                    key[0] in {"task", "event", "reminder"}
+                    and key[1]
+                    and key not in seen_references
+                ):
                     observed_references.append({"resource": key[0], "target_id": key[1]})
                     seen_references.add(key)
         earlier_user_messages = [
             message["content"].lower() for message in messages[:-1] if message["role"] == "user"
         ]
-        if "что у меня на завтра" in lowered:
+        if {item["function"]["name"] for item in request.get("tools", [])} == {
+            "finish_collision_response"
+        }:
+            report = json.loads(messages[-2]["content"])["collision_report"]
+            calls = [
+                (
+                    "finish_collision_response",
+                    {
+                        "reply": "Событие сохранено",
+                        "collision_notices": [
+                            {
+                                "collision_id": group["id"],
+                                "text": "Возможное пересечение с существующей встречей в 16:00.",
+                            }
+                            for group in report["groups"]
+                        ],
+                    },
+                )
+            ]
+        elif "создай событие с коллизией" in lowered:
+            calls = [
+                (
+                    "commit_calendar_command",
+                    {
+                        "reply": "Событие создано",
+                        "mutations": [
+                            {
+                                "operation": "create",
+                                "resource": "event",
+                                "payload": {
+                                    "title": "Новая встреча",
+                                    "starts_at": "2026-10-25T16:00:00+03:00",
+                                    "duration_minutes": 60,
+                                },
+                            }
+                        ],
+                    },
+                )
+            ]
+        elif "создай связанное напоминание" in lowered:
+            if last_tool == "list_events":
+                rows = json.loads(messages[-1]["content"]).get("data", [])
+                calls = [
+                    (
+                        "commit_calendar_command",
+                        {
+                            "reply": "Напоминание добавлено",
+                            "mutations": [
+                                {
+                                    "operation": "create",
+                                    "resource": "reminder",
+                                    "payload": {
+                                        "title": "За час до урока",
+                                        "linked_resource": "event",
+                                        "linked_id": rows[0]["id"],
+                                        "relative_offset_minutes": -60,
+                                    },
+                                }
+                            ],
+                        },
+                    )
+                ]
+            else:
+                calls = [("list_events", {})]
+        elif "создай напоминание" in lowered:
+            calls = [
+                (
+                    "commit_calendar_command",
+                    {
+                        "reply": "Напоминание добавлено",
+                        "mutations": [
+                            {
+                                "operation": "create",
+                                "resource": "reminder",
+                                "payload": {
+                                    "title": "Проверить уведомления",
+                                    "remind_at": "2000-01-01T00:00:00Z",
+                                },
+                            }
+                        ],
+                    },
+                )
+            ]
+        elif "найди напоминание" in lowered:
+            if last_tool == "show_calendar_items":
+                calls = [("finish_response", {"reply": "Вот напоминания"})]
+            elif observed and observed_references:
+                calls = [("show_calendar_items", {"items": observed_references})]
+            elif observed:
+                calls = [("finish_response", {"reply": "Ничего не найдено"})]
+            else:
+                calls = [("search_calendar", {"query": "уведомления", "resource": "reminder"})]
+        elif "что у меня на завтра" in lowered:
             time_range = {"from": "2026-10-15T00:00:00+03:00", "to": "2026-10-16T00:00:00+03:00"}
             if last_tool == "show_calendar_items":
                 calls = [("finish_response", {"reply": "Вот ваши задачи и события на завтра"})]

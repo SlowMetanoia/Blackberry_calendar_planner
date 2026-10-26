@@ -17,6 +17,7 @@ from sqlalchemy import select
 
 from .agent_tools import (
     AgentTool,
+    CollisionResponseArgs,
     CommitCalendarCommandArgs,
     FinishResponseArgs,
     RequestClarificationArgs,
@@ -30,6 +31,7 @@ from .calendar import (
     CalendarValidationError,
     operation_dict,
 )
+from .collisions import collision_report
 from .config import get_settings
 from .llm import (
     auth_headers,
@@ -41,7 +43,9 @@ from .occurrences import OccurrenceService
 from .prompts_manager import get_prompts_manager
 from .safety import GuardDecision, classify, refusal_for
 from .search import SearchIndexUnavailable
-from .services import EventService, TaskService
+
+from .services import EventService, ReminderService, TaskService
+
 
 logger = logging.getLogger(__name__)
 INVALID_DECISION_RESULT = json.dumps(
@@ -83,9 +87,12 @@ class AgentState(TypedDict, total=False):
     terminal_call: dict[str, Any]
     route: str
     reply: str
+    speech_reply: str
     observed_resources: list[dict[str, str]]
     display_refs: list[dict[str, str]]
     operations: list[dict]
+    collision_report: dict
+    collision_notices: list[dict]
     known_resources: list[str]
     guard_decision: GuardDecision
     blocking_guard: dict[str, Any]
@@ -191,7 +198,13 @@ def _assistant_history_content(result: str | None) -> str | None:
         return None
     visible = {
         key: value[key]
-        for key in ("reply", "display_items", "operations", "requires_new_conversation")
+        for key in (
+            "reply",
+            "display_items",
+            "operations",
+            "collision_notices",
+            "requires_new_conversation",
+        )
         if key in value
     }
     if "display_items" not in visible and isinstance(value.get("reads"), list):
@@ -237,7 +250,7 @@ def _result_payload(result: str | None) -> dict:
 
 
 def _resource_reference(resource: object, ident: object) -> tuple[str, uuid.UUID] | None:
-    if resource not in {"task", "event"} or not ident:
+    if resource not in {"task", "event", "reminder"} or not ident:
         return None
     try:
         return str(resource), uuid.UUID(str(ident))
@@ -313,7 +326,9 @@ async def _referenced_resource_context(
         return []
     resources: list[dict] = []
     for resource, ident in references:
-        service = TaskService if resource == "task" else EventService
+        service = {"task": TaskService, "event": EventService, "reminder": ReminderService}[
+            resource
+        ]
         row = await service.get(context.session, user, ident)
         if row is None:
             continue
@@ -721,7 +736,9 @@ async def _execute_presentation_tools(state: AgentState) -> AgentState:
             if key is None or key not in known or context is None or user is None:
                 invalid = True
                 break
-            service = TaskService if item.resource == "task" else EventService
+            service = {"task": TaskService, "event": EventService, "reminder": ReminderService}[
+                item.resource
+            ]
             current = await service.get(context.session, user, item.target_id)
             if current is None:
                 invalid = True
@@ -753,22 +770,26 @@ async def _validate_terminal(state: AgentState) -> AgentState:
         parsed = FinishResponseArgs.model_validate(args)
         decision = await classify(parsed.reply, get_settings(), source="model_output")
         if decision.action != "allow":
+
             return {
                 "reply": refusal_for(decision),
                 "route": "finish",
                 "blocking_guard": {**asdict(decision), "source": "model_output"},
             }
         return {"reply": parsed.reply, "route": "finish"}
+
     if name == "request_clarification":
         parsed = RequestClarificationArgs.model_validate(args)
         decision = await classify(parsed.question, get_settings(), source="model_output")
         if decision.action != "allow":
+
             return {
                 "reply": refusal_for(decision),
                 "route": "clarify",
                 "blocking_guard": {**asdict(decision), "source": "model_output"},
             }
         return {"reply": parsed.question, "route": "clarify"}
+
     if name != "commit_calendar_command":
         return {"state": "failed", "result": INVALID_DECISION_RESULT, "route": "failed"}
 
@@ -776,9 +797,11 @@ async def _validate_terminal(state: AgentState) -> AgentState:
     settings = get_settings()
     texts_to_check = [parsed.reply]
     for mutation in parsed.mutations:
+
         payload = mutation.payload
         for field_name in ("title", "description", "location"):
             value = getattr(payload, field_name, None)
+
             if isinstance(value, str):
                 texts_to_check.append(value)
     for value in texts_to_check:
@@ -797,7 +820,9 @@ async def _validate_terminal(state: AgentState) -> AgentState:
         if mutation.operation not in {"update", "delete"}:
             continue
         key = _resource_key(mutation.resource, mutation.target_id)
-        service = TaskService if mutation.resource == "task" else EventService
+        service = {"task": TaskService, "event": EventService, "reminder": ReminderService}[
+            mutation.resource
+        ]
         current = (
             await service.get(context.session, user, mutation.target_id)
             if context is not None and user is not None
@@ -821,6 +846,7 @@ async def _validate_terminal(state: AgentState) -> AgentState:
         }
     return {
         "reply": parsed.reply,
+        "speech_reply": parsed.speech_reply,
         "terminal_call": {**call, "args": parsed},
         "route": "commit",
     }
@@ -867,11 +893,82 @@ async def _commit_mutations(state: AgentState) -> AgentState:
                 ensure_ascii=False,
             ),
         }
-    return {"operations": [operation_dict(item) for item in operations]}
+    serialized = [operation_dict(item) for item in operations]
+    # A response-generation failure must not undo a successfully executed command.
+    await context.session.commit()
+    report = await collision_report(context.session, user, operations)
+    return {"operations": serialized, "collision_report": report.model_dump(mode="json")}
 
 
-def _route_after_commit(state: AgentState) -> Literal["finish", "failed"]:
-    return "failed" if state.get("state") == "failed" else "finish"
+def _route_after_commit(state: AgentState) -> Literal["assess_collisions", "failed"]:
+    return "failed" if state.get("state") == "failed" else "assess_collisions"
+
+
+async def _assess_collisions(state: AgentState) -> AgentState:
+    report = state.get("collision_report", {})
+    groups = report.get("groups", [])
+    if not groups:
+        return {}
+    call = state["terminal_call"]
+    observation = _tool_result_message(
+        call["id"],
+        call["name"],
+        json.dumps(
+            {"ok": True, "operations": state["operations"], "collision_report": report},
+            ensure_ascii=False,
+        ),
+    )
+    instruction = await get_prompts_manager().render("collision_response")
+    tool = AgentTool(
+        "finish_collision_response",
+        "Explain the saved changes and select meaningful overlap warnings.",
+        CollisionResponseArgs,
+        "terminal",
+    )
+    try:
+        message = await _complete_react(
+            [*state["messages"], observation, {"role": "system", "content": instruction}],
+            [tool.openai_schema()],
+        )
+        calls = message.get("tool_calls", [])
+        if len(calls) != 1:
+            raise ValueError("one collision response is required")
+        _, name, arguments = _raw_tool_call(calls[0])
+        if name != tool.name:
+            raise ValueError("only collision response is allowed after commit")
+        args = CollisionResponseArgs.model_validate(_arguments_object(arguments))
+        valid_ids = {group["id"] for group in groups}
+        notices = [item.model_dump() for item in args.collision_notices]
+        if any(item["collision_id"] not in valid_ids for item in notices):
+            raise ValueError("unknown collision reference")
+        if len({item["collision_id"] for item in notices}) != len(notices):
+            raise ValueError("duplicate collision reference")
+        for text in [args.reply, args.speech_reply or "", *(item["text"] for item in notices)]:
+            if (
+                text
+                and (await classify(text, get_settings(), source="model_output")).action != "allow"
+            ):
+                raise ValueError("unsafe collision response")
+        return {
+            "reply": args.reply,
+            "speech_reply": args.speech_reply,
+            "collision_notices": notices,
+        }
+    except Exception:
+        logger.warning("Collision response unavailable after successful commit", exc_info=True)
+        return {
+            "collision_notices": [
+                {
+                    "collision_id": group["id"],
+                    "text": (
+                        f"Возможное пересечение: «{group['occurrences'][0]['first']['data']['title'][:200]}» "
+                        f"и «{group['occurrences'][0]['second']['data']['title'][:200]}». "
+                        "Изменения сохранены; проверьте расписание."
+                    ),
+                }
+                for group in groups
+            ]
+        }
 
 
 async def _failed(state: AgentState) -> AgentState:
@@ -913,7 +1010,9 @@ async def _selected_display_items(state: AgentState) -> list[dict[str, Any]]:
         if parsed is None:
             continue
         resource, ident = parsed
-        service = TaskService if resource == "task" else EventService
+        service = {"task": TaskService, "event": EventService, "reminder": ReminderService}[
+            resource
+        ]
         row = await service.get(context.session, user, ident)
         if row is None:
             continue
@@ -951,12 +1050,18 @@ async def _selected_display_items(state: AgentState) -> list[dict[str, Any]]:
 
 
 async def _final_response_payload(state: AgentState, reply: str) -> dict[str, Any]:
-    return {
+    payload = {
         "reply": reply,
         "display_items": await _selected_display_items(state),
         "observed_resources": state.get("observed_resources", []),
         "operations": state.get("operations", []),
+        "collision_notices": state.get("collision_notices", []),
     }
+    if state.get("collision_report"):
+        payload["collision_report"] = state["collision_report"]
+    if state.get("speech_reply"):
+        payload["speech_reply"] = state["speech_reply"]
+    return payload
 
 
 async def _finish(state: AgentState) -> AgentState:
@@ -978,6 +1083,7 @@ def _compiled_graph():
     graph.add_node("execute_presentations", _execute_presentation_tools)
     graph.add_node("validate_terminal", _validate_terminal)
     graph.add_node("commit_mutations", _commit_mutations)
+    graph.add_node("assess_collisions", _assess_collisions)
     graph.add_node("clarify", _clarify)
     graph.add_node("failed", _failed)
     graph.add_node("blocked", _blocked)
@@ -992,6 +1098,7 @@ def _compiled_graph():
     graph.add_edge("execute_presentations", "call_model")
     graph.add_conditional_edges("validate_terminal", _route_after_terminal)
     graph.add_conditional_edges("commit_mutations", _route_after_commit)
+    graph.add_edge("assess_collisions", "finish")
     graph.add_edge("clarify", END)
     graph.add_edge("failed", END)
     graph.add_edge("finish", END)

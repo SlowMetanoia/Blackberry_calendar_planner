@@ -41,6 +41,39 @@ class Settings(BaseSettings):
     stt_api_key: str | None = None
     stt_model: str = "gigaam-v3-e2e-rnnt"
     audio_max_upload_bytes: int = Field(default=25 * 1024 * 1024, ge=1)
+    voice_ticket_ttl_seconds: int = Field(default=60, ge=10, le=300)
+    voice_max_pcm_bytes: int = Field(default=3_200_000, ge=32_000)
+    voice_max_duration_seconds: int = Field(default=60, ge=1, le=300)
+    voice_terminal_wait_seconds: float = Field(default=180, gt=0)
+    tts_base_url: str | None = None
+    tts_api_key: str | None = None
+    tts_model: str = "v5_6_ru"
+    tts_request_timeout_seconds: float = Field(default=60, gt=0)
+    web_push_vapid_public_key: str | None = None
+    web_push_vapid_private_key: str | None = None
+    web_push_vapid_subject: str | None = None
+    frontend_base_url: str = "http://localhost:3000"
+    google_calendar_client_id: str | None = None
+    google_calendar_client_secret: str | None = None
+    google_calendar_redirect_url: str | None = None
+    calendar_token_key: str | None = None
+    calendar_sync_past_days: int = Field(default=30, ge=0, le=3650)
+    calendar_http_timeout_seconds: float = Field(default=20, gt=0)
+
+    @property
+    def google_enabled(self) -> bool:
+        return bool(
+            self.google_calendar_client_id
+            and self.google_calendar_client_secret
+            and self.calendar_token_key
+        )
+
+    @property
+    def google_redirect_url(self) -> str:
+        return (
+            self.google_calendar_redirect_url
+            or f"{self.frontend_base_url.rstrip('/')}/api/auth/google/callback"
+        )
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

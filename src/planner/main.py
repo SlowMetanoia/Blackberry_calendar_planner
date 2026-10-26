@@ -1,18 +1,35 @@
+import asyncio
+import hashlib
 import json
 import logging
+import secrets
+import tempfile
 import uuid
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
 
+import httpx
 from arq import create_pool
 from arq.connections import RedisSettings
-from fastapi import Depends, FastAPI, File, Header, HTTPException, Query, Request, UploadFile
+from fastapi import (
+    Depends,
+    FastAPI,
+    File,
+    Header,
+    HTTPException,
+    Query,
+    Request,
+    UploadFile,
+    WebSocket,
+    WebSocketDisconnect,
+)
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.websockets import WebSocketDisconnected
 
 from .agent import TranscriptionError, transcribe
 from .calendar import (
@@ -22,10 +39,24 @@ from .calendar import (
     CalendarValidationError,
     UndoConflict,
 )
+from .collisions import collision_report
 from .config import get_settings
-from .db import Base, engine, get_session
+from .db import Base, SessionLocal, engine, get_session
+from .google_routes import router as google_router
+from .google_sync_worker import schedule_google_sync
 from .llm import verify_llm_connection
-from .models import AgentMessage, CalendarOperation, Conversation, Event, MessageStatus, Task, User
+from .models import (
+    AgentMessage,
+    CalendarOperation,
+    Conversation,
+    Event,
+    MessageStatus,
+    Notification,
+    PushSubscription,
+    Reminder,
+    Task,
+    User,
+)
 from .occurrences import OccurrenceService, occurrence_dict, parse_occurrence_key
 from .schemas import (
     AgentInput,
@@ -36,11 +67,19 @@ from .schemas import (
     ConversationSummary,
     CursorPage,
     EventCreate,
+    EventMutationResponse,
+    EventOccurrenceMutationResponse,
     EventResponse,
     EventUpdate,
+    NotificationResponse,
     Page,
     ProblemDetail,
     ProblemFieldError,
+    PushConfigResponse,
+    PushSubscriptionPayload,
+    ReminderCreate,
+    ReminderResponse,
+    ReminderUpdate,
     TaskCreate,
     TaskResponse,
     TaskUpdate,
@@ -50,7 +89,10 @@ from .schemas import (
     UserPreferencesResponse,
     UserPreferencesUpdate,
 )
-from .search import SearchIndexUnavailable, schedule_calendar_index
+from .search import (
+    SearchIndexUnavailable,
+    schedule_calendar_index,
+)
 from .security import (
     AuthSessionContext,
     create_auth_session,
@@ -60,6 +102,12 @@ from .security import (
     verify_password,
 )
 from .services import EventService, TaskService, normalize_datetime
+from .voice import (
+    HandsFreeProtocolError,
+    VoiceConversation,
+    pcm16_wave_bytes,
+    split_speech_text,
+)
 
 AUDIO_DIR = Path("/tmp/planner-audio")
 logger = logging.getLogger(__name__)
@@ -76,6 +124,19 @@ async def lifespan(_app: FastAPI):
 
 
 app = FastAPI(title="Smart Planner API", version="0.1.0", lifespan=lifespan)
+# Re-register each route on the app (as include_router used to): FastAPI 0.16x nests
+# included routers lazily, while app.routes and dependency overrides expect app routes.
+for _route in google_router.routes:
+    app.router.add_api_route(
+        _route.path,
+        _route.endpoint,
+        methods=list(_route.methods),
+        response_model=_route.response_model,
+        status_code=_route.status_code,
+        response_class=_route.response_class,
+        include_in_schema=_route.include_in_schema,
+        name=_route.name,
+    )
 
 
 def _problem(
@@ -149,6 +210,7 @@ async def _schedule_index(owner_id: uuid.UUID) -> None:
         await schedule_calendar_index(owner_id, get_settings())
     except SearchIndexUnavailable:
         logger.warning("Calendar index enqueue failed for owner %s", owner_id)
+    await schedule_google_sync(owner_id, get_settings())
 
 
 async def _save_audio_upload(
@@ -362,12 +424,12 @@ async def delete_task(
     await _schedule_index(user.id)
 
 
-@app.post("/events", response_model=EventResponse, status_code=201)
+@app.post("/events", response_model=EventMutationResponse, status_code=201)
 async def create_event(
     data: EventCreate,
     user: User = Depends(current_user),
     session: AsyncSession = Depends(get_session),
-) -> Event:
+) -> EventMutationResponse:
     operation = (
         await CalendarCommandService.execute(
             session, user, [CalendarMutation("create", "event", data.model_dump())], origin="rest"
@@ -375,7 +437,11 @@ async def create_event(
     )[0]
     await session.commit()
     await _schedule_index(user.id)
-    return await EventService.get(session, user, operation.target_id)
+    report = await collision_report(session, user, [operation])
+    event = await EventService.get(session, user, operation.target_id)
+    return EventMutationResponse.model_validate(event).model_copy(
+        update={"collision_report": report}
+    )
 
 
 @app.get("/events", response_model=Page[EventResponse])
@@ -416,16 +482,16 @@ async def get_event(
     return event
 
 
-@app.patch("/events/{event_id}", response_model=EventResponse)
+@app.patch("/events/{event_id}", response_model=EventMutationResponse)
 async def update_event(
     event_id: uuid.UUID,
     data: EventUpdate,
     effective_from_occurrence_key: str | None = None,
     user: User = Depends(current_user),
     session: AsyncSession = Depends(get_session),
-) -> Event:
+) -> EventMutationResponse:
     try:
-        await CalendarCommandService.execute(
+        operations = await CalendarCommandService.execute(
             session,
             user,
             [
@@ -443,7 +509,11 @@ async def update_event(
         raise HTTPException(404, "Event not found")
     await session.commit()
     await _schedule_index(user.id)
-    return await EventService.get(session, user, event_id)
+    report = await collision_report(session, user, operations)
+    event = await EventService.get(session, user, event_id)
+    return EventMutationResponse.model_validate(event).model_copy(
+        update={"collision_report": report}
+    )
 
 
 @app.delete("/events/{event_id}", status_code=204)
@@ -460,6 +530,253 @@ async def delete_event(
         raise HTTPException(404, "Event not found")
     await session.commit()
     await _schedule_index(user.id)
+
+
+@app.post("/reminders", response_model=ReminderResponse, status_code=201)
+async def create_reminder(
+    data: ReminderCreate,
+    user: User = Depends(current_user),
+    session: AsyncSession = Depends(get_session),
+) -> Reminder:
+    operation = (
+        await CalendarCommandService.execute(
+            session,
+            user,
+            [CalendarMutation("create", "reminder", data.model_dump())],
+            origin="rest",
+        )
+    )[0]
+    await session.commit()
+    await _schedule_index(user.id)
+    return await session.get(Reminder, operation.target_id)
+
+
+@app.get("/reminders", response_model=Page[ReminderResponse])
+async def list_reminders(
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    status: Literal["active", "fired", "cancelled"] | None = None,
+    remind_from: datetime | None = None,
+    remind_to: datetime | None = None,
+    linked_resource: Literal["task", "event"] | None = None,
+    linked_id: uuid.UUID | None = None,
+    user: User = Depends(current_user),
+    session: AsyncSession = Depends(get_session),
+) -> Page[ReminderResponse]:
+    conditions = [Reminder.owner_id == user.id]
+    if remind_from and remind_to and remind_from >= remind_to:
+        raise HTTPException(422, "remind_from must be earlier than remind_to")
+    if linked_resource:
+        conditions.append(Reminder.linked_resource == linked_resource)
+    if linked_id:
+        conditions.append(Reminder.linked_id == linked_id)
+    if status:
+        conditions.append(Reminder.status == status)
+    if remind_from:
+        conditions.append(Reminder.remind_at >= normalize_datetime(remind_from, user))
+    if remind_to:
+        conditions.append(Reminder.remind_at < normalize_datetime(remind_to, user))
+    items = list(
+        (
+            await session.scalars(
+                select(Reminder)
+                .where(*conditions)
+                .order_by(Reminder.remind_at, Reminder.id)
+                .offset(offset)
+                .limit(limit)
+            )
+        ).all()
+    )
+    total = int(
+        await session.scalar(select(func.count()).select_from(Reminder).where(*conditions)) or 0
+    )
+    return Page(items=items, total=total, limit=limit, offset=offset)
+
+
+@app.get("/reminders/{reminder_id}", response_model=ReminderResponse)
+async def get_reminder(
+    reminder_id: uuid.UUID,
+    user: User = Depends(current_user),
+    session: AsyncSession = Depends(get_session),
+) -> Reminder:
+    reminder = await session.scalar(
+        select(Reminder).where(Reminder.id == reminder_id, Reminder.owner_id == user.id)
+    )
+    if reminder is None:
+        raise HTTPException(404, "Reminder not found")
+    return reminder
+
+
+@app.patch("/reminders/{reminder_id}", response_model=ReminderResponse)
+async def update_reminder(
+    reminder_id: uuid.UUID,
+    data: ReminderUpdate,
+    user: User = Depends(current_user),
+    session: AsyncSession = Depends(get_session),
+) -> Reminder:
+    try:
+        await CalendarCommandService.execute(
+            session,
+            user,
+            [
+                CalendarMutation(
+                    "update", "reminder", data.model_dump(exclude_unset=True), reminder_id
+                )
+            ],
+            origin="rest",
+        )
+    except CalendarTargetNotFound as exc:
+        raise HTTPException(404, "Reminder not found") from exc
+    await session.commit()
+    await _schedule_index(user.id)
+    return await session.get(Reminder, reminder_id)
+
+
+@app.delete("/reminders/{reminder_id}", status_code=204)
+async def delete_reminder(
+    reminder_id: uuid.UUID,
+    user: User = Depends(current_user),
+    session: AsyncSession = Depends(get_session),
+) -> None:
+    try:
+        await CalendarCommandService.execute(
+            session, user, [CalendarMutation("delete", "reminder", {}, reminder_id)], origin="rest"
+        )
+    except CalendarTargetNotFound as exc:
+        raise HTTPException(404, "Reminder not found") from exc
+    await session.commit()
+    await _schedule_index(user.id)
+
+
+@app.get("/notifications", response_model=Page[NotificationResponse])
+async def list_notifications(
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    unread: bool = False,
+    user: User = Depends(current_user),
+    session: AsyncSession = Depends(get_session),
+) -> Page[NotificationResponse]:
+    conditions = [Notification.owner_id == user.id]
+    if unread:
+        conditions.append(Notification.read_at.is_(None))
+    items = list(
+        (
+            await session.scalars(
+                select(Notification)
+                .where(*conditions)
+                .order_by(Notification.created_at.desc())
+                .offset(offset)
+                .limit(limit)
+            )
+        ).all()
+    )
+    total = int(
+        await session.scalar(select(func.count()).select_from(Notification).where(*conditions)) or 0
+    )
+    return Page(items=items, total=total, limit=limit, offset=offset)
+
+
+@app.patch("/notifications/{notification_id}/read", response_model=NotificationResponse)
+async def mark_notification_read(
+    notification_id: uuid.UUID,
+    user: User = Depends(current_user),
+    session: AsyncSession = Depends(get_session),
+) -> Notification:
+    notification = await session.scalar(
+        select(Notification).where(
+            Notification.id == notification_id, Notification.owner_id == user.id
+        )
+    )
+    if notification is None:
+        raise HTTPException(404, "Notification not found")
+    notification.read_at = datetime.now(UTC)
+    await session.commit()
+    return notification
+
+
+@app.post("/notifications/read-all", status_code=204)
+async def mark_all_notifications_read(
+    user: User = Depends(current_user), session: AsyncSession = Depends(get_session)
+) -> None:
+
+    await session.execute(
+        update(Notification)
+        .where(Notification.owner_id == user.id, Notification.read_at.is_(None))
+        .values(read_at=datetime.now(UTC))
+    )
+    await session.commit()
+
+
+@app.delete("/notifications/{notification_id}", status_code=204)
+async def delete_notification(
+    notification_id: uuid.UUID,
+    user: User = Depends(current_user),
+    session: AsyncSession = Depends(get_session),
+) -> None:
+    notification = await session.scalar(
+        select(Notification).where(
+            Notification.id == notification_id, Notification.owner_id == user.id
+        )
+    )
+    if notification is None:
+        raise HTTPException(404, "Notification not found")
+    await session.delete(notification)
+    await session.commit()
+
+
+@app.get("/notifications/push/config", response_model=PushConfigResponse)
+async def push_config() -> PushConfigResponse:
+    settings = get_settings()
+    return PushConfigResponse(
+        enabled=bool(
+            settings.web_push_vapid_public_key
+            and settings.web_push_vapid_private_key
+            and settings.web_push_vapid_subject
+        ),
+        public_key=settings.web_push_vapid_public_key,
+    )
+
+
+@app.put("/notifications/push/subscription", status_code=204)
+async def upsert_push_subscription(
+    data: PushSubscriptionPayload,
+    user: User = Depends(current_user),
+    session: AsyncSession = Depends(get_session),
+) -> None:
+    await session.execute(
+        update(PushSubscription)
+        .where(PushSubscription.endpoint == data.endpoint, PushSubscription.owner_id != user.id)
+        .values(active=False)
+    )
+    subscription = await session.scalar(
+        select(PushSubscription).where(
+            PushSubscription.owner_id == user.id, PushSubscription.endpoint == data.endpoint
+        )
+    )
+    if subscription is None:
+        subscription = PushSubscription(owner_id=user.id, **data.model_dump())
+        session.add(subscription)
+    else:
+        subscription.p256dh = data.p256dh
+        subscription.auth = data.auth
+        subscription.active = True
+    await session.commit()
+
+
+@app.delete("/notifications/push/subscription", status_code=204)
+async def delete_push_subscription(
+    data: PushSubscriptionPayload,
+    user: User = Depends(current_user),
+    session: AsyncSession = Depends(get_session),
+) -> None:
+    subscription = await session.scalar(
+        select(PushSubscription).where(
+            PushSubscription.owner_id == user.id, PushSubscription.endpoint == data.endpoint
+        )
+    )
+    if subscription is not None:
+        subscription.active = False
+        await session.commit()
 
 
 @app.get("/calendar/occurrences", response_model=CursorPage[CalendarOccurrenceResponse])
@@ -539,7 +856,15 @@ async def _update_occurrence(
     data = operation.after_state or {}
     schedule_field = "deadline" if resource == "task" else "starts_at"
     scheduled_at = data[schedule_field]
-    return CalendarOccurrenceResponse(
+    response_type = (
+        EventOccurrenceMutationResponse if resource == "event" else CalendarOccurrenceResponse
+    )
+    extra = (
+        {"collision_report": await collision_report(session, user, [operation])}
+        if resource == "event"
+        else {}
+    )
+    return response_type(
         resource=resource,
         series_id=target_id,
         occurrence_key=occurrence_key,
@@ -547,6 +872,7 @@ async def _update_occurrence(
         scheduled_at=scheduled_at,
         recurring=True,
         data=data,
+        **extra,
     )
 
 
@@ -604,7 +930,8 @@ async def delete_task_occurrence(
 
 
 @app.patch(
-    "/events/{event_id}/occurrences/{occurrence_key}", response_model=CalendarOccurrenceResponse
+    "/events/{event_id}/occurrences/{occurrence_key}",
+    response_model=EventOccurrenceMutationResponse,
 )
 async def update_event_occurrence(
     event_id: uuid.UUID,
@@ -800,7 +1127,7 @@ async def _message_response(message: AgentMessage, session: AsyncSession) -> Age
                 ident = uuid.UUID(str(item.get("id")))
             except (TypeError, ValueError, AttributeError):
                 continue
-            if resource not in {"task", "event"}:
+            if resource not in {"task", "event", "reminder"}:
                 continue
             key = (resource, ident)
             if key in seen_display_items:
@@ -815,7 +1142,12 @@ async def _message_response(message: AgentMessage, session: AsyncSession) -> Age
         status=message.status,
         error=message.error,
         reply=payload.get("reply"),
+
         diagnostics=payload.get("diagnostics", {}),
+
+        speech_text=message.speech_text,
+        collision_notices=payload.get("collision_notices", []),
+
         display_items=unique_display_items,
         operations=payload.get("operations", []),
         requires_new_conversation=payload.get("requires_new_conversation", False),
@@ -880,6 +1212,249 @@ async def transcribe_audio(
         logger.warning("Open-air transcription unavailable: %s", type(exc).__name__)
         raise HTTPException(503, "Сервис распознавания речи временно недоступен") from exc
     return TranscriptionResponse(text=text)
+
+
+def _voice_ticket_key(ticket: str) -> str:
+    return f"voice-ticket:{hashlib.sha256(ticket.encode()).hexdigest()}"
+
+
+async def _redis_pool():
+    return await create_pool(RedisSettings.from_dsn(get_settings().redis_url))
+
+
+@app.get("/voice/capabilities")
+async def voice_capabilities(_user: User = Depends(current_user)) -> dict:
+    settings = get_settings()
+    return {
+        "stt": {"configured": bool(settings.stt_base_url), "sample_rate": 16_000},
+        "tts": {
+            "configured": bool(settings.tts_base_url),
+            "model": settings.tts_model,
+            "voices": ["aidar", "baya", "kseniya", "xenia", "eugene"],
+            "sample_rate": 24_000,
+        },
+    }
+
+
+@app.post("/voice/session-tickets", status_code=201)
+async def create_voice_session_ticket(user: User = Depends(current_user)) -> dict:
+    settings = get_settings()
+    ticket = secrets.token_urlsafe(32)
+    pool = await _redis_pool()
+    try:
+        await pool.setex(
+            _voice_ticket_key(ticket),
+            settings.voice_ticket_ttl_seconds,
+            str(user.id),
+        )
+    finally:
+        await pool.close()
+    return {"ticket": ticket, "expires_in": settings.voice_ticket_ttl_seconds}
+
+
+async def _consume_voice_ticket(ticket: str) -> uuid.UUID | None:
+    pool = await _redis_pool()
+    try:
+        raw = await pool.execute_command("GETDEL", _voice_ticket_key(ticket))
+    finally:
+        await pool.close()
+    if raw is None:
+        return None
+    try:
+        return uuid.UUID(raw.decode() if isinstance(raw, bytes) else str(raw))
+    except ValueError:
+        return None
+
+
+async def _tts_audio(text: str, *, voice: str, speed: float) -> bytes:
+    settings = get_settings()
+    if not settings.tts_base_url:
+        raise RuntimeError("TTS is not configured")
+    headers = {"Content-Type": "application/json"}
+    if settings.tts_api_key:
+        headers["Authorization"] = f"Bearer {settings.tts_api_key}"
+    async with httpx.AsyncClient(timeout=settings.tts_request_timeout_seconds) as client:
+        response = await client.post(
+            f"{settings.tts_base_url.rstrip('/')}/v1/audio/speech",
+            headers=headers,
+            json={"model": settings.tts_model, "voice": voice, "speed": speed, "input": text},
+        )
+        response.raise_for_status()
+        return response.content
+
+
+async def _transcribe_pcm(pcm: bytes) -> str:
+    path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as output:
+            output.write(pcm16_wave_bytes(pcm))
+            path = Path(output.name)
+        return await transcribe(str(path))
+    finally:
+        if path is not None:
+            path.unlink(missing_ok=True)
+
+
+async def _wait_for_terminal_message(message_id: uuid.UUID) -> AgentMessage:
+    deadline = asyncio.get_running_loop().time() + get_settings().voice_terminal_wait_seconds
+    while asyncio.get_running_loop().time() < deadline:
+        async with SessionLocal() as session:
+            message = await session.get(AgentMessage, message_id)
+            if message is not None and message.status in {
+                MessageStatus.completed,
+                MessageStatus.needs_clarification,
+                MessageStatus.failed,
+            }:
+                return message
+        await asyncio.sleep(0.5)
+    raise TimeoutError("voice turn timed out")
+
+
+async def _send_tts(websocket: WebSocket, user: User, message: AgentMessage) -> bool:
+    if not user.voice_output_enabled or not message.speech_text:
+        return False
+    chunks = split_speech_text(message.speech_text)
+    audio_sent = False
+    try:
+        for index, phrase in enumerate(chunks):
+            audio = await _tts_audio(phrase, voice=user.tts_voice, speed=user.tts_speed)
+            await websocket.send_json(
+                {"type": "tts_phrase", "index": index, "count": len(chunks), "text": phrase}
+            )
+            await websocket.send_bytes(audio)
+            audio_sent = True
+    except (httpx.HTTPError, RuntimeError):
+        logger.warning("TTS unavailable for message %s", message.id)
+        await websocket.send_json(
+            {"type": "tts_unavailable", "message": "Голосовой вывод временно недоступен"}
+        )
+    return audio_sent
+
+
+async def _finish_tts(websocket: WebSocket, user: User, message: AgentMessage) -> None:
+    event_type = (
+        "playback_ready" if await _send_tts(websocket, user, message) else "playback_skipped"
+    )
+    await websocket.send_json({"type": event_type})
+
+
+@app.websocket("/voice/session")
+async def voice_session(websocket: WebSocket, ticket: str) -> None:
+    owner_id = await _consume_voice_ticket(ticket)
+    if owner_id is None:
+        await websocket.close(code=4401, reason="Invalid or expired voice ticket")
+        return
+    await websocket.accept()
+    settings = get_settings()
+    state = VoiceConversation(
+        max_pcm_bytes=settings.voice_max_pcm_bytes,
+        max_duration_seconds=settings.voice_max_duration_seconds,
+    )
+    conversation_id: uuid.UUID | None = None
+    utterance_phase: Literal["wake", "command"] | None = None
+    await websocket.send_json({"type": "state", "state": "armed"})
+    try:
+        while True:
+            incoming = await websocket.receive()
+            if incoming.get("type") == "websocket.disconnect":
+                return
+            if incoming.get("bytes") is not None:
+                state.add_pcm(incoming["bytes"])
+                continue
+            raw = incoming.get("text")
+            if raw is None:
+                continue
+            event = json.loads(raw)
+            event_type = event.get("type")
+            if event_type == "start":
+                state.activate()
+                await websocket.send_json({"type": "state", "state": "ready"})
+            elif event_type == "utterance_start":
+                logger.info("Voice utterance started for owner %s", owner_id)
+                utterance_phase = "command" if state.active else "wake"
+                state.begin_utterance(sample_rate=int(event.get("sample_rate", 16_000)))
+                await websocket.send_json(
+                    {"type": "state", "state": "capturing", "phase": utterance_phase}
+                )
+            elif event_type == "utterance_end":
+                logger.info("Voice utterance ended for owner %s", owner_id)
+                if utterance_phase is None:
+                    raise HandsFreeProtocolError("voice utterance was not started")
+                phase = utterance_phase
+                state.start_turn()
+                await websocket.send_json({"type": "state", "state": "processing", "phase": phase})
+                try:
+                    transcript = await _transcribe_pcm(state.finish_utterance())
+                    logger.info("Voice utterance transcribed for owner %s", owner_id)
+                    await websocket.send_json({"type": "transcript", "text": transcript})
+                    command = state.accept_transcript(transcript)
+                    if command is None:
+                        await websocket.send_json(
+                            {"type": "state", "state": "ready" if state.active else "armed"}
+                        )
+                        continue
+                    if not command:
+                        await websocket.send_json({"type": "state", "state": "ready"})
+                        continue
+                    async with SessionLocal() as session:
+                        user = await session.get(User, owner_id)
+                        if user is None:
+                            await websocket.close(code=4401)
+                            return
+                        message = await _new_message(
+                            user,
+                            session,
+                            text=command,
+                            audio_path=None,
+                            conversation_id=conversation_id,
+                            idempotency_key=None,
+                        )
+                        conversation_id = message.conversation_id
+                        queued_response = await _message_response(message, session)
+                    await websocket.send_json(
+                        {"type": "message", "message": queued_response.model_dump(mode="json")}
+                    )
+                    terminal = await _wait_for_terminal_message(message.id)
+                    async with SessionLocal() as session:
+                        response = await _message_response(terminal, session)
+                        user = await session.get(User, owner_id)
+                    await websocket.send_json(
+                        {"type": "message", "message": response.model_dump(mode="json")}
+                    )
+                    await websocket.send_json({"type": "state", "state": "speaking"})
+                    if user is not None:
+                        await _finish_tts(websocket, user, terminal)
+                    else:
+                        await websocket.send_json({"type": "playback_skipped"})
+                finally:
+                    utterance_phase = None
+                    state.finish_turn()
+            elif event_type == "playback_complete":
+                await websocket.send_json(
+                    {"type": "state", "state": "ready" if state.active else "armed"}
+                )
+            elif event_type == "repeat":
+                async with SessionLocal() as session:
+                    message = await session.scalar(
+                        select(AgentMessage).where(
+                            AgentMessage.id == uuid.UUID(str(event.get("message_id"))),
+                            AgentMessage.owner_id == owner_id,
+                        )
+                    )
+                    user = await session.get(User, owner_id)
+                if message is None or user is None or not message.speech_text:
+                    await websocket.send_json({"type": "error", "message": "Ответ не найден"})
+                else:
+                    await _finish_tts(websocket, user, message)
+            elif event_type == "stop":
+                state.active = False
+                utterance_phase = None
+                await websocket.send_json({"type": "state", "state": "armed"})
+    except HandsFreeProtocolError as exc:
+        await websocket.send_json({"type": "error", "message": str(exc)})
+        await websocket.close(code=1009)
+    except (WebSocketDisconnect, WebSocketDisconnected, json.JSONDecodeError):
+        return
 
 
 @app.get("/agent/messages/{message_id}", response_model=AgentMessageResponse)

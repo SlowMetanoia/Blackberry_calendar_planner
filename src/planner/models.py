@@ -10,6 +10,7 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     Enum,
+    Float,
     ForeignKey,
     Index,
     String,
@@ -40,6 +41,15 @@ class User(Base):
             "open_air_silence_ms BETWEEN 500 AND 5000",
             name="ck_users_open_air_silence_range",
         ),
+        CheckConstraint(
+            "open_air_active_timeout_seconds BETWEEN 5 AND 300",
+            name="ck_users_open_air_active_timeout_range",
+        ),
+        CheckConstraint("tts_speed BETWEEN 0.75 AND 1.5", name="ck_users_tts_speed_range"),
+        CheckConstraint(
+            "tts_voice IN ('aidar', 'baya', 'kseniya', 'xenia', 'eugene')",
+            name="ck_users_tts_voice",
+        ),
     )
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     email: Mapped[str] = mapped_column(String(320), unique=True, index=True)
@@ -47,6 +57,14 @@ class User(Base):
     timezone: Mapped[str] = mapped_column(String(64), default="UTC")
     upcoming_days: Mapped[int] = mapped_column(default=7, server_default="7")
     open_air_silence_ms: Mapped[int] = mapped_column(default=1500, server_default="1500")
+    open_air_active_timeout_seconds: Mapped[int] = mapped_column(default=15, server_default="15")
+    voice_output_enabled: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="false"
+    )
+    tts_voice: Mapped[str] = mapped_column(String(32), default="kseniya", server_default="kseniya")
+    tts_speed: Mapped[float] = mapped_column(Float, default=1.0, server_default="1.0")
+    open_air_default: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    mascot_visible: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -123,6 +141,109 @@ class Event(Base):
     recurrence_version_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
 
 
+class Reminder(Base):
+    __tablename__ = "reminders"
+    __table_args__ = (
+        CheckConstraint(
+            "(linked_id IS NULL) = (linked_resource IS NULL)", name="ck_reminders_link_pair"
+        ),
+        CheckConstraint(
+            "description IS NULL OR length(description) <= 10000",
+            name="ck_reminders_description_length",
+        ),
+        Index("ix_reminders_link", "owner_id", "linked_resource", "linked_id"),
+        CheckConstraint("length(trim(title)) > 0", name="ck_reminders_title_not_blank"),
+        CheckConstraint("length(title) <= 500", name="ck_reminders_title_length"),
+        CheckConstraint("status IN ('active', 'fired', 'cancelled')", name="ck_reminders_status"),
+        CheckConstraint(
+            "linked_resource IS NULL OR linked_resource IN ('task', 'event')",
+            name="ck_reminders_linked_resource",
+        ),
+        CheckConstraint(
+            "(relative_offset_minutes IS NULL) OR linked_resource IS NOT NULL",
+            name="ck_reminders_relative_link",
+        ),
+        Index("ix_reminders_due", "status", "remind_at"),
+        Index("ix_reminders_owner_due", "owner_id", "status", "remind_at"),
+    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    owner_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    title: Mapped[str] = mapped_column(String(500))
+    description: Mapped[str | None] = mapped_column(Text())
+    remind_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    status: Mapped[str] = mapped_column(String(16), default="active", server_default="active")
+    linked_resource: Mapped[str | None] = mapped_column(String(16))
+    linked_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    relative_offset_minutes: Mapped[int | None] = mapped_column()
+    cancelled_reason: Mapped[str | None] = mapped_column(String(255))
+    fired_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class Notification(Base):
+    __tablename__ = "notifications"
+    __table_args__ = (
+        UniqueConstraint("reminder_id"),
+        Index("ix_notifications_owner_created", "owner_id", "created_at"),
+    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    owner_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    reminder_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("reminders.id", ondelete="CASCADE"), nullable=False
+    )
+    title: Mapped[str] = mapped_column(String(500))
+    body: Mapped[str | None] = mapped_column(Text())
+    read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class PushSubscription(Base):
+    __tablename__ = "push_subscriptions"
+    __table_args__ = (UniqueConstraint("owner_id", "endpoint"),)
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    owner_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    endpoint: Mapped[str] = mapped_column(Text())
+    p256dh: Mapped[str] = mapped_column(Text())
+    auth: Mapped[str] = mapped_column(Text())
+    active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class NotificationDelivery(Base):
+    __tablename__ = "notification_deliveries"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('pending', 'sent', 'failed', 'discarded')", name="ck_delivery_status"
+        ),
+        CheckConstraint("attempts >= 0", name="ck_delivery_attempts"),
+        UniqueConstraint("notification_id", "subscription_id"),
+        Index("ix_notification_deliveries_pending", "status", "next_attempt_at"),
+    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    notification_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("notifications.id", ondelete="CASCADE"), nullable=False
+    )
+    subscription_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("push_subscriptions.id", ondelete="CASCADE"), nullable=False
+    )
+    status: Mapped[str] = mapped_column(String(16), default="pending", server_default="pending")
+    attempts: Mapped[int] = mapped_column(default=0, server_default="0")
+    next_attempt_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True
+    )
+    last_error: Mapped[str | None] = mapped_column(Text())
+
+
 class CalendarScheduleVersion(Base):
     __tablename__ = "calendar_schedule_versions"
     __table_args__ = (
@@ -166,7 +287,9 @@ class CalendarOccurrenceException(Base):
 class CalendarSearchDocument(Base):
     __tablename__ = "calendar_search_documents"
     __table_args__ = (
-        CheckConstraint("resource IN ('task', 'event')", name="ck_search_documents_resource"),
+        CheckConstraint(
+            "resource IN ('task', 'event', 'reminder')", name="ck_search_documents_resource"
+        ),
         Index("ix_search_documents_owner_resource", "owner_id", "resource"),
     )
     owner_id: Mapped[uuid.UUID] = mapped_column(
@@ -234,6 +357,7 @@ class AgentMessage(Base):
     audio_path: Mapped[str | None] = mapped_column(String(1000))
     status: Mapped[MessageStatus] = mapped_column(Enum(MessageStatus), default=MessageStatus.queued)
     result: Mapped[str | None] = mapped_column(Text())
+    speech_text: Mapped[str | None] = mapped_column(Text())
     error: Mapped[str | None] = mapped_column(Text())
     idempotency_key: Mapped[str | None] = mapped_column(String(255))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
@@ -265,10 +389,12 @@ class CalendarOperation(Base):
             "operation IN ('create', 'update', 'delete')",
             name="ck_calendar_operations_operation",
         ),
-        CheckConstraint("resource IN ('task', 'event')", name="ck_calendar_operations_resource"),
+        CheckConstraint(
+            "resource IN ('task', 'event', 'reminder')", name="ck_calendar_operations_resource"
+        ),
         CheckConstraint("scope IN ('series', 'occurrence')", name="ck_calendar_operations_scope"),
         CheckConstraint(
-            "origin IN ('agent', 'rest', 'undo')", name="ck_calendar_operations_origin"
+            "origin IN ('agent', 'rest', 'undo', 'google')", name="ck_calendar_operations_origin"
         ),
         CheckConstraint(
             "(operation = 'create' AND before_state IS NULL AND after_state IS NOT NULL) OR "
@@ -304,3 +430,59 @@ class CalendarOperation(Base):
         ForeignKey("calendar_operations.id", ondelete="SET NULL"), index=True
     )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class GoogleAccount(Base):
+    """A user's linked Google identity and the calendar sync cursor."""
+
+    __tablename__ = "google_accounts"
+    __table_args__ = (
+        CheckConstraint(
+            "sync_status IN ('idle', 'syncing', 'ok', 'error', 'reauth')",
+            name="ck_google_accounts_sync_status",
+        ),
+        CheckConstraint("pushed_sequence >= 0", name="ck_google_accounts_pushed_sequence"),
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    subject: Mapped[str] = mapped_column(String(255), unique=True)
+    email: Mapped[str] = mapped_column(String(320))
+    refresh_token_encrypted: Mapped[str | None] = mapped_column(Text())
+    calendar_enabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    calendar_id: Mapped[str] = mapped_column(
+        String(255), default="primary", server_default="primary"
+    )
+    sync_token: Mapped[str | None] = mapped_column(Text())
+    pushed_sequence: Mapped[int] = mapped_column(BigInteger, default=0, server_default="0")
+    sync_status: Mapped[str] = mapped_column(String(16), default="idle", server_default="idle")
+    last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_error: Mapped[str | None] = mapped_column(Text())
+    # Google event IDs that cannot be represented (for example unsupported RRULEs).
+    skipped_event_ids: Mapped[list] = mapped_column(JSON, default=list)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class GoogleEventLink(Base):
+    """Maps a planner schedule version (or one of its occurrences) to a Google event."""
+
+    __tablename__ = "google_event_links"
+    __table_args__ = (
+        UniqueConstraint("owner_id", "google_event_id"),
+        UniqueConstraint("owner_id", "series_id", "version_id", "occurrence_key"),
+        Index("ix_google_event_links_series", "owner_id", "series_id"),
+    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    owner_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    series_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
+    version_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
+    # Empty for the series master; the planner occurrence key for an instance override.
+    occurrence_key: Mapped[str] = mapped_column(String(255), default="", server_default="")
+    google_event_id: Mapped[str] = mapped_column(String(1024))
+    etag: Mapped[str | None] = mapped_column(String(255))
+    content_hash: Mapped[str | None] = mapped_column(String(64))
+    all_day: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    # Google eventType; birthday and fromGmail events accept only a few fields.
+    event_type: Mapped[str] = mapped_column(String(32), default="default", server_default="default")
+    # True while the Google event carries notification overrides set by the planner.
+    reminders_pushed: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
