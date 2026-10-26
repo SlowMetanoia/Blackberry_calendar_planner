@@ -1,5 +1,6 @@
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import { NotebookPenIcon } from "lucide-react";
+import { GOOGLE_LOGIN_URL, getGoogleConfig } from "../../api";
 import { Alert, AlertDescription } from "../ui/alert";
 import { Button } from "../ui/button";
 import {
@@ -25,7 +26,22 @@ export function LoginScreen({
 }) {
   const [register, setRegister] = useState(false),
     [email, setEmail] = useState(""),
-    [password, setPassword] = useState("");
+    [password, setPassword] = useState(""),
+    [googleEnabled, setGoogleEnabled] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    getGoogleConfig()
+      .then((config) => {
+        if (active) setGoogleEnabled(config.enabled);
+      })
+      .catch(() => {
+        // Google sign-in stays hidden when the server does not offer it.
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -80,6 +96,25 @@ export function LoginScreen({
                 {register ? "Зарегистрироваться" : "Войти"}
               </Button>
             </form>
+            {googleEnabled && (
+              <>
+                <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                  <span className="h-px flex-1 bg-border" />
+                  или
+                  <span className="h-px flex-1 bg-border" />
+                </div>
+                <Button
+                  asChild
+                  variant="outline"
+                  className="w-full max-sm:h-11"
+                  size="lg"
+                >
+                  <a href={GOOGLE_LOGIN_URL}>
+                    {register ? "Зарегистрироваться через Google" : "Войти через Google"}
+                  </a>
+                </Button>
+              </>
+            )}
             <Button
               variant="link"
               className="mx-auto h-auto w-fit px-0 text-muted-foreground"

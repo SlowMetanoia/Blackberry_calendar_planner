@@ -1,7 +1,11 @@
 const base = "/api";
 export const TOKEN_KEY = "planner-token";
 export const AUTH_EXPIRED_EVENT = "planner-auth-expired";
-const authPaths = new Set(["/auth/login", "/auth/register"]);
+const authPaths = new Set([
+  "/auth/login",
+  "/auth/register",
+  "/auth/google/exchange",
+]);
 
 export class AuthenticationRequiredError extends Error {}
 

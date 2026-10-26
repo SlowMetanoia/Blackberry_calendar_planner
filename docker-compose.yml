@@ -72,6 +72,13 @@ services:
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_started }
+  calendar-sync:
+    build: .
+    command: arq planner.google_sync_worker.GoogleSyncWorkerSettings
+    env_file: ${ENV_FILE:-.env}
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_started }
   notifier:
     build: .
     command: arq planner.notifier.NotifierSettings

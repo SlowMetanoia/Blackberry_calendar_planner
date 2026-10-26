@@ -24,7 +24,7 @@ export type EventOccurrenceMutationResult = CalendarOccurrence & {
 };
 export type Resource = CalendarResource | "reminder";
 export type OperationKind = "create" | "update" | "delete";
-export type OperationOrigin = "agent" | "rest" | "undo";
+export type OperationOrigin = "agent" | "rest" | "undo" | "google";
 export type OperationScope = "series" | "occurrence";
 export type TaskStatus = "open" | "completed";
 export type Weekday = "MO" | "TU" | "WE" | "TH" | "FR" | "SA" | "SU";

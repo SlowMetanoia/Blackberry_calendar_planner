@@ -394,7 +394,7 @@ class CalendarOperation(Base):
         ),
         CheckConstraint("scope IN ('series', 'occurrence')", name="ck_calendar_operations_scope"),
         CheckConstraint(
-            "origin IN ('agent', 'rest', 'undo')", name="ck_calendar_operations_origin"
+            "origin IN ('agent', 'rest', 'undo', 'google')", name="ck_calendar_operations_origin"
         ),
         CheckConstraint(
             "(operation = 'create' AND before_state IS NULL AND after_state IS NOT NULL) OR "
@@ -430,3 +430,59 @@ class CalendarOperation(Base):
         ForeignKey("calendar_operations.id", ondelete="SET NULL"), index=True
     )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class GoogleAccount(Base):
+    """A user's linked Google identity and the calendar sync cursor."""
+
+    __tablename__ = "google_accounts"
+    __table_args__ = (
+        CheckConstraint(
+            "sync_status IN ('idle', 'syncing', 'ok', 'error', 'reauth')",
+            name="ck_google_accounts_sync_status",
+        ),
+        CheckConstraint("pushed_sequence >= 0", name="ck_google_accounts_pushed_sequence"),
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    subject: Mapped[str] = mapped_column(String(255), unique=True)
+    email: Mapped[str] = mapped_column(String(320))
+    refresh_token_encrypted: Mapped[str | None] = mapped_column(Text())
+    calendar_enabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    calendar_id: Mapped[str] = mapped_column(
+        String(255), default="primary", server_default="primary"
+    )
+    sync_token: Mapped[str | None] = mapped_column(Text())
+    pushed_sequence: Mapped[int] = mapped_column(BigInteger, default=0, server_default="0")
+    sync_status: Mapped[str] = mapped_column(String(16), default="idle", server_default="idle")
+    last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_error: Mapped[str | None] = mapped_column(Text())
+    # Google event IDs that cannot be represented (for example unsupported RRULEs).
+    skipped_event_ids: Mapped[list] = mapped_column(JSON, default=list)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class GoogleEventLink(Base):
+    """Maps a planner schedule version (or one of its occurrences) to a Google event."""
+
+    __tablename__ = "google_event_links"
+    __table_args__ = (
+        UniqueConstraint("owner_id", "google_event_id"),
+        UniqueConstraint("owner_id", "series_id", "version_id", "occurrence_key"),
+        Index("ix_google_event_links_series", "owner_id", "series_id"),
+    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    owner_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    series_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
+    version_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
+    # Empty for the series master; the planner occurrence key for an instance override.
+    occurrence_key: Mapped[str] = mapped_column(String(255), default="", server_default="")
+    google_event_id: Mapped[str] = mapped_column(String(1024))
+    etag: Mapped[str | None] = mapped_column(String(255))
+    content_hash: Mapped[str | None] = mapped_column(String(64))
+    all_day: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    # Google eventType; birthday and fromGmail events accept only a few fields.
+    event_type: Mapped[str] = mapped_column(String(32), default="default", server_default="default")
+    # True while the Google event carries notification overrides set by the planner.
+    reminders_pushed: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")

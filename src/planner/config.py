@@ -52,6 +52,28 @@ class Settings(BaseSettings):
     web_push_vapid_public_key: str | None = None
     web_push_vapid_private_key: str | None = None
     web_push_vapid_subject: str | None = None
+    frontend_base_url: str = "http://localhost:3000"
+    google_calendar_client_id: str | None = None
+    google_calendar_client_secret: str | None = None
+    google_calendar_redirect_url: str | None = None
+    calendar_token_key: str | None = None
+    calendar_sync_past_days: int = Field(default=30, ge=0, le=3650)
+    calendar_http_timeout_seconds: float = Field(default=20, gt=0)
+
+    @property
+    def google_enabled(self) -> bool:
+        return bool(
+            self.google_calendar_client_id
+            and self.google_calendar_client_secret
+            and self.calendar_token_key
+        )
+
+    @property
+    def google_redirect_url(self) -> str:
+        return (
+            self.google_calendar_redirect_url
+            or f"{self.frontend_base_url.rstrip('/')}/api/auth/google/callback"
+        )
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

@@ -111,6 +111,17 @@ vi.mock("../api", async () => {
     deleteEvent: vi.fn(),
     updateEventOccurrence: vi.fn(),
     deleteEventOccurrence: vi.fn(),
+    getGoogleConfig: vi.fn(async () => ({ enabled: false })),
+    getGoogleIntegration: vi.fn(async () => ({
+      available: false,
+      linked: false,
+      email: null,
+      calendar_enabled: false,
+      sync_status: null,
+      last_synced_at: null,
+      last_error: null,
+      skipped_events: 0,
+    })),
   };
 });
 const operation: CalendarOperation = {

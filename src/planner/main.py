@@ -42,6 +42,8 @@ from .calendar import (
 from .collisions import collision_report
 from .config import get_settings
 from .db import Base, SessionLocal, engine, get_session
+from .google_routes import router as google_router
+from .google_sync_worker import schedule_google_sync
 from .llm import verify_llm_connection
 from .models import (
     AgentMessage,
@@ -122,6 +124,19 @@ async def lifespan(_app: FastAPI):
 
 
 app = FastAPI(title="Smart Planner API", version="0.1.0", lifespan=lifespan)
+# Re-register each route on the app (as include_router used to): FastAPI 0.16x nests
+# included routers lazily, while app.routes and dependency overrides expect app routes.
+for _route in google_router.routes:
+    app.router.add_api_route(
+        _route.path,
+        _route.endpoint,
+        methods=list(_route.methods),
+        response_model=_route.response_model,
+        status_code=_route.status_code,
+        response_class=_route.response_class,
+        include_in_schema=_route.include_in_schema,
+        name=_route.name,
+    )
 
 
 def _problem(
@@ -195,6 +210,7 @@ async def _schedule_index(owner_id: uuid.UUID) -> None:
         await schedule_calendar_index(owner_id, get_settings())
     except SearchIndexUnavailable:
         logger.warning("Calendar index enqueue failed for owner %s", owner_id)
+    await schedule_google_sync(owner_id, get_settings())
 
 
 async def _save_audio_upload(

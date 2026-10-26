@@ -2,6 +2,7 @@ import { createStore, type StoreApi } from "zustand/vanilla";
 import {
   authenticate as authenticateRequest,
   clearStoredToken,
+  exchangeGoogleLogin,
   getCalendarHistory,
   getConversationHistory,
   getConversations,
@@ -40,6 +41,7 @@ export type SessionState = {
     password: string,
     register: boolean,
   ) => Promise<void>;
+  completeGoogleLogin: (code: string) => Promise<void>;
   reset: (message?: string) => void;
   logout: () => Promise<void>;
   refreshSessions: () => Promise<void>;
@@ -145,6 +147,15 @@ export function createSessionStore(): SessionStore {
         set({ error: "" });
         try {
           set({ token: await authenticateRequest(email, password, register) });
+        } catch (error) {
+          set({ error: (error as Error).message });
+        }
+      },
+
+      completeGoogleLogin: async (code) => {
+        set({ error: "" });
+        try {
+          set({ token: await exchangeGoogleLogin(code) });
         } catch (error) {
           set({ error: (error as Error).message });
         }

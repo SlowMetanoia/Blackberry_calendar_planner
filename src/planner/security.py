@@ -22,7 +22,13 @@ def hash_password(password: str) -> str:
 
 
 def verify_password(password: str, password_hash: str) -> bool:
-    return bcrypt.checkpw(password.encode(), password_hash.encode())
+    # Accounts registered through Google have no usable password hash.
+    if not password_hash:
+        return False
+    try:
+        return bcrypt.checkpw(password.encode(), password_hash.encode())
+    except ValueError:
+        return False
 
 
 def hash_token(token: str) -> str:

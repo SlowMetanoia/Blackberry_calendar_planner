@@ -7,3 +7,4 @@ export * from "./users";
 export * from "./notifications";
 export * from "./reminders";
 export * from "./voice";
+export * from "./google";
