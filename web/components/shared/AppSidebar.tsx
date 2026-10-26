@@ -55,10 +55,16 @@ export function AppSidebar({
         />
       </div>
       <div
-        className="relative h-24 shrink-0 border-t border-sidebar-foreground/25"
+        className="relative @container/sidebar-branding h-24 shrink-0 border-t border-sidebar-foreground/25"
         data-testid="sidebar-mascot-line"
       >
         {mascotVisible && <Mascot mode={mascotMode} />}
+        <span
+          data-collapsed={collapsed}
+          className="gorkycode-label absolute inset-0 z-20 flex items-center justify-center whitespace-nowrap font-pixel text-sidebar-foreground/55"
+        >
+          Gorkycode
+        </span>
       </div>
     </aside>
   );
