@@ -21,9 +21,19 @@ at `POST /classify` and should return:
 }
 ```
 
-Use `action: "refuse"` for prompt injection, hate speech, extremist praise,
-violence, sexual abuse, or other unsafe content. Use `label: "off_topic"` and
-`action: "clarify"` for requests unrelated to calendar tasks and events.
+The backend only accepts specific safety labels: hate speech, extremist praise,
+violent crimes/weapons, sexual abuse/child exploitation, and political persuasion
+(`elections`, `politics`, `political_persuasion`). Remote decisions require
+`GUARD_MIN_CONFIDENCE` (default `0.9`). Generic unsafe, off-topic, sexual-content,
+advice, and model-only injection labels do not block calendar operations.
+Explicit local injection checks remain active. Ordinary words such as recipes,
+movies, music, weather, or news never trigger a keyword veto; the planner asks
+for clarification when the actual request is unrelated to calendar work.
+Local political checks target explicit requests to generate agitation or propaganda,
+not neutral reminders about elections or political-science lectures.
+If the optional guard is unavailable or its response is invalid, local checks
+still apply and calendar operations continue. Owner/schema/tool authorization
+always remains mandatory, independently of content classification.
 
 The default configured model is `auren-research/lunaris-guardv3`. It is a
 multilingual model with prompt-injection and safety heads; evaluate it on a
