@@ -81,7 +81,7 @@ export function VoiceSettingsDialog() {
               checked={openAirDefault}
               onCheckedChange={(value) => void update({ open_air_default: value === true })}
             />
-            Ждать «Айвори» после открытия
+            Ждать «Вика» после открытия
           </Label>
           <Label className="flex items-center gap-2">
             <Checkbox

@@ -304,8 +304,12 @@ async def test_repository_bundle_renders_agent_prompts() -> None:
         timezone_name="Europe/Moscow",
     )
     assert "{{" not in system
+    assert "You are Vika (Вика)" in system
     assert "Current local datetime: 2026-10-14T19:30:00+03:00" in system
     assert "User IANA timezone: Europe/Moscow" in system
+
+    collision = await manager.render("collision_response")
+    assert "You are Vika (Вика)" in collision
 
     referenced = await manager.render(
         "referenced_records", referenced_resources='{"referenced_resources": []}'

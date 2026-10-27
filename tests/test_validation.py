@@ -216,7 +216,7 @@ async def test_transcription_upload_always_removes_temporary_audio(monkeypatch, 
     async def fake_transcribe(path: str) -> str:
         nonlocal received
         received = Path(path).read_bytes()
-        return "Ivory, создай задачу"
+        return "Вика, создай задачу"
 
     monkeypatch.setattr("planner.main.transcribe", fake_transcribe)
     result = await _transcribe_audio_upload(
@@ -229,7 +229,7 @@ async def test_transcription_upload_always_removes_temporary_audio(monkeypatch, 
         max_bytes=10,
     )
 
-    assert result == "Ivory, создай задачу"
+    assert result == "Вика, создай задачу"
     assert received == b"voice"
     assert list(tmp_path.iterdir()) == []
 

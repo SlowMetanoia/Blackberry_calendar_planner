@@ -45,7 +45,7 @@ ACTION_NAMES = {
     ("delete", "event"): "Удалено",
     ("delete", "reminder"): "Удалено",
 }
-WAKE_WORD = re.compile(r"(^|[^\w])(ivory|айвори|ивори)(?=$|[^\w])", re.IGNORECASE)
+WAKE_WORD = re.compile(r"(^|[^\w])(vika|вика)(?=$|[^\w])", re.IGNORECASE)
 STOP_COMMAND = re.compile(
     r"(?:закончи(?:ть)?\s+(?:диалог|разговор)|выключи(?:ть)?\s+(?:hands[ -]?free|хендс[ -]?фри))",
     re.IGNORECASE,

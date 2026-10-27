@@ -46,9 +46,9 @@ export class SilenceSegmenter {
   }
 }
 
-const wakeWord = /(^|[^\p{L}\p{N}_])(ivory|айвори|ивори)(?=$|[^\p{L}\p{N}_])/iu;
+const wakeWord = /(^|[^\p{L}\p{N}_])(vika|вика)(?=$|[^\p{L}\p{N}_])/iu;
 
-export function extractIvoryCommand(transcript: string): string | null {
+export function extractVikaCommand(transcript: string): string | null {
   const match = wakeWord.exec(transcript.normalize("NFC"));
   if (!match) return null;
   const start = (match.index ?? 0) + match[1].length;
