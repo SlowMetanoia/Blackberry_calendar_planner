@@ -2,6 +2,7 @@ import type {
   CalendarEntry,
   CalendarOccurrence,
   Event,
+  Reminder,
   Task,
 } from "../types";
 
@@ -71,6 +72,17 @@ export function occurrenceEntry(item: CalendarOccurrence): CalendarEntry {
     event,
     occurrenceKey: item.occurrence_key,
     recurring: item.recurring,
+  };
+}
+
+export function reminderEntry(reminder: Reminder): CalendarEntry {
+  return {
+    id: reminder.id,
+    resource: "reminder",
+    title: reminder.title,
+    startsAt: reminder.remind_at,
+    durationMinutes: null,
+    reminder,
   };
 }
 

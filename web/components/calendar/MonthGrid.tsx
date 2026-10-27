@@ -49,18 +49,8 @@ export function MonthGrid({
 
   function showPreview(cell: HTMLElement, date: string) {
     if (!canHover()) return;
-    const rect = cell.getBoundingClientRect();
-    onDayHover(
-      {
-        date,
-        x: Math.max(8, Math.min(rect.left, window.innerWidth - 316)),
-        y:
-          rect.bottom + 260 < window.innerHeight
-            ? rect.bottom + 6
-            : Math.max(8, rect.top - 254),
-      },
-      date,
-    );
+    const { left, right, top, bottom } = cell.getBoundingClientRect();
+    onDayHover({ date, anchor: { left, right, top, bottom } }, date);
   }
 
   return (

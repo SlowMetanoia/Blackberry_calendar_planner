@@ -29,11 +29,13 @@ export function ScheduleSection({
   entries,
   onOpen,
   overdue = false,
+  taskActions = false,
 }: {
   title?: string;
   entries: CalendarEntry[];
   onOpen: (entry: CalendarEntry) => void;
   overdue?: boolean;
+  taskActions?: boolean;
 }) {
   if (!entries.length) return null;
   const groups = new Map<string, CalendarEntry[]>();
@@ -64,7 +66,11 @@ export function ScheduleSection({
                 </span>
                 <span className="text-muted-foreground">{heading.rest}</span>
               </h4>
-              <ScheduleList entries={items} onOpen={onOpen} />
+              <ScheduleList
+                entries={items}
+                onOpen={onOpen}
+                taskActions={taskActions}
+              />
             </div>
           );
         })}

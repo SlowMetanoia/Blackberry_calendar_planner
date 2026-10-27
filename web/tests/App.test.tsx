@@ -104,6 +104,9 @@ vi.mock("../api", async () => {
     createTask: vi.fn(),
     updateTask: vi.fn(),
     deleteTask: vi.fn(),
+    getTask: vi.fn(),
+    getEvent: vi.fn(),
+    getReminder: vi.fn(),
     updateTaskOccurrence: vi.fn(),
     deleteTaskOccurrence: vi.fn(),
     createEvent: vi.fn(),
@@ -432,6 +435,36 @@ describe("planner chat", () => {
       within(sidebar).getByTestId("sidebar-mascot-line"),
     ).toBeInTheDocument();
   });
+  it("collapses the mini calendar and hides it in the calendar section", async () => {
+    localStorage.setItem("planner-token", "token");
+    const view = render(<App />);
+    const mini = await screen.findByRole("region", { name: "Мини-календарь" });
+    expect(
+      within(mini).getByRole("button", { name: "Следующий месяц" }),
+    ).toBeInTheDocument();
+
+    await userEvent.click(
+      within(mini).getByRole("button", { name: "Свернуть мини-календарь" }),
+    );
+    expect(
+      within(mini).queryByRole("button", { name: "Следующий месяц" }),
+    ).not.toBeInTheDocument();
+    expect(localStorage.getItem("planner-mini-calendar-open")).toBe("false");
+
+    view.unmount();
+    render(<App />);
+    const restored = await screen.findByRole("region", {
+      name: "Мини-календарь",
+    });
+    expect(
+      within(restored).getByRole("button", { name: "Развернуть мини-календарь" }),
+    ).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Календарь" }));
+    expect(
+      screen.queryByRole("region", { name: "Мини-календарь" }),
+    ).not.toBeInTheDocument();
+  });
   it("keeps the sidebar line when the mascot is hidden", async () => {
     localStorage.setItem("planner-token", "token");
     vi.mocked(api.getUserPreferences).mockResolvedValue({
@@ -577,6 +610,244 @@ describe("planner chat", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("completes an upcoming task from the chat sidebar and can bring it back", async () => {
+    localStorage.setItem("planner-token", "token");
+    const deadline = new Date(Date.now() + 86_400_000).toISOString();
+    const task = {
+      id: "t-near",
+      owner_id: "u1",
+      title: "Подготовить отчёт",
+      description: null,
+      deadline,
+      estimated_minutes: null,
+      status: "open" as const,
+    };
+    vi.mocked(api.getTasks).mockResolvedValue({
+      items: [task],
+      total: 1,
+      limit: 100,
+      offset: 0,
+    });
+    vi.mocked(api.updateTask).mockResolvedValue({
+      ...task,
+      status: "completed",
+    });
+    render(<App />);
+    const tasksRegion = await screen.findByRole("region", {
+      name: "Ближайшие задачи",
+    });
+    await within(tasksRegion).findByText("Подготовить отчёт");
+    vi.mocked(api.getCalendarHistory).mockResolvedValue({
+      items: [
+        {
+          ...operation,
+          id: "o-complete",
+          operation: "update",
+          resource: "task",
+          target_id: "t-near",
+          origin: "rest",
+        },
+      ],
+      total: 1,
+      limit: 100,
+      offset: 0,
+    });
+
+    await userEvent.click(
+      within(tasksRegion).getByRole("button", {
+        name: "Завершить «Подготовить отчёт»",
+      }),
+    );
+
+    await waitFor(() =>
+      expect(api.updateTask).toHaveBeenCalledWith("t-near", {
+        status: "completed",
+      }),
+    );
+    const notice = await screen.findByRole("status");
+    expect(notice).toHaveTextContent("Задача «Подготовить отчёт» завершена");
+    await userEvent.click(
+      within(notice).getByRole("button", { name: "Вернуть" }),
+    );
+    await waitFor(() =>
+      expect(api.undoOperation).toHaveBeenCalledWith("o-complete"),
+    );
+  });
+  it("opens the editor for a task clicked in the chat sidebar", async () => {
+    localStorage.setItem("planner-token", "token");
+    vi.mocked(api.getTasks).mockResolvedValue({
+      items: [
+        {
+          id: "t-near",
+          owner_id: "u1",
+          title: "Подготовить отчёт",
+          description: "Квартальный",
+          deadline: new Date(Date.now() + 86_400_000).toISOString(),
+          estimated_minutes: 45,
+          status: "open",
+        },
+      ],
+      total: 1,
+      limit: 100,
+      offset: 0,
+    });
+    render(<App />);
+    const tasksRegion = await screen.findByRole("region", {
+      name: "Ближайшие задачи",
+    });
+    await userEvent.click(
+      await within(tasksRegion).findByRole("button", {
+        name: "Открыть «Подготовить отчёт»",
+      }),
+    );
+    const editor = await screen.findByRole("dialog", {
+      name: "Редактирование записи",
+    });
+    expect(within(editor).getByLabelText("Название")).toHaveValue(
+      "Подготовить отчёт",
+    );
+  });
+  it("opens the editor for records the agent changed or showed in chat", async () => {
+    localStorage.setItem("planner-token", "token");
+    const task = {
+      id: "t1",
+      owner_id: "u1",
+      title: "Купить молоко",
+      description: null,
+      deadline: "2026-10-30T09:00:00Z",
+      estimated_minutes: null,
+      status: "open" as const,
+    };
+    vi.mocked(api.getTask).mockResolvedValue(task);
+    vi.mocked(api.getEvent).mockResolvedValue({
+      id: "e1",
+      owner_id: "u1",
+      title: "Релиз",
+      description: null,
+      starts_at: "2026-10-15T08:00:00Z",
+      duration_minutes: 90,
+      location: "Офис",
+    });
+    render(<App />);
+    await userEvent.click(
+      await screen.findByRole("button", {
+        name: "Включить open-air режим Ivory",
+      }),
+    );
+    handsFree.options!.onMessage({
+      id: "m1",
+      conversation_id: "s1",
+      sequence: 1,
+      input_text: "Создай задачу",
+      status: "completed",
+      reply: "Готово",
+      display_items: [{ resource: "event", id: "e1", data: { title: "Релиз" } }],
+      operations: [
+        {
+          ...operation,
+          id: "o-task",
+          resource: "task",
+          target_id: "t1",
+          after: task,
+        },
+        {
+          ...operation,
+          id: "o-gone",
+          operation: "delete",
+          resource: "task",
+          target_id: "t2",
+          before: { ...task, id: "t2", title: "Старая задача" },
+          after: null,
+        },
+      ],
+      error: null,
+      created_at: "2026-10-15T09:00:00Z",
+    });
+
+    expect(await screen.findByText("Старая задача")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Открыть «Старая задача»" }),
+    ).not.toBeInTheDocument();
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "Открыть «Купить молоко»" }),
+    );
+    const editor = await screen.findByRole("dialog", {
+      name: "Редактирование записи",
+    });
+    expect(api.getTask).toHaveBeenCalledWith("t1");
+    expect(within(editor).getByLabelText("Название")).toHaveValue(
+      "Купить молоко",
+    );
+    await userEvent.keyboard("{Escape}");
+
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Открыть «Релиз»" }),
+    );
+    expect(
+      within(
+        await screen.findByRole("dialog", { name: "Редактирование записи" }),
+      ).getByLabelText("Название"),
+    ).toHaveValue("Релиз");
+    expect(api.getEvent).toHaveBeenCalledWith("e1");
+  });
+  it("cancels one occurrence of a recurring task from the calendar panel", async () => {
+    localStorage.setItem("planner-token", "token");
+    const deadline = new Date(Date.now() + 3_600_000).toISOString();
+    const task = {
+      id: "series-1",
+      owner_id: "u1",
+      title: "Французский",
+      description: null,
+      deadline,
+      estimated_minutes: 30,
+      status: "open" as const,
+      recurrence: {
+        frequency: "daily" as const,
+        interval: 1,
+        end: { kind: "never" as const },
+      },
+    };
+    vi.mocked(api.getOccurrences).mockResolvedValue({
+      items: [
+        {
+          resource: "task",
+          series_id: task.id,
+          occurrence_key: "occurrence-1",
+          original_at: deadline,
+          scheduled_at: deadline,
+          recurring: true,
+          data: task,
+        },
+      ],
+      total: 1,
+      has_more: false,
+      next_cursor: null,
+    });
+    vi.mocked(api.deleteTaskOccurrence).mockResolvedValue(undefined);
+    render(<App />);
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Календарь" }),
+    );
+    const panel = await screen.findByRole("complementary", {
+      name: "Ближайшие дела",
+    });
+    await userEvent.click(
+      await within(panel).findByRole("button", {
+        name: "Отменить «Французский»",
+      }),
+    );
+    await waitFor(() =>
+      expect(api.deleteTaskOccurrence).toHaveBeenCalledWith(
+        "series-1",
+        "occurrence-1",
+      ),
+    );
+    expect(api.deleteTask).not.toHaveBeenCalled();
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "Задача «Французский» отменена",
+    );
+  });
   it("keeps the chat sessions panel open when starting a new conversation", async () => {
     localStorage.setItem("planner-token", "token");
     vi.mocked(api.syncTimeZone).mockResolvedValue({ timezone: "UTC" });
@@ -648,15 +919,112 @@ describe("planner chat", () => {
     const heatmap = await screen.findByRole("region", {
       name: "Занятость недели",
     });
-    const grid = within(heatmap).getByRole("img", {
-      name: /Понедельник.*1 час 30 минут/,
-    });
+    expect(
+      within(heatmap).getByRole("group", {
+        name: /Понедельник.*1 час 30 минут/,
+      }),
+    ).toBeInTheDocument();
     expect(within(heatmap).getByText("Пн")).toBeInTheDocument();
 
-    await userEvent.hover(grid);
-    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
-    await userEvent.click(grid);
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    const wednesdayCell = within(heatmap).getByRole("button", {
+      name: /^Среда/,
+    });
+    await userEvent.hover(wednesdayCell);
+    const [tooltip] = await screen.findAllByRole("tooltip");
+    expect(tooltip).toHaveTextContent("Подготовить отчёт");
+    expect(tooltip).toHaveTextContent("14:00");
+    expect(tooltip).not.toHaveTextContent("Планёрка");
+
+    await userEvent.click(wednesdayCell);
+    const dayDialog = await screen.findByRole("dialog", { name: /Дела на/ });
+    expect(dayDialog).toHaveAccessibleName(
+      `Дела на ${new Intl.DateTimeFormat("ru-RU", { dateStyle: "long" }).format(wednesday)}`,
+    );
+    expect(
+      await within(dayDialog).findByText("Подготовить отчёт"),
+    ).toBeInTheDocument();
+    await userEvent.click(
+      within(dayDialog).getByRole("button", { name: "Закрыть дела на день" }),
+    );
+    expect(
+      await screen.findByRole("heading", { name: "Что запланируем?" }),
+    ).toBeInTheDocument();
+  });
+  it("opens a day from the mini calendar in the navigation sidebar", async () => {
+    localStorage.setItem("planner-token", "token");
+    const today = new Date();
+    today.setHours(12, 0, 0, 0);
+    const meeting = new Date(today.getFullYear(), today.getMonth(), 15, 10);
+    vi.mocked(api.getOccurrences).mockResolvedValue({
+      items: [
+        {
+          resource: "event",
+          series_id: "e1",
+          occurrence_key: "e1",
+          original_at: meeting.toISOString(),
+          scheduled_at: meeting.toISOString(),
+          recurring: false,
+          data: {
+            id: "e1",
+            owner_id: "u1",
+            title: "Планёрка",
+            description: null,
+            starts_at: meeting.toISOString(),
+            duration_minutes: 60,
+            location: null,
+          },
+        },
+      ],
+      total: 1,
+      has_more: false,
+      next_cursor: null,
+    });
+    render(<App />);
+    const mini = await screen.findByRole("region", { name: "Мини-календарь" });
+    const monthTitle = (value: Date) =>
+      new RegExp(
+        new Intl.DateTimeFormat("ru-RU", { month: "long", year: "numeric" })
+          .format(value)
+          .replace(/\s*г\.$/, ""),
+        "i",
+      );
+    expect(within(mini).getByText(monthTitle(today))).toBeInTheDocument();
+    const dayLabel = new Intl.DateTimeFormat("ru-RU", {
+      day: "numeric",
+      month: "long",
+    }).format(meeting);
+    expect(
+      await within(mini).findByRole("button", { name: `${dayLabel}, есть дела` }),
+    ).toBeInTheDocument();
+
+    await userEvent.click(
+      within(mini).getByRole("button", { name: "Следующий месяц" }),
+    );
+    const next = new Date(today.getFullYear(), today.getMonth() + 1, 1, 12);
+    expect(within(mini).getByText(monthTitle(next))).toBeInTheDocument();
+    await userEvent.click(
+      within(mini).getByRole("button", { name: "Предыдущий месяц" }),
+    );
+    await userEvent.click(
+      await within(mini).findByRole("button", { name: `${dayLabel}, есть дела` }),
+    );
+
+    const dayDialog = await screen.findByRole("dialog", { name: /Дела на/ });
+    expect(await within(dayDialog).findByText("Планёрка")).toBeInTheDocument();
+    await userEvent.click(
+      within(dayDialog).getByRole("button", { name: /Планёрка/ }),
+    );
+    expect(
+      await screen.findByRole("dialog", { name: "Редактирование записи" }),
+    ).toBeInTheDocument();
+    await userEvent.keyboard("{Escape}");
+    await userEvent.click(
+      (await screen.findByRole("dialog", { name: /Дела на/ }))
+        .querySelector("[aria-label='Закрыть дела на день']") as HTMLElement,
+    );
+    expect(
+      await screen.findByRole("heading", { name: "Что запланируем?" }),
+    ).toBeInTheDocument();
   });
   it("undoes an operation and refreshes history", async () => {
     localStorage.setItem("planner-token", "token");
@@ -804,6 +1172,56 @@ describe("planner chat", () => {
     expect(await screen.findByText("Ivory создай задачу")).toBeInTheDocument();
     expect(await screen.findByText("Готово")).toBeInTheDocument();
   });
+  it("queues messages typed while the agent is still answering", async () => {
+    const queued: AgentMessage = {
+      id: "m1",
+      conversation_id: "s1",
+      sequence: 1,
+      input_text: "Первая задача",
+      status: "queued",
+      reply: null,
+      display_items: [],
+      operations: [],
+      error: null,
+      created_at: "2026-10-15T09:00:00Z",
+    };
+    localStorage.setItem("planner-token", "token");
+    vi.mocked(api.sendMessage).mockResolvedValue(queued);
+    vi.mocked(api.getMessage).mockResolvedValue({
+      ...queued,
+      status: "processing",
+    });
+    render(<App />);
+    const input = await screen.findByLabelText("Сообщение");
+
+    await userEvent.type(input, "Первая задача{Enter}");
+    await userEvent.type(input, "Вторая задача{Enter}");
+    await userEvent.type(input, "Третья задача{Enter}");
+
+    expect(await screen.findByText("Первая задача")).toBeInTheDocument();
+    const second = screen
+      .getByText("Вторая задача")
+      .closest("article") as HTMLElement;
+    expect(within(second).getByText("В очереди")).toBeInTheDocument();
+    expect(api.sendMessage).toHaveBeenCalledTimes(1);
+
+    await userEvent.click(
+      within(second).getByRole("button", { name: "Изменить сообщение" }),
+    );
+    const editor = within(second).getByLabelText("Текст сообщения в очереди");
+    await userEvent.clear(editor);
+    await userEvent.type(editor, "Вторая, уточнённая{Enter}");
+    expect(screen.getByText("Вторая, уточнённая")).toBeInTheDocument();
+
+    const third = screen
+      .getByText("Третья задача")
+      .closest("article") as HTMLElement;
+    await userEvent.click(
+      within(third).getByRole("button", { name: "Убрать из очереди" }),
+    );
+    expect(screen.queryByText("Третья задача")).not.toBeInTheDocument();
+    expect(api.sendMessage).toHaveBeenCalledTimes(1);
+  });
   it("stops and releases the hands-free session", async () => {
     localStorage.setItem("planner-token", "token");
     vi.mocked(api.syncTimeZone).mockResolvedValue({ timezone: "UTC" });
@@ -829,6 +1247,52 @@ describe("planner chat", () => {
       screen.getByText("15 октября 2026, 11:00–12:30"),
     ).toBeInTheDocument();
     expect(screen.getByText("Место:").parentElement).toHaveTextContent("Офис");
+  });
+  it("shows a click-through day preview that closes as soon as the day is left", async () => {
+    const noon = new Date();
+    noon.setHours(12, 0, 0, 0);
+    const part = (value: number) => String(value).padStart(2, "0");
+    const dateKey = `${noon.getFullYear()}-${part(noon.getMonth() + 1)}-${part(noon.getDate())}`;
+    localStorage.setItem("planner-token", "token");
+    vi.mocked(api.getTasks).mockResolvedValue({
+      items: [
+        {
+          id: "t1",
+          owner_id: "u1",
+          title: "Полить цветы",
+          description: null,
+          deadline: noon.toISOString(),
+          estimated_minutes: null,
+          status: "open",
+        },
+      ],
+      total: 1,
+      limit: 100,
+      offset: 0,
+    });
+    const { container } = render(<App />);
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Календарь" }),
+    );
+    const cell = await waitFor(() => {
+      const element = container.querySelector(
+        `[data-date='${dateKey}'].calendar-day-occupied`,
+      );
+      expect(element).not.toBeNull();
+      return element as HTMLElement;
+    });
+
+    await userEvent.hover(cell);
+    const preview = await waitFor(() => {
+      const element = document.querySelector(".day-hover-preview");
+      expect(element).not.toBeNull();
+      return element as HTMLElement;
+    });
+    expect(preview).toHaveTextContent("Полить цветы");
+    expect(preview).toHaveStyle({ pointerEvents: "none" });
+
+    fireEvent.mouseLeave(cell);
+    expect(document.querySelector(".day-hover-preview")).toBeNull();
   });
   it("shows calendar dots, day details, hover expansion, and edits a task", async () => {
     const deadlineDate = new Date(Date.now() + 86_400_000),
@@ -874,7 +1338,7 @@ describe("planner chat", () => {
       await screen.findByRole("button", { name: "Календарь" }),
     );
     const taskButton = await screen.findByRole("button", {
-      name: /Подготовить отчёт/,
+      name: /^(?!Завершить|Отменить).*Подготовить отчёт/,
     });
     expect(screen.getByText("Без срока")).toBeInTheDocument();
     await userEvent.hover(taskButton);
@@ -971,7 +1435,7 @@ describe("planner chat", () => {
       await screen.findByRole("button", { name: "Календарь" }),
     );
     await userEvent.click(
-      await screen.findByRole("button", { name: /Французский/ }),
+      await screen.findByRole("button", { name: /^(?!Завершить|Отменить).*Французский/ }),
     );
     expect(screen.getByLabelText("Изменить")).toHaveValue("occurrence");
     expect(screen.getByLabelText("Повторять")).toBeDisabled();

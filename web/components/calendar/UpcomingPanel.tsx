@@ -102,8 +102,13 @@ export function UpcomingPanel({
               overdue
               entries={overdue}
               onOpen={onOpenEntry}
+              taskActions
             />
-            <ScheduleSection entries={upcoming} onOpen={onOpenEntry} />
+            <ScheduleSection
+              entries={upcoming}
+              onOpen={onOpenEntry}
+              taskActions
+            />
             {undatedEntries.length > 0 && (
               <section className="grid gap-1.5">
                 <h3 className="flex items-baseline gap-1.5 px-2 text-xs font-semibold">
@@ -112,7 +117,11 @@ export function UpcomingPanel({
                     {undatedEntries.length}
                   </span>
                 </h3>
-                <ScheduleList entries={undatedEntries} onOpen={onOpenEntry} />
+                <ScheduleList
+                  entries={undatedEntries}
+                  onOpen={onOpenEntry}
+                  taskActions
+                />
               </section>
             )}
             {overviewCursor && (

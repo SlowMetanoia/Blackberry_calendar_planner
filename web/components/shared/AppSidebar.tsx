@@ -1,4 +1,5 @@
 import type { PlannerView } from "../../types";
+import { MiniCalendar } from "./MiniCalendar";
 import { SidebarBrand } from "./SidebarBrand";
 import { SidebarNav } from "./SidebarNav";
 import { Mascot, type MascotMode } from "../chat/Mascot";
@@ -15,6 +16,7 @@ export function AppSidebar({
   collapsed,
   historyCount,
   onSelect,
+  onOpenDate,
   onClose,
   onToggleCollapsed,
   mascotMode,
@@ -25,6 +27,7 @@ export function AppSidebar({
   collapsed: boolean;
   historyCount: number;
   onSelect: (view: PlannerView) => void;
+  onOpenDate: (date: string) => void;
   onClose: () => void;
   onToggleCollapsed: () => void;
   mascotMode: MascotMode;
@@ -46,19 +49,32 @@ export function AppSidebar({
         onClose={onClose}
         onToggleCollapsed={onToggleCollapsed}
       />
-      <div className="min-h-0 flex-1 pt-16">
-        <SidebarNav
-          view={view}
-          collapsed={collapsed}
-          historyCount={historyCount}
-          onSelect={onSelect}
-        />
+      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+        <div className="shrink-0">
+          <SidebarNav
+            view={view}
+            collapsed={collapsed}
+            historyCount={historyCount}
+            onSelect={onSelect}
+          />
+        </div>
+        {view !== "calendar" && (
+          <div
+            className={`mt-1 shrink-0 border-t border-sidebar-foreground/10 pt-2 ${
+              collapsed ? "md:hidden" : ""
+            }`}
+          >
+            <MiniCalendar onOpenDate={onOpenDate} />
+          </div>
+        )}
+        <div className="mascot-slot relative min-h-0 flex-1">
+          {mascotVisible && <Mascot mode={mascotMode} />}
+        </div>
       </div>
       <div
         className="relative @container/sidebar-branding h-24 shrink-0 border-t border-sidebar-foreground/25"
         data-testid="sidebar-mascot-line"
       >
-        {mascotVisible && <Mascot mode={mascotMode} />}
         <span
           data-collapsed={collapsed}
           className="gorkycode-label absolute inset-0 z-20 flex items-center justify-center whitespace-nowrap font-pixel text-sidebar-foreground/55"

@@ -100,14 +100,14 @@ export function Mascot({ mode = "idle" }: { mode?: MascotMode }) {
 
   return (
     <div
-      className="pointer-events-none absolute bottom-full left-1/2 z-10 hidden w-[min(15rem,92%)] -translate-x-1/2 sm:block md:w-[min(17rem,92%)]"
+      className="mascot-figure pointer-events-none absolute inset-x-0 top-2 bottom-0 z-10 hidden items-end justify-center sm:flex"
       data-testid="blackberry-mascot"
       aria-hidden="true"
     >
       <img
         src={`/mascot/blackberry/${folder}/${frame}.png`}
         alt=""
-        className="block h-auto w-full"
+        className="block h-auto max-h-full w-[min(15rem,92%)] object-contain object-bottom md:w-[min(17rem,92%)]"
       />
     </div>
   );

@@ -9,12 +9,18 @@ import {
   MessageSquarePlusIcon,
   MessagesSquareIcon,
 } from "lucide-react";
-import { useSessionStore, useVoiceStore } from "../../libs/stores";
+import type { EntryRef } from "../../libs/entry-loader";
+import {
+  useSessionStore,
+  useUiStore,
+  useVoiceStore,
+} from "../../libs/stores";
 import { Button } from "../ui/button";
 import { ScrollArea } from "../ui/scroll-area";
 import { ChatComposer } from "./ChatComposer";
 import type { MascotMode } from "./Mascot";
 import { MessageExchange } from "./MessageExchange";
+import { QueuedMessage } from "./QueuedMessage";
 
 export function ChatView({
   startNewConversation,
@@ -29,6 +35,12 @@ export function ChatView({
 }) {
   const chat = useRef<HTMLDivElement | null>(null);
   const messages = useSessionStore((state) => state.messages);
+  const queue = useSessionStore((state) => state.queue);
+  const openEntry = useUiStore((state) => state.openEntry);
+  const openRecord = useCallback(
+    (ref: EntryRef) => openEntry({ ref }),
+    [openEntry],
+  );
   const sendText = useSessionStore((state) => state.sendText);
   const recording = useVoiceStore((state) => state.recording);
   const audioRequestPending = useVoiceStore((state) => state.audioRequestPending);
@@ -43,9 +55,10 @@ export function ChatView({
     (state) => state.changeOpenAirSilence,
   );
   const [textActive, setTextActive] = useState(false);
-  const pending = messages.some((message) =>
-    ["queued", "transcribing", "processing"].includes(message.status),
-  );
+  const pending =
+    messages.some((message) =>
+      ["queued", "transcribing", "processing"].includes(message.status),
+    ) || queue.some((item) => item.status === "sending");
   const mascotMode: MascotMode =
     pending || audioRequestPending || openAirStatus === "processing"
       ? "processing"
@@ -78,14 +91,14 @@ export function ChatView({
   );
 
   useEffect(() => {
-    if (!messages.length) return;
+    if (!messages.length && !queue.length) return;
     requestAnimationFrame(() =>
       chat.current?.scrollTo({
         top: chat.current.scrollHeight,
         behavior: "smooth",
       }),
     );
-  }, [messages]);
+  }, [messages, queue.length]);
 
   return (
     <div className="relative flex min-h-0 flex-1 flex-col">
@@ -112,7 +125,7 @@ export function ChatView({
         </Button>
       </div>
 
-      {messages.length ? (
+      {messages.length || queue.length ? (
         <ScrollArea
           className="min-h-0 flex-1"
           viewportClassName="chat px-3.5 py-4 sm:px-8 sm:py-6"
@@ -125,7 +138,11 @@ export function ChatView({
                 key={message.id}
                 message={message}
                 startNewConversation={startNewConversation}
+                onOpenRecord={openRecord}
               />
+            ))}
+            {queue.map((item) => (
+              <QueuedMessage key={item.localId} item={item} />
             ))}
           </div>
         </ScrollArea>

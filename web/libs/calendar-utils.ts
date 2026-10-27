@@ -1,4 +1,5 @@
 import { localDateKey } from "./format";
+import type { AnchorRect } from "../types";
 
 export type CalendarMode = "month" | "week";
 export type CalendarDay = { date: Date; key: string };
@@ -47,4 +48,41 @@ export function buildWeekDays(anchor: Date): CalendarDay[] {
     const date = addDays(start, index);
     return { date, key: localDateKey(date) };
   });
+}
+
+const PREVIEW_GAP = 8;
+const PREVIEW_MARGIN = 8;
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(value, max));
+}
+
+// Puts the day preview next to the hovered day so it never covers it: to the
+// right when there is room, otherwise to the left, and only as a last resort
+// below or above.
+export function placeDayPreview(
+  anchor: AnchorRect,
+  size: { width: number; height: number },
+  viewport: { width: number; height: number },
+): { left: number; top: number } {
+  const maxLeft = viewport.width - PREVIEW_MARGIN - size.width;
+  const maxTop = Math.max(
+    PREVIEW_MARGIN,
+    viewport.height - PREVIEW_MARGIN - size.height,
+  );
+  const right = anchor.right + PREVIEW_GAP;
+  const left = anchor.left - PREVIEW_GAP - size.width;
+  if (right <= maxLeft || left >= PREVIEW_MARGIN)
+    return {
+      left: right <= maxLeft ? right : left,
+      top: clamp(anchor.top, PREVIEW_MARGIN, maxTop),
+    };
+  const below = anchor.bottom + PREVIEW_GAP;
+  return {
+    left: clamp(anchor.left, PREVIEW_MARGIN, Math.max(PREVIEW_MARGIN, maxLeft)),
+    top:
+      below + size.height <= viewport.height - PREVIEW_MARGIN
+        ? below
+        : Math.max(PREVIEW_MARGIN, anchor.top - PREVIEW_GAP - size.height),
+  };
 }
