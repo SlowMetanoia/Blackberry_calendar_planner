@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     llm_model: str = "planner-model"
     llm_required: bool = True
     llm_reasoning_effort: Literal["none", "minimal", "low", "medium", "high", "xhigh"] = "none"
-    llm_startup_timeout_seconds: float = Field(default=5, gt=0)
+    llm_startup_timeout_seconds: float = Field(default=30, gt=0)
     llm_request_timeout_seconds: float = Field(default=120, gt=0)
     llm_max_tokens: int = Field(default=2048, ge=1)
     guard_enabled: bool = False

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { SilenceSegmenter, extractIvoryCommand } from "../libs/open-air";
+import { SilenceSegmenter, extractVikaCommand } from "../libs/open-air";
 import {
   VOICE_CUES,
   InactivityTimer,
@@ -8,21 +8,28 @@ import {
   signalUtteranceEnd,
 } from "../libs/hands-free";
 
-describe("Ivory wake word", () => {
+describe("Vika wake word", () => {
   it.each([
-    ["Ivory, поставь встречу на пять", "Ivory, поставь встречу на пять"],
-    ["мы потом решим, АЙВОРИ поставь встречу", "АЙВОРИ поставь встречу"],
-    ["шум перед словом Ивори: напомни позвонить", "Ивори: напомни позвонить"],
+    ["Вика, поставь встречу на пять", "Вика, поставь встречу на пять"],
+    ["мы потом решим, ВИКА поставь встречу", "ВИКА поставь встречу"],
+    ["noise before Vika: напомни позвонить", "Vika: напомни позвонить"],
   ])(
     "keeps the wake word and discards speech before it",
     (transcript, expected) => {
-      expect(extractIvoryCommand(transcript)).toBe(expected);
+      expect(extractVikaCommand(transcript)).toBe(expected);
     },
   );
 
-  it.each(["ivorytower сделай задачу", "айворинка привет", "просто разговор"])(
+  it.each([
+    "Ivory сделай задачу",
+    "Айвори привет",
+    "Вику позови",
+    "виктория привет",
+    "супервика сделай задачу",
+    "просто разговор",
+  ])(
     "does not match a partial or missing wake word",
-    (transcript) => expect(extractIvoryCommand(transcript)).toBeNull(),
+    (transcript) => expect(extractVikaCommand(transcript)).toBeNull(),
   );
 });
 

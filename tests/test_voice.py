@@ -101,17 +101,19 @@ def test_hands_free_requires_wake_once_then_accepts_follow_up_and_stop() -> None
     conversation = VoiceConversation(active=False)
 
     assert conversation.accept_transcript("разговор рядом") is None
-    assert conversation.accept_transcript("Айвори") == ""
+    assert conversation.accept_transcript("Айвори") is None
+    assert conversation.accept_transcript("Вику") is None
+    assert conversation.accept_transcript("Вика") == ""
     assert conversation.active is True
     assert conversation.accept_transcript("создай задачу") == "создай задачу"
-    assert conversation.accept_transcript("Айвори, закончи диалог") is None
+    assert conversation.accept_transcript("Vika, закончи диалог") is None
     assert conversation.active is False
 
 
 def test_hands_free_requires_a_pause_after_wake_word() -> None:
     conversation = VoiceConversation(active=False)
 
-    assert conversation.accept_transcript("Айвори, создай задачу слишком рано") == ""
+    assert conversation.accept_transcript("Вика, создай задачу слишком рано") == ""
     assert conversation.active is True
     assert conversation.accept_transcript("создай задачу после сигнала") == (
         "создай задачу после сигнала"

@@ -18,10 +18,10 @@ import { NativeSelect } from "../ui/native-select";
 import { VoiceSettingsDialog } from "./VoiceSettingsDialog";
 
 const openAirLabels: Record<OpenAirStatus, string> = {
-  off: "Ivory выключена",
-  armed: "Скажите «Айвори»",
+  off: "Вика выключена",
+  armed: "Скажите «Вика»",
   hearing_wake: "Слышу обращение…",
-  recognizing_wake: "Распознаю «Айвори»…",
+  recognizing_wake: "Распознаю обращение «Вика»…",
   ready: "Скажите, что нужно сделать",
   hearing_command: "Слушаю команду…",
   processing: "Распознаю и думаю…",
@@ -127,12 +127,12 @@ export function ChatComposer({
           variant={openAirEnabled ? "highlight" : "outline"}
           size="lg"
           className="size-11 shrink-0 px-0 sm:size-9 sm:w-auto sm:px-2.5"
-          aria-label={`${openAirEnabled ? "Выключить" : "Включить"} open-air режим Ivory`}
+          aria-label={`${openAirEnabled ? "Выключить" : "Включить"} open-air режим Вика`}
           aria-pressed={openAirEnabled}
           onClick={() => void onToggleOpenAir()}
         >
           <AudioLinesIcon aria-hidden="true" />
-          <span className="hidden sm:inline">Ivory</span>
+          <span className="hidden sm:inline">Вика</span>
         </Button>
         <Button
           type="button"

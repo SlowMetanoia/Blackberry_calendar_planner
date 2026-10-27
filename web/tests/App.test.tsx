@@ -731,7 +731,7 @@ describe("planner chat", () => {
     render(<App />);
     await userEvent.click(
       await screen.findByRole("button", {
-        name: "Включить open-air режим Ivory",
+        name: "Включить open-air режим Вика",
       }),
     );
     handsFree.options!.onMessage({
@@ -1107,7 +1107,7 @@ describe("planner chat", () => {
     );
     expect(screen.getByText("Думаю…")).toBeInTheDocument();
   });
-  it("enables Ivory open-air, updates its pause, and cleans up", async () => {
+  it("enables Vika open-air, updates its pause, and cleans up", async () => {
     localStorage.setItem("planner-token", "token");
     vi.mocked(api.syncTimeZone).mockResolvedValue({ timezone: "UTC" });
     vi.mocked(api.updateUserPreferences).mockResolvedValue({
@@ -1117,12 +1117,12 @@ describe("planner chat", () => {
     });
     const view = render(<App />);
     const toggle = await screen.findByRole("button", {
-      name: "Включить open-air режим Ivory",
+      name: "Включить open-air режим Вика",
     });
     await userEvent.click(toggle);
     expect(handsFree.start).toHaveBeenCalledWith();
     expect(toggle).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getByText("Скажите «Айвори»")).toBeInTheDocument();
+    expect(screen.getByText("Скажите «Вика»")).toBeInTheDocument();
     handsFree.options!.onStatus("hearing_wake");
     expect(await screen.findByText("Слышу обращение…")).toBeInTheDocument();
     handsFree.options!.onStatus("ready");
@@ -1152,7 +1152,7 @@ describe("planner chat", () => {
       id: "m1",
       conversation_id: "s1",
       sequence: 1,
-      input_text: "Ivory создай задачу",
+      input_text: "Вика создай задачу",
       status: "completed",
       reply: "Готово",
       display_items: [],
@@ -1165,11 +1165,11 @@ describe("planner chat", () => {
     render(<App />);
     await userEvent.click(
       await screen.findByRole("button", {
-        name: "Включить open-air режим Ivory",
+        name: "Включить open-air режим Вика",
       }),
     );
     handsFree.options!.onMessage(message);
-    expect(await screen.findByText("Ivory создай задачу")).toBeInTheDocument();
+    expect(await screen.findByText("Вика создай задачу")).toBeInTheDocument();
     expect(await screen.findByText("Готово")).toBeInTheDocument();
   });
   it("queues messages typed while the agent is still answering", async () => {
@@ -1227,11 +1227,11 @@ describe("planner chat", () => {
     vi.mocked(api.syncTimeZone).mockResolvedValue({ timezone: "UTC" });
     render(<App />);
     const toggle = await screen.findByRole("button", {
-      name: "Включить open-air режим Ivory",
+      name: "Включить open-air режим Вика",
     });
     await userEvent.click(toggle);
     await userEvent.click(
-      screen.getByRole("button", { name: "Выключить open-air режим Ivory" }),
+      screen.getByRole("button", { name: "Выключить open-air режим Вика" }),
     );
     expect(handsFree.stop).toHaveBeenCalled();
     expect(toggle).toHaveAttribute("aria-pressed", "false");

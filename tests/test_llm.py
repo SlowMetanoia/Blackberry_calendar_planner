@@ -53,6 +53,10 @@ def test_normalize_base_url_accepts_root_and_v1() -> None:
     assert llm.normalize_base_url("http://localhost:1234/v1/") == "http://localhost:1234/v1"
 
 
+def test_default_startup_timeout_allows_slow_cloud_provider() -> None:
+    assert Settings(_env_file=None).llm_startup_timeout_seconds == 30
+
+
 def test_react_payload_uses_tools_without_json_response_format() -> None:
     tools = [
         {
