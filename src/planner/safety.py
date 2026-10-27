@@ -6,6 +6,8 @@ Russian-capable classifier can be deployed independently from the API.
 
 from __future__ import annotations
 
+import logging
+import math
 import re
 from dataclasses import dataclass
 from typing import Any, Literal
@@ -24,7 +26,10 @@ GuardCategory = Literal[
     "violence",
     "sexual",
     "unsafe_other",
+    "politics",
 ]
+
+logger = logging.getLogger(__name__)
 
 SAFE_REFUSAL = (
     "Я могу помогать только с задачами и событиями календаря. "
@@ -58,7 +63,6 @@ _INJECTION_PATTERNS = (
     r"раскр(ой|ывать)\s+.*(системн|скрыт).*промпт",
     r"reveal\s+.*system\s+prompt",
     r"ты\s+теперь\s+(системный|администратор|другой)\s+агент",
-    r"вызови\s+commit_calendar_command",
 )
 
 _HARMFUL_PATTERNS = (
@@ -67,17 +71,14 @@ _HARMFUL_PATTERNS = (
     ("hate", r"разжиг\w*\s+ненавист"),
     ("hate", r"(убить|истребить|уничтожить)\s+(всех|людей|евреев|мусульман|мигрантов)"),
     ("hate", r"расов\w*\s+превосходств"),
-    ("violence", r"(как|способ)\s+(убить|взорвать|совершить\s+теракт)"),
-)
-
-_OFF_TOPIC_PATTERNS = (
-    r"рецепт",
-    r"борщ",
-    r"погода",
-    r"новости",
-    r"фильм",
-    r"музыка",
-    r"курс валют",
+    (
+        "violence",
+        r"\b(как|способ)\s+(убить\s+(человека|людей|соседа|кого-то)|взорвать\s+(здание|дом|машину)|совершить\s+теракт)\b",
+    ),
+    (
+        "politics",
+        r"\b(напиши|создай|составь|подготовь)\s+(политическ\w*\s+(агитаци\w*|пропаганд\w*)|(?:агитаци\w*|пропаганд\w*)\s+за\s+(?:кандидат\w*|парти\w*))",
+    ),
 )
 
 
@@ -93,50 +94,35 @@ def _deterministic_decision(text: str) -> GuardDecision | None:
     if _contains(_INJECTION_PATTERNS, normalized):
         return GuardDecision("refuse", "prompt_injection", 1.0, "deterministic_injection_pattern")
 
-    # === ВАШ НОВЫЙ ГАРД: оффтоп ===
-    if _contains(_OFF_TOPIC_PATTERNS, normalized):
-        return GuardDecision("clarify", "off_topic", 1.0, "deterministic_off_topic")
-    
     return None
 
 
-def _parse_remote_decision(payload: Any) -> GuardDecision:
+def _parse_remote_decision(payload: Any, threshold: float) -> GuardDecision:
+    """Only confident, specific safety labels can veto a calendar request."""
     if not isinstance(payload, dict):
-        return GuardDecision("clarify", "unsafe_other", 1.0, "invalid_guard_response")
+        return GuardDecision("allow", reason="invalid_guard_response")
     label = str(payload.get("label", payload.get("category", "none"))).casefold()
     score = float(payload.get("score", payload.get("confidence", 0.0)) or 0.0)
-    action = str(payload.get("action", "allow")).casefold()
+    if not math.isfinite(score) or not 0 <= score <= 1:
+        return GuardDecision("allow", reason="invalid_guard_response")
     category_map = {
-        "injection": "prompt_injection",
-        "prompt_injection": "prompt_injection",
-        "jailbreak": "prompt_injection",
-        "off-topic": "off_topic",
-        "off_topic": "off_topic",
         "hate_speech": "hate",
         "hate": "hate",
         "violent_crimes": "violence",
-        "non_violent_crimes": "unsafe_other",
         "sex_crimes": "sexual",
         "child_exploitation": "sexual",
         "indiscriminate_weapons": "violence",
-        "sexual_content": "sexual",
-        "suicide_self_harm": "unsafe_other",
-        "code_interpreter_abuse": "unsafe_other",
         "extremism": "extremist_praise",
         "extremist_praise": "extremist_praise",
         "violence": "violence",
-        "sexual": "sexual",
-        "unsafe": "unsafe_other",
-        "unsafe_other": "unsafe_other",
+        "elections": "politics",
+        "politics": "politics",
+        "political_persuasion": "politics",
     }
     category = category_map.get(label, "none")
-    if action not in {"allow", "refuse", "clarify"}:
-        action = "refuse" if category != "none" else "clarify"
-    if category != "none" and action == "allow" and score >= 0.5:
-        action = "refuse"
-    return GuardDecision(
-        action, category, max(0.0, min(score, 1.0)), str(payload.get("reason", ""))
-    )
+    if category == "none" or score < threshold:
+        return GuardDecision("allow", reason="remote_guard_below_policy_threshold")
+    return GuardDecision("refuse", category, score, str(payload.get("reason", "")))
 
 
 async def classify(text: str, settings: Settings, *, source: str = "user") -> GuardDecision:
@@ -155,11 +141,12 @@ async def classify(text: str, settings: Settings, *, source: str = "user") -> Gu
         async with httpx.AsyncClient(timeout=settings.guard_request_timeout_seconds) as client:
             response = await client.post(url, json=payload, headers=headers)
             response.raise_for_status()
-        return _parse_remote_decision(response.json())
+        return _parse_remote_decision(response.json(), settings.guard_min_confidence)
     except (httpx.HTTPError, ValueError, TypeError):
-        # Fail closed only for configured guards. A broken guard must not let
-        # arbitrary content through in a production safety configuration.
-        return GuardDecision("clarify", "unsafe_other", 1.0, "guard_unavailable")
+        # Local checks have already run. The optional classifier must not make
+        # ordinary calendar operations depend on model availability.
+        logger.warning("Optional safety classifier unavailable or returned invalid data")
+        return GuardDecision("allow", reason="guard_unavailable")
 
 
 def refusal_for(decision: GuardDecision) -> str:

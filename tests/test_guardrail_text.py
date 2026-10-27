@@ -8,9 +8,9 @@
 import json
 from datetime import UTC, datetime
 from pathlib import Path
-from uuid import uuid4
 
 import pytest
+from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
@@ -99,9 +99,36 @@ async def _count_operations(gb_session, user: User) -> int:
     return len(result.scalars().all())
 
 
+@pytest.mark.parametrize(
+    "title",
+    ["Посмотреть фильм", "Найти рецепт борща", "Урок музыки", "Проверить погоду"],
+)
+async def test_ordinary_topics_are_saved_through_agent(monkeypatch, gb_session, title):
+    user, _, _, context = await _make_context(gb_session, f"Создай задачу: {title}")
+
+    async def complete(_messages, _tools):
+        return tool_call(
+            "save-task",
+            "commit_calendar_command",
+            {
+                "reply": f"Создана задача: {title}",
+                "mutations": [
+                    {"operation": "create", "resource": "task", "payload": {"title": title}}
+                ],
+            },
+        )
+
+    monkeypatch.setattr(agent, "_complete_react", complete)
+    result = await run_agent(f"Создай задачу: {title}", context)
+    assert result.state == "completed"
+    assert title in json.loads(result.result)["reply"]
+    assert await _count_operations(gb_session, user) == 1
+
+
 # =====================================================================
 # Часть 1: Прямые тесты classify() — детерминированные паттерны гарда
 # =====================================================================
+
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("case", CASES, ids=lambda c: c["case_id"])
@@ -134,7 +161,14 @@ async def test_classify_direct(case):
 
 def test_refusal_messages_do_not_echo_unsafe():
     """Отказы не содержат опасный текст во входе."""
-    for category in ("hate", "extremist_praise", "violence", "sexual", "prompt_injection", "off_topic"):
+    for category in (
+        "hate",
+        "extremist_praise",
+        "violence",
+        "sexual",
+        "prompt_injection",
+        "off_topic",
+    ):
         decision = GuardDecision("refuse", category, 1.0, "test")
         response = refusal_for(decision)
         assert response is not None
@@ -144,6 +178,7 @@ def test_refusal_messages_do_not_echo_unsafe():
 # =====================================================================
 # Часть 2: Сквозные тесты run_agent() через _guard_input
 # =====================================================================
+
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("case", CASES, ids=lambda c: c["case_id"])
@@ -156,7 +191,6 @@ async def test_run_agent_guardrail(monkeypatch, gb_session, case):
     if user_input == "__LONG_INPUT__":
         user_input = "x" * 10_001
 
-    expected_action = case["expected_action"]
     expected_state = case["expected_state"]
     expected_mutations = case["expected_db_mutations"]
     expected_reply = case.get("expected_reply_contains")
@@ -165,7 +199,7 @@ async def test_run_agent_guardrail(monkeypatch, gb_session, case):
 
     # --- API-уровень валидации (AgentInput) ---
     if llm_response_type == "api_validation":
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             AgentInput.model_validate({"text": user_input})
         return
 
@@ -179,7 +213,9 @@ async def test_run_agent_guardrail(monkeypatch, gb_session, case):
             if not llm_responses:
                 return {"role": "assistant", "content": None, "tool_calls": []}
             spec = llm_responses.pop(0)
-            return tool_call(call_id=f"call-{spec['name']}", name=spec["name"], arguments=spec["arguments"])
+            return tool_call(
+                call_id=f"call-{spec['name']}", name=spec["name"], arguments=spec["arguments"]
+            )
         return {"role": "assistant", "content": None, "tool_calls": []}
 
     monkeypatch.setattr(agent, "_complete_react", complete)
@@ -217,12 +253,13 @@ async def test_run_agent_guardrail(monkeypatch, gb_session, case):
 # Часть 3: Валидация AgentInput отдельно
 # =====================================================================
 
+
 @pytest.mark.asyncio
 async def test_agent_input_validation_rejects_bad_text():
     """AgentInput не пропускает пустые и слишком длинные строки."""
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError):
         AgentInput.model_validate({"text": "   "})
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError):
         AgentInput.model_validate({"text": "x" * 10_001})
     valid = AgentInput.model_validate({"text": "создай задачу"})
     assert valid.text == "создай задачу"

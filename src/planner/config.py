@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     guard_api_key: str | None = None
     guard_model: str = "auren-research/lunaris-guardv3"
     guard_request_timeout_seconds: float = Field(default=10, gt=0)
+    guard_min_confidence: float = Field(default=0.9, ge=0, le=1)
     agent_max_model_turns: int = Field(default=6, ge=1, le=20)
     agent_max_tool_calls: int = Field(default=12, ge=1, le=100)
     agent_max_observation_items: int = Field(default=100, ge=1, le=500)
