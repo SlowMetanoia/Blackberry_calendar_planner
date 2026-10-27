@@ -16,8 +16,14 @@ import {
 } from "../../api";
 import { browserTimeZone } from "../format";
 import { collectPages } from "../pagination";
+import {
+  applyTaskAction,
+  taskActionNotices,
+  type TaskAction,
+} from "../task-actions";
 import type {
   AgentMessage,
+  CalendarEntry,
   CalendarOperation,
   ConversationSummary,
 } from "../../types";
@@ -26,14 +32,33 @@ const terminal = new Set(["needs_clarification", "completed", "failed"]);
 const pollDelay = (ms: number) =>
   new Promise((resolve) => setTimeout(resolve, ms));
 
+export type QueuedMessageStatus = "waiting" | "sending" | "editing" | "failed";
+
+export type QueuedMessage = {
+  localId: string;
+  kind: "text" | "audio";
+  text: string;
+  audio?: Blob;
+  createdAt: string;
+  status: QueuedMessageStatus;
+};
+
+export type TaskNotice = {
+  id: number;
+  text: string;
+  operationId: string | null;
+};
+
 export type SessionState = {
   token: string | null;
   messages: AgentMessage[];
+  queue: QueuedMessage[];
   sessions: ConversationSummary[];
   history: CalendarOperation[];
   conversation: string | null;
   error: string;
   calendarRevision: number;
+  taskNotice: TaskNotice | null;
   setError: (message: string) => void;
   clearError: () => void;
   authenticate: (
@@ -52,9 +77,17 @@ export type SessionState = {
   receiveMessage: (message: AgentMessage) => void;
   sendText: (text: string) => Promise<void>;
   sendAudio: (blob: Blob) => Promise<void>;
+  removeQueued: (localId: string) => void;
+  editQueued: (localId: string) => void;
+  saveQueued: (localId: string, text: string) => void;
+  cancelEditQueued: (localId: string) => void;
+  retryQueued: (localId: string) => void;
   openConversation: (id: string) => Promise<void>;
   startNewConversation: () => void;
   undo: (id: string) => Promise<void>;
+  changeTask: (entry: CalendarEntry, action: TaskAction) => Promise<void>;
+  undoTaskNotice: () => Promise<void>;
+  dismissTaskNotice: () => void;
   getConversationId: () => string | null;
 };
 
@@ -62,6 +95,10 @@ export type SessionStore = StoreApi<SessionState>;
 
 export function createSessionStore(): SessionStore {
   let selectionVersion = 0;
+  let queueCounter = 0;
+  let noticeCounter = 0;
+  // The selection version whose queued message is currently being posted.
+  let postingVersion: number | null = null;
 
   return createStore<SessionState>()((set, get) => {
     const mergeMessage = (message: AgentMessage) =>
@@ -86,12 +123,85 @@ export function createSessionStore(): SessionStore {
       });
     };
 
+    const updateQueued = (
+      localId: string,
+      change: Partial<Omit<QueuedMessage, "localId">>,
+    ) =>
+      set((state) => ({
+        queue: state.queue.map((item) =>
+          item.localId === localId ? { ...item, ...change } : item,
+        ),
+      }));
+
+    const agentBusy = () =>
+      get().messages.some((message) => !terminal.has(message.status));
+
+    // Queued messages are posted one at a time, and only after the agent has
+    // answered the previous one, so the server sees them in the order typed.
+    const dispatchQueue = () => {
+      const version = selectionVersion;
+      const next = get().queue[0];
+      if (postingVersion === version || next?.status !== "waiting") return;
+      if (agentBusy()) return;
+      postingVersion = version;
+      updateQueued(next.localId, { status: "sending" });
+      void (async () => {
+        let message: AgentMessage;
+        try {
+          message =
+            next.kind === "audio" && next.audio
+              ? await sendAudioMessage(next.audio, get().conversation)
+              : await sendMessage(next.text, get().conversation);
+        } catch (error) {
+          if (postingVersion === version) postingVersion = null;
+          if (version !== selectionVersion) return dispatchQueue();
+          updateQueued(next.localId, { status: "failed" });
+          set({ error: (error as Error).message });
+          return;
+        }
+        if (postingVersion === version) postingVersion = null;
+        if (version !== selectionVersion) return dispatchQueue();
+        set((state) => ({
+          queue: state.queue.filter((item) => item.localId !== next.localId),
+        }));
+        try {
+          await acceptWithVersion(message, version);
+        } catch (error) {
+          set({ error: (error as Error).message });
+        }
+      })();
+    };
+
+    const enqueue = (item: Pick<QueuedMessage, "kind" | "text" | "audio">) => {
+      set((state) => ({
+        queue: [
+          ...state.queue,
+          {
+            ...item,
+            localId: `local-${++queueCounter}`,
+            createdAt: new Date().toISOString(),
+            status: "waiting",
+          },
+        ],
+      }));
+      dispatchQueue();
+    };
+
     const pollMessage = async (id: string, version: number) => {
       for (;;) {
-        const message = await getMessage(id);
+        let message: AgentMessage;
+        try {
+          message = await getMessage(id);
+        } catch (error) {
+          if (version !== selectionVersion) return;
+          set({ error: (error as Error).message });
+          await pollDelay(2000);
+          continue;
+        }
         if (version !== selectionVersion) return;
         mergeMessage(message);
         if (terminal.has(message.status)) {
+          dispatchQueue();
           await refreshHistory();
           set((state) => ({ calendarRevision: state.calendarRevision + 1 }));
           return;
@@ -123,22 +233,26 @@ export function createSessionStore(): SessionStore {
       set({
         token: null,
         messages: [],
+        queue: [],
         sessions: [],
         history: [],
         conversation: null,
         error: message,
         calendarRevision: 0,
+        taskNotice: null,
       });
     };
 
     return {
       token: getStoredToken(),
       messages: [],
+      queue: [],
       sessions: [],
       history: [],
       conversation: null,
       error: "",
       calendarRevision: 0,
+      taskNotice: null,
 
       setError: (message) => set({ error: message }),
       clearError: () => set({ error: "" }),
@@ -203,6 +317,7 @@ export function createSessionStore(): SessionStore {
         mergeMessage(message);
         set({ conversation: message.conversation_id });
         if (terminal.has(message.status)) {
+          dispatchQueue();
           void refreshHistory().catch((error) =>
             set({ error: (error as Error).message }),
           );
@@ -215,38 +330,67 @@ export function createSessionStore(): SessionStore {
 
       sendText: async (text) => {
         if (!text.trim()) return;
-        const version = selectionVersion;
-        try {
-          await acceptWithVersion(
-            await sendMessage(text.trim(), get().conversation),
-            version,
-          );
-        } catch (error) {
-          set({ error: (error as Error).message });
-        }
+        enqueue({ kind: "text", text: text.trim() });
       },
 
       sendAudio: async (blob) => {
         if (!blob.size) return;
-        const version = selectionVersion;
-        try {
-          await acceptWithVersion(
-            await sendAudioMessage(blob, get().conversation),
-            version,
-          );
-        } catch (error) {
-          set({ error: (error as Error).message });
+        enqueue({ kind: "audio", text: "", audio: blob });
+      },
+
+      removeQueued: (localId) => {
+        set((state) => ({
+          queue: state.queue.filter(
+            (item) => item.localId !== localId || item.status === "sending",
+          ),
+        }));
+        dispatchQueue();
+      },
+
+      editQueued: (localId) => {
+        const item = get().queue.find((entry) => entry.localId === localId);
+        if (item?.kind !== "text" || item.status === "sending") return;
+        updateQueued(localId, { status: "editing" });
+      },
+
+      saveQueued: (localId, text) => {
+        const item = get().queue.find((entry) => entry.localId === localId);
+        if (item?.status !== "editing") return;
+        if (!text.trim()) {
+          get().removeQueued(localId);
+          return;
         }
+        updateQueued(localId, { text: text.trim(), status: "waiting" });
+        dispatchQueue();
+      },
+
+      cancelEditQueued: (localId) => {
+        const item = get().queue.find((entry) => entry.localId === localId);
+        if (item?.status !== "editing") return;
+        updateQueued(localId, { status: "waiting" });
+        dispatchQueue();
+      },
+
+      retryQueued: (localId) => {
+        const item = get().queue.find((entry) => entry.localId === localId);
+        if (item?.status !== "failed") return;
+        updateQueued(localId, { status: "waiting" });
+        dispatchQueue();
       },
 
       openConversation: async (id) => {
         const version = ++selectionVersion;
-        set({ conversation: id, messages: [], error: "" });
+        set({ conversation: id, messages: [], queue: [], error: "" });
         try {
           const all = await collectPages((offset) =>
             getConversationHistory(id, 100, offset),
           );
-          if (version === selectionVersion) set({ messages: all });
+          if (version !== selectionVersion) return;
+          set({ messages: all });
+          all
+            .filter((message) => !terminal.has(message.status))
+            .forEach((message) => void pollMessage(message.id, version));
+          dispatchQueue();
         } catch (error) {
           if (version === selectionVersion)
             set({ error: (error as Error).message });
@@ -255,7 +399,7 @@ export function createSessionStore(): SessionStore {
 
       startNewConversation: () => {
         selectionVersion++;
-        set({ conversation: null, messages: [], error: "" });
+        set({ conversation: null, messages: [], queue: [], error: "" });
       },
 
       undo: async (id) => {
@@ -267,6 +411,37 @@ export function createSessionStore(): SessionStore {
           set({ error: (error as Error).message });
         }
       },
+
+      changeTask: async (entry, action) => {
+        try {
+          await applyTaskAction(entry, action);
+          await refreshHistory();
+        } catch (error) {
+          set({ error: (error as Error).message });
+          return;
+        } finally {
+          set((state) => ({ calendarRevision: state.calendarRevision + 1 }));
+        }
+        // History is newest first, so the first REST change of this task is ours.
+        const operation = get().history.find(
+          (item) => item.target_id === entry.id && item.origin === "rest",
+        );
+        set({
+          taskNotice: {
+            id: ++noticeCounter,
+            text: `Задача «${entry.title}» ${taskActionNotices[action]}`,
+            operationId: operation?.id ?? null,
+          },
+        });
+      },
+
+      undoTaskNotice: async () => {
+        const notice = get().taskNotice;
+        set({ taskNotice: null });
+        if (notice?.operationId) await get().undo(notice.operationId);
+      },
+
+      dismissTaskNotice: () => set({ taskNotice: null }),
 
       getConversationId: () => get().conversation,
     };

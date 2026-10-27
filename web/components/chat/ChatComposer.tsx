@@ -81,7 +81,12 @@ export function ChatComposer({
   }
 
   return (
-    <footer className="h-24 shrink-0 border-t bg-muted/30 px-3 pt-2.5 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-6 sm:py-3">
+    <footer className="relative shrink-0 bg-background md:h-24 px-3 pt-2 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-6 sm:pt-2.5 sm:pb-3">
+      {/* Messages fade out above the composer instead of being cut by a line. */}
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-x-0 bottom-full h-7 bg-gradient-to-b from-transparent to-background"
+      />
       <form
         className="mx-auto flex w-full max-w-3xl items-center gap-1.5 sm:gap-2"
         onSubmit={submit}
@@ -89,7 +94,7 @@ export function ChatComposer({
         <Input
           aria-label="Сообщение"
           placeholder="Задача или вопрос…"
-          className="h-11 flex-1 bg-card"
+          className="h-11 flex-1 bg-card sm:h-9"
           value={text}
           onChange={(e) => {
             setText(e.target.value);
@@ -109,6 +114,7 @@ export function ChatComposer({
             type="button"
             variant="outline"
             size="icon-lg"
+            className="size-11 shrink-0 sm:size-9"
             aria-label="Завершить hands-free диалог"
             onClick={onStopConversation}
           >

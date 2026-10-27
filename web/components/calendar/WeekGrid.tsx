@@ -13,6 +13,38 @@ import { useHorizontalSwipe } from "../../libs/hooks/use-horizontal-swipe";
 const HOUR_HEIGHT = 48;
 const DAY_MINUTES = 24 * 60;
 const MIN_BLOCK_HEIGHT = 18;
+// Narrower blocks turn titles into unreadable slivers, so overlapping entries
+// beyond what fits collapse into a "+N" counter.
+const MIN_LANE_WIDTH = 64;
+const MIN_LANES = 2;
+const MAX_LANES = 4;
+const HOUR_SCALE_WIDTH = 48;
+const SCROLLBAR_GUTTER = 10;
+
+export function lanesForWidth(columnWidth: number): number {
+  if (!Number.isFinite(columnWidth) || columnWidth <= 0) return 3;
+  return Math.max(
+    MIN_LANES,
+    Math.min(MAX_LANES, Math.floor(columnWidth / MIN_LANE_WIDTH)),
+  );
+}
+
+// `active` re-attaches the observer when the mobile and desktop grids swap.
+function useColumnWidth(days: number, gutter: number, active: boolean) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [width, setWidth] = useState(0);
+  useEffect(() => {
+    const element = ref.current;
+    if (!active || !element) return;
+    const update = () =>
+      setWidth((element.clientWidth - HOUR_SCALE_WIDTH - gutter) / days);
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [days, gutter, active]);
+  return { ref, width };
+}
 const monthShortFormat = new Intl.DateTimeFormat("ru-RU", { month: "short" });
 const mobileDayFormat = new Intl.DateTimeFormat("ru-RU", {
   weekday: "long",
@@ -28,6 +60,41 @@ type PositionedEntry = {
   column: number;
   columns: number;
 };
+
+type OverflowGroup = {
+  key: string;
+  start: number;
+  end: number;
+  column: number;
+  columns: number;
+  entries: CalendarEntry[];
+};
+
+export type WeekDayLayout = {
+  items: PositionedEntry[];
+  overflow: OverflowGroup[];
+};
+
+function assignLanes(
+  cluster: PositionedEntry[],
+  lanes: number,
+): { placed: PositionedEntry[]; rest: PositionedEntry[]; used: number } {
+  const columnEnds: number[] = [];
+  const placed: PositionedEntry[] = [];
+  const rest: PositionedEntry[] = [];
+  cluster.forEach((item) => {
+    let column = columnEnds.findIndex((end) => end <= item.start);
+    if (column === -1 && columnEnds.length < lanes) {
+      column = columnEnds.length;
+      columnEnds.push(item.end);
+    } else if (column !== -1) {
+      columnEnds[column] = item.end;
+    }
+    if (column === -1) rest.push(item);
+    else placed.push({ ...item, column });
+  });
+  return { placed, rest, used: columnEnds.length };
+}
 
 function clock(minutes: number): string {
   const hours = Math.floor(minutes / 60) % 24;
@@ -48,7 +115,10 @@ function entryBounds(entry: CalendarEntry): { start: number; end: number } | nul
   return { start, end: Math.min(DAY_MINUTES, start + duration) };
 }
 
-export function layoutEntries(entries: CalendarEntry[]): PositionedEntry[] {
+export function layoutEntries(
+  entries: CalendarEntry[],
+  maxLanes = Number.POSITIVE_INFINITY,
+): WeekDayLayout {
   const items = entries
     .map((entry) => {
       const bounds = entryBounds(entry);
@@ -65,24 +135,28 @@ export function layoutEntries(entries: CalendarEntry[]): PositionedEntry[] {
     .filter((item): item is PositionedEntry => item !== null)
     .sort((left, right) => left.start - right.start || left.end - right.end);
 
-  const result: PositionedEntry[] = [];
+  const result: WeekDayLayout = { items: [], overflow: [] };
   let cluster: PositionedEntry[] = [];
   let clusterEnd = -1;
 
   function flush() {
     if (!cluster.length) return;
-    const columnEnds: number[] = [];
-    cluster.forEach((item) => {
-      let column = columnEnds.findIndex((end) => end <= item.start);
-      if (column === -1) {
-        column = columnEnds.length;
-        columnEnds.push(item.end);
-      } else {
-        columnEnds[column] = item.end;
-      }
-      item.column = column;
-    });
-    cluster.forEach((item) => result.push({ ...item, columns: columnEnds.length }));
+    let lanes = assignLanes(cluster, Number.POSITIVE_INFINITY);
+    if (lanes.used > maxLanes) {
+      // Keep the last lane for the counter of everything that did not fit.
+      lanes = assignLanes(cluster, maxLanes - 1);
+      const { rest } = lanes;
+      result.overflow.push({
+        key: `overflow:${rest[0].key}`,
+        start: Math.min(...rest.map((item) => item.start)),
+        end: Math.max(...rest.map((item) => item.end)),
+        column: maxLanes - 1,
+        columns: maxLanes,
+        entries: rest.map((item) => item.entry),
+      });
+    }
+    const columns = Math.min(lanes.used + (lanes.rest.length ? 1 : 0), maxLanes);
+    lanes.placed.forEach((item) => result.items.push({ ...item, columns }));
     cluster = [];
     clusterEnd = -1;
   }
@@ -106,6 +180,48 @@ function entryBlockClass(entry: CalendarEntry): string {
     ? "border-chart-2 bg-chart-2/15 active:bg-chart-2/25"
     : entry.resource === "reminder" ? "border-chart-4 bg-chart-4/15 active:bg-chart-4/25"
     : "border-primary bg-primary/10 active:bg-primary/15";
+}
+
+function recordsWord(count: number): string {
+  const tens = count % 100;
+  const ones = count % 10;
+  if (tens >= 11 && tens <= 14) return "записей";
+  if (ones === 1) return "запись";
+  if (ones >= 2 && ones <= 4) return "записи";
+  return "записей";
+}
+
+function OverflowBlock({
+  group,
+  date,
+  onOpenDate,
+}: {
+  group: OverflowGroup;
+  date: string;
+  onOpenDate: (date: string) => void;
+}) {
+  const height = (group.end - group.start) * (HOUR_HEIGHT / 60);
+  const count = group.entries.length;
+  return (
+    <button
+      type="button"
+      aria-label={`Ещё ${count} ${recordsWord(count)} с ${clock(group.start)}, открыть день`}
+      title={group.entries.map((entry) => entry.title).join("\n")}
+      className="absolute z-10 flex items-start justify-center overflow-hidden rounded-md border border-dashed border-foreground/25 bg-muted px-1 py-0.5 text-[11px] font-semibold tabular-nums text-foreground/75 outline-none transition-colors hover:bg-muted/70 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50"
+      style={{
+        top: (group.start / 60) * HOUR_HEIGHT + 1,
+        height: Math.max(height - 2, MIN_BLOCK_HEIGHT),
+        left: `calc(${(group.column / group.columns) * 100}% + 1px)`,
+        width: `calc(${100 / group.columns}% - 2px)`,
+      }}
+      onClick={(event) => {
+        event.stopPropagation();
+        onOpenDate(date);
+      }}
+    >
+      +{count}
+    </button>
+  );
 }
 
 function HourScale({ className }: { className?: string }) {
@@ -159,6 +275,12 @@ export function WeekGrid({
   const selectedEntries = selectedDay
     ? entriesByDate.get(selectedDay.key) || []
     : [];
+  const desktopColumns = useColumnWidth(7, SCROLLBAR_GUTTER, !isMobile);
+  const mobileColumn = useColumnWidth(1, 0, isMobile && Boolean(selectedDay));
+  const selectedLayout = layoutEntries(
+    selectedEntries,
+    lanesForWidth(mobileColumn.width),
+  );
 
   useEffect(() => {
     setSelectedKey((current) =>
@@ -310,6 +432,7 @@ export function WeekGrid({
           >
             {selectedDay && (
               <div
+                ref={mobileColumn.ref}
                 className="grid"
                 style={{
                   gridTemplateColumns: "3rem minmax(0, 1fr)",
@@ -339,7 +462,15 @@ export function WeekGrid({
                     </div>
                   )}
 
-                  {layoutEntries(selectedEntries).map(
+                  {selectedLayout.overflow.map((group) => (
+                    <OverflowBlock
+                      key={group.key}
+                      group={group}
+                      date={selectedDay.key}
+                      onOpenDate={onOpenDate}
+                    />
+                  ))}
+                  {selectedLayout.items.map(
                     ({ entry, key, start, end, column, columns }) => {
                       const height = (end - start) * (HOUR_HEIGHT / 60);
                       return (
@@ -348,7 +479,8 @@ export function WeekGrid({
                           key={key}
                           aria-label={`${entry.title}, ${clock(start)}–${clock(end)}`}
                           className={cn(
-                            "absolute z-10 flex flex-col justify-start overflow-hidden rounded-md border-l-[3px] px-2 py-1 text-left text-xs leading-tight outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring/50",
+                            "absolute z-10 flex flex-col justify-start overflow-hidden rounded-md border-l-[3px] px-2 text-left text-xs leading-tight outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring/50",
+                            height < 26 ? "py-px" : "py-1",
                             entryBlockClass(entry),
                           )}
                           style={{
@@ -434,6 +566,7 @@ export function WeekGrid({
             viewportClassName="overscroll-contain"
           >
             <div
+              ref={desktopColumns.ref}
               className="grid"
               style={{
                 gridTemplateColumns: "3rem repeat(7, minmax(0, 1fr)) 0.625rem",
@@ -443,8 +576,9 @@ export function WeekGrid({
               <HourScale />
 
               {days.map((day) => {
-                const positioned = layoutEntries(
+                const layout = layoutEntries(
                   entriesByDate.get(day.key) || [],
+                  lanesForWidth(desktopColumns.width),
                 );
                 const isToday = day.key === today;
                 return (
@@ -470,7 +604,15 @@ export function WeekGrid({
                       </div>
                     )}
 
-                    {positioned.map(
+                    {layout.overflow.map((group) => (
+                      <OverflowBlock
+                        key={group.key}
+                        group={group}
+                        date={day.key}
+                        onOpenDate={onOpenDate}
+                      />
+                    ))}
+                    {layout.items.map(
                       ({ entry, key, start, end, column, columns }) => {
                         const height = (end - start) * (HOUR_HEIGHT / 60);
                         const showTime = height >= 30;

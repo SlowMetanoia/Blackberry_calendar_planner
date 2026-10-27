@@ -3,6 +3,7 @@ import { localDateKey } from "../format";
 import {
   occurrencesToEntries,
   partitionOccurrenceEntries,
+  reminderEntry,
 } from "../planner-data";
 import { useCalendarStore, useSessionStore } from "../stores";
 import type { CalendarEntry } from "../../types";
@@ -46,7 +47,7 @@ export function useCalendarData() {
 
   const reminderEntries = useMemo<CalendarEntry[]>(() => reminders
     .filter(item => item.status !== "cancelled")
-    .map(reminder => ({id:reminder.id,resource:"reminder",title:reminder.title,startsAt:reminder.remind_at,durationMinutes:null,reminder})), [reminders]);
+    .map(reminderEntry), [reminders]);
 
   const entries = useMemo(
     () =>

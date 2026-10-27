@@ -18,6 +18,7 @@ export function ResourceCard({
   changes,
   footer,
   className = "",
+  onOpen,
 }: {
   badge: ReactNode;
   title: string;
@@ -25,9 +26,25 @@ export function ResourceCard({
   changes?: CalendarOperation["changes"];
   footer?: ReactNode;
   className?: string;
+  onOpen?: () => void;
 }) {
   return (
-    <Card size="sm" className={className}>
+    <Card
+      size="sm"
+      className={`${className} ${
+        onOpen
+          ? "relative cursor-pointer transition-colors hover:bg-muted/50 has-[button:focus-visible]:ring-2 has-[button:focus-visible]:ring-ring/50"
+          : ""
+      }`}
+    >
+      {onOpen && (
+        <button
+          type="button"
+          aria-label={`Открыть «${title}»`}
+          className="absolute inset-0 z-10 rounded-[inherit] outline-none"
+          onClick={onOpen}
+        />
+      )}
       <CardHeader className="gap-1.5">
         {badge}
         <CardTitle className="text-sm">{title}</CardTitle>

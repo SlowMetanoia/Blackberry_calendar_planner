@@ -1,4 +1,5 @@
 import { MessageSquarePlusIcon, Volume2Icon } from "lucide-react";
+import type { EntryRef } from "../../libs/entry-loader";
 import type { AgentMessage } from "../../types";
 import { useVoiceStore } from "../../libs/stores";
 import { Alert, AlertDescription } from "../ui/alert";
@@ -12,10 +13,12 @@ export function BotMessage({
   message,
   showThinking,
   startNewConversation,
+  onOpenRecord,
 }: {
   message: AgentMessage;
   showThinking: boolean;
   startNewConversation: () => void;
+  onOpenRecord?: (ref: EntryRef) => void;
 }) {
   return (
     <Card
@@ -29,10 +32,18 @@ export function BotMessage({
           <p className="text-sm text-muted-foreground">Думаю…</p>
         ) : null}
         {message.display_items.map((item) => (
-          <ReadCard read={item} key={`${item.resource}-${item.id}`} />
+          <ReadCard
+            read={item}
+            key={`${item.resource}-${item.id}`}
+            onOpenRecord={onOpenRecord}
+          />
         ))}
         {message.operations.map((item) => (
-          <OperationReceipt item={item} key={item.id} />
+          <OperationReceipt
+            item={item}
+            key={item.id}
+            onOpenRecord={onOpenRecord}
+          />
         ))}
         {message.collision_notices?.map((notice) => (
           <Alert key={notice.collision_id} className="mt-2 border-lime-400 bg-lime-50 text-lime-950">

@@ -7,6 +7,12 @@ export type EditorState = {
   date?: string;
   time?: string;
 };
-export type DayHover = { date: string; x: number; y: number };
+export type AnchorRect = {
+  left: number;
+  right: number;
+  top: number;
+  bottom: number;
+};
+export type DayHover = { date: string; anchor: AnchorRect };
 export type PreviewAnchor = { x: number; y: number };
 export type ResourceMetadataItem = { label?: string; value: string };

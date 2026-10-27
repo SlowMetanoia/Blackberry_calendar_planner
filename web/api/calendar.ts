@@ -55,6 +55,9 @@ export const getEvents = (options: EventListOptions = {}) =>
     }),
   );
 
+export const getTask = (id: string) => request<Task>(`/tasks/${id}`);
+export const getEvent = (id: string) => request<Event>(`/events/${id}`);
+
 export const createTask = (data: Omit<Task, "id" | "owner_id">) =>
   request<Task>("/tasks", { method: "POST", body: JSON.stringify(data) });
 export const updateTask = (

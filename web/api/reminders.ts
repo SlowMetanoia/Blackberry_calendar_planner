@@ -9,6 +9,7 @@ export const getReminders = (options: ReminderListOptions = {}) => {
   if (options.remindTo) params.set("remind_to", options.remindTo);
   return request<Page<Reminder>>(`/reminders?${params}`);
 };
+export const getReminder = (id: string) => request<Reminder>(`/reminders/${id}`);
 export const createReminder = (data: Omit<Reminder, "id" | "owner_id" | "status" | "cancelled_reason" | "fired_at" | "cancelled_at" | "created_at">) => request<Reminder>("/reminders", {method: "POST", body: JSON.stringify(data)});
 export const updateReminder = (id: string, data: Partial<Pick<Reminder,"title" | "description" | "remind_at" | "status" | "relative_offset_minutes">>) => request<Reminder>(`/reminders/${id}`, {method:"PATCH", body:JSON.stringify(data)});
 export const deleteReminder = (id: string) => request<void>(`/reminders/${id}`, {method:"DELETE"});

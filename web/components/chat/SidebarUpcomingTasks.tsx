@@ -1,6 +1,8 @@
 import { CalendarClockIcon } from "lucide-react";
 import type { UpcomingTask } from "../../libs/hooks/use-upcoming-tasks";
 import { formatHistoryTime, localDateKey } from "../../libs/format";
+import { useUiStore } from "../../libs/stores";
+import { TaskActions } from "../shared/TaskActions";
 import { Skeleton } from "../ui/skeleton";
 
 const dayMonth = new Intl.DateTimeFormat("ru-RU", {
@@ -28,6 +30,8 @@ export function SidebarUpcomingTasks({
   loading: boolean;
   error: string;
 }) {
+  const openEntry = useUiStore((state) => state.openEntry);
+
   if (loading && !items.length) {
     return (
       <div className="grid gap-2 px-2 py-1.5" aria-busy="true">
@@ -53,29 +57,40 @@ export function SidebarUpcomingTasks({
   return (
     <ul className="grid gap-0.5 px-1">
       {items.map((item) => (
-        <li key={item.task.id}>
-          <div className="flex min-w-0 items-start gap-2 rounded-md px-1.5 py-1.5">
-            <span
-              aria-hidden="true"
-              className={`mt-1.5 size-1.5 shrink-0 rounded-full ${
-                item.overdue ? "bg-destructive" : "bg-sidebar-primary"
-              }`}
-            />
-            <span className="grid min-w-0 flex-1 gap-0.5">
-              <strong className="truncate text-[13px] font-medium leading-[1.15rem]">
-                {item.task.title}
-              </strong>
-              <small
-                className={`truncate text-[11.5px] tabular-nums ${
-                  item.overdue
-                    ? "text-destructive"
-                    : "text-sidebar-foreground/45"
+        <li key={item.entry.occurrenceKey || item.entry.id}>
+          <div className="group/task flex min-w-0 items-start gap-1 rounded-md hover:bg-sidebar-accent/10">
+            <button
+              type="button"
+              aria-label={`Открыть «${item.entry.title}»`}
+              onClick={() => openEntry({ entry: item.entry })}
+              className="flex min-w-0 flex-1 items-start gap-2 rounded-md py-1.5 pl-1.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring/50"
+            >
+              <span
+                aria-hidden="true"
+                className={`mt-1.5 size-1.5 shrink-0 rounded-full ${
+                  item.overdue ? "bg-sidebar-destructive" : "bg-sidebar-primary"
                 }`}
-              >
-                {item.overdue ? "Просрочено · " : ""}
-                {deadlineLabel(item)}
-              </small>
-            </span>
+              />
+              <span className="grid min-w-0 flex-1 gap-0.5">
+                <strong className="truncate text-[13px] font-medium leading-[1.15rem]">
+                  {item.entry.title}
+                </strong>
+                <small
+                  className={`truncate text-[11.5px] tabular-nums ${
+                    item.overdue
+                      ? "text-sidebar-destructive"
+                      : "text-sidebar-foreground/45"
+                  }`}
+                >
+                  {item.overdue ? "Просрочено · " : ""}
+                  {deadlineLabel(item)}
+                </small>
+              </span>
+            </button>
+            <TaskActions
+              entry={item.entry}
+              className="mt-1 mr-1 text-sidebar-foreground/60"
+            />
           </div>
         </li>
       ))}

@@ -88,7 +88,7 @@ function occupiedMinutes(entries: CalendarEntry[]): number {
   return Math.round(total / 60_000);
 }
 
-async function loadWeekOccurrences(
+export async function loadOccurrencesInRange(
   from: Date,
   to: Date,
 ): Promise<CalendarOccurrence[]> {
@@ -123,7 +123,7 @@ export function useWeekOccupancy(): WeekOccupancy {
     setError("");
     void (async () => {
       try {
-        const items = await loadWeekOccurrences(weekStart, weekEnd);
+        const items = await loadOccurrencesInRange(weekStart, weekEnd);
         if (!cancelled) setOccurrences(items);
       } catch {
         if (!cancelled) {

@@ -14,6 +14,7 @@ import type { PlannerView } from "../types";
 import { Button } from "./ui/button";
 import { LoginScreen } from "./auth/LoginScreen";
 import { CalendarView } from "./calendar/CalendarView";
+import { CalendarDialogsHost } from "./calendar/CalendarDialogsHost";
 import { ChatHistorySheet, ChatSidebar } from "./chat/ChatSidebar";
 import { ChatView } from "./chat/ChatView";
 import type { MascotMode } from "./chat/Mascot";
@@ -21,6 +22,7 @@ import { HistoryPanel } from "./history/HistoryPanel";
 import { AppSidebar } from "./shared/AppSidebar";
 import { ErrorToast } from "./shared/ErrorToast";
 import { PlannerHeader } from "./shared/PlannerHeader";
+import { TaskNotice } from "./shared/TaskNotice";
 import { ViewPanel } from "./shared/ViewPanel";
 import { detachPushSubscription, NotificationCenter } from "./notifications/NotificationCenter";
 import { GoogleCalendarButton } from "./integrations/GoogleCalendarButton";
@@ -46,6 +48,9 @@ function PlannerApp() {
   const authenticate = useSessionStore((state) => state.authenticate);
   const error = useSessionStore((state) => state.error);
   const clearError = useSessionStore((state) => state.clearError);
+  const taskNotice = useSessionStore((state) => state.taskNotice);
+  const undoTaskNotice = useSessionStore((state) => state.undoTaskNotice);
+  const dismissTaskNotice = useSessionStore((state) => state.dismissTaskNotice);
   const historyCount = useSessionStore((state) => state.history.length);
   const sessions = useSessionStore((state) => state.sessions);
   const conversation = useSessionStore((state) => state.conversation);
@@ -55,6 +60,7 @@ function PlannerApp() {
   const selectView = useUiStore((state) => state.selectView);
   const setNavOpen = useUiStore((state) => state.setNavOpen);
   const toggleSidebar = useUiStore((state) => state.toggleSidebar);
+  const openDay = useUiStore((state) => state.openDay);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [mascotMode, setMascotMode] = useState<MascotMode>("idle");
   const mascotVisible = useVoiceStore((state) => state.mascotVisible);
@@ -146,6 +152,7 @@ function PlannerApp() {
           collapsed={navCollapsed}
           historyCount={historyCount}
           onSelect={selectView}
+          onOpenDate={openDay}
           onClose={() => setNavOpen(false)}
           onToggleCollapsed={toggleSidebar}
           mascotMode={mascotMode}
@@ -193,6 +200,12 @@ function PlannerApp() {
           </ViewPanel>
 
           <ErrorToast message={error} onDismiss={clearError} />
+          <CalendarDialogsHost />
+          <TaskNotice
+            notice={taskNotice}
+            onUndo={() => void undoTaskNotice()}
+            onDismiss={dismissTaskNotice}
+          />
         </section>
 
         {view === "chat" && (

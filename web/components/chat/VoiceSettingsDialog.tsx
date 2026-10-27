@@ -29,7 +29,7 @@ export function VoiceSettingsDialog() {
   return (
     <Dialog>
       <DialogTrigger asChild>
-        <Button type="button" variant="outline" size="icon-lg" aria-label="Настройки голоса">
+        <Button type="button" variant="outline" size="icon-lg" className="size-11 shrink-0 sm:size-9" aria-label="Настройки голоса">
           <Settings2Icon aria-hidden="true" />
         </Button>
       </DialogTrigger>
