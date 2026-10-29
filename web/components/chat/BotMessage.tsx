@@ -46,7 +46,10 @@ export function BotMessage({
           />
         ))}
         {message.collision_notices?.map((notice) => (
-          <Alert key={notice.collision_id} className="mt-2 border-lime-400 bg-lime-50 text-lime-950">
+          <Alert
+            key={notice.collision_id}
+            className="mt-2 border-lime-400 bg-lime-50 text-lime-950"
+          >
             <AlertDescription>{notice.text}</AlertDescription>
           </Alert>
         ))}
@@ -76,13 +79,11 @@ export function BotMessage({
 
 function RepeatSpeechButton({ messageId }: { messageId: string }) {
   const repeat = useVoiceStore((state) => state.repeat);
-  const voiceConnected = useVoiceStore((state) => state.openAirEnabled);
   return (
     <Button
       variant="ghost"
       size="sm"
       className="mt-1 w-fit"
-      disabled={!voiceConnected}
       onClick={() => repeat(messageId)}
     >
       <Volume2Icon aria-hidden="true" />

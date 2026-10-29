@@ -1,6 +1,7 @@
 import io
 import math
 import os
+import re
 import threading
 import wave
 from array import array
@@ -8,6 +9,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Header, HTTPException
 from fastapi.responses import Response
+from num2words import num2words
 from pydantic import BaseModel, Field
 
 VOICES = ("aidar", "baya", "kseniya", "xenia", "eugene")
@@ -19,6 +21,105 @@ _model = None
 _lock = threading.Lock()
 _load_lock = threading.Lock()
 _model_error: str | None = None
+
+MONTHS = (
+    "января",
+    "февраля",
+    "марта",
+    "апреля",
+    "мая",
+    "июня",
+    "июля",
+    "августа",
+    "сентября",
+    "октября",
+    "ноября",
+    "декабря",
+)
+DAY_MONTH = re.compile(r"\b(\d{1,2})\s+(" + "|".join(MONTHS) + r")\b", re.IGNORECASE)
+YEAR = re.compile(r"\b(\d{1,4})\s+года\b", re.IGNORECASE)
+CLOCK = re.compile(r"(?<![\d:])([01]?\d|2[0-3]):([0-5]\d)(?![\d:])")
+NUMBER = re.compile(r"[+−-]?\d+(?:[.,]\d+)?")
+
+
+def _digits_words(value: str) -> str:
+    return " ".join(num2words(int(char), lang="ru") for char in value)
+
+
+def _integer_words(value: str) -> str:
+    if len(value) > 1 and value.startswith("0"):
+        return _digits_words(value)
+    try:
+        return num2words(int(value), lang="ru")
+    except (OverflowError, KeyError):
+        # Russian scale names in num2words are finite; larger integers raise KeyError.
+        return _digits_words(value)
+
+
+def _unit_form(value: int, forms: tuple[str, str, str]) -> str:
+    if 11 <= value % 100 <= 14:
+        return forms[2]
+    ending = value % 10
+    return forms[0] if ending == 1 else forms[1] if 2 <= ending <= 4 else forms[2]
+
+
+def _clock_words(match: re.Match[str]) -> str:
+    hour, minute = map(int, match.groups())
+    hours = f"{num2words(hour, lang='ru')} {_unit_form(hour, ('час', 'часа', 'часов'))}"
+    if minute == 0:
+        return f"{hours} ровно"
+    minutes = num2words(minute, lang="ru", gender="feminine")
+    return f"{hours} {minutes} {_unit_form(minute, ('минута', 'минуты', 'минут'))}"
+
+
+def _number_words(match: re.Match[str]) -> str:
+    value = match.group()
+    sign = ""
+    if value[0] in "+−-":
+        sign = "плюс " if value[0] == "+" else "минус "
+        value = value[1:]
+    parts = re.split(r"[.,]", value)
+    spoken = sign + _integer_words(parts[0])
+    if len(parts) == 2:
+        spoken += " запятая " + _digits_words(parts[1])
+    # Keep numbers inside names audible as separate words (e.g. «Проект2026»).
+    if match.start() and match.string[match.start() - 1].isalpha():
+        spoken = " " + spoken
+    if match.end() < len(match.string) and match.string[match.end()].isalpha():
+        spoken += " "
+    return spoken
+
+
+def normalize_speech_text(text: str) -> str:
+    """Expand numbers before Silero's alphabet filter can discard them."""
+    text = DAY_MONTH.sub(
+        lambda m: (
+            f"{num2words(int(m[1]), lang='ru', to='ordinal', gender='neuter')} {m[2]}"
+            if 1 <= int(m[1]) <= 31
+            else m.group()
+        ),
+        text,
+    )
+    text = YEAR.sub(
+        lambda m: f"{num2words(int(m[1]), lang='ru', to='ordinal', case='genitive')} года",
+        text,
+    )
+    text = CLOCK.sub(_clock_words, text)
+    return " ".join(NUMBER.sub(_number_words, text).split())
+
+
+def _speech_chunks(text: str, max_chars: int = 200) -> list[str]:
+    chunks: list[str] = []
+    remaining = text
+    while len(remaining) > max_chars:
+        boundary = remaining.rfind(" ", 0, max_chars + 1)
+        if boundary <= 0:
+            boundary = max_chars
+        chunks.append(remaining[:boundary])
+        remaining = remaining[boundary:].strip()
+    if remaining:
+        chunks.append(remaining)
+    return chunks
 
 
 def load_model():
@@ -149,12 +250,15 @@ def speech(data: SpeechRequest, authorization: str | None = Header(default=None)
             model = load_model()
         except Exception as exc:
             raise HTTPException(503, "TTS model is temporarily unavailable") from exc
-        audio = model.apply_tts(
-            text=data.input,
-            speaker=data.voice,
-            sample_rate=SAMPLE_RATE,
-            put_accent=True,
-            put_yo=True,
-        )
-        stretched = time_stretch(_samples(audio), data.speed)
+        samples: list[float] = []
+        for chunk in _speech_chunks(normalize_speech_text(data.input)):
+            audio = model.apply_tts(
+                text=chunk,
+                speaker=data.voice,
+                sample_rate=SAMPLE_RATE,
+                put_accent=True,
+                put_yo=True,
+            )
+            samples.extend(_samples(audio))
+        stretched = time_stretch(samples, data.speed)
     return Response(encode_wav(stretched), media_type="audio/wav")

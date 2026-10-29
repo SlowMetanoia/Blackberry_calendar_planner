@@ -5,16 +5,9 @@ import {
   useState,
   type PointerEvent as ReactPointerEvent,
 } from "react";
-import {
-  MessageSquarePlusIcon,
-  MessagesSquareIcon,
-} from "lucide-react";
+import { MessageSquarePlusIcon, MessagesSquareIcon } from "lucide-react";
 import type { EntryRef } from "../../libs/entry-loader";
-import {
-  useSessionStore,
-  useUiStore,
-  useVoiceStore,
-} from "../../libs/stores";
+import { useSessionStore, useUiStore, useVoiceStore } from "../../libs/stores";
 import { Button } from "../ui/button";
 import { ScrollArea } from "../ui/scroll-area";
 import { ChatComposer } from "./ChatComposer";
@@ -43,14 +36,15 @@ export function ChatView({
   );
   const sendText = useSessionStore((state) => state.sendText);
   const recording = useVoiceStore((state) => state.recording);
-  const audioRequestPending = useVoiceStore((state) => state.audioRequestPending);
+  const audioRequestPending = useVoiceStore(
+    (state) => state.audioRequestPending,
+  );
   const openAirEnabled = useVoiceStore((state) => state.openAirEnabled);
   const openAirStatus = useVoiceStore((state) => state.openAirStatus);
   const openAirSilenceMs = useVoiceStore((state) => state.openAirSilenceMs);
   const startRecording = useVoiceStore((state) => state.startRecording);
   const stopRecording = useVoiceStore((state) => state.stopRecording);
   const toggleOpenAir = useVoiceStore((state) => state.toggleOpenAir);
-  const stopConversation = useVoiceStore((state) => state.stopConversation);
   const changeOpenAirSilence = useVoiceStore(
     (state) => state.changeOpenAirSilence,
   );
@@ -173,7 +167,6 @@ export function ChatView({
         openAirSilenceMs={openAirSilenceMs}
         onSendText={handleSendText}
         onToggleOpenAir={toggleOpenAir}
-        onStopConversation={stopConversation}
         onChangeOpenAirSilence={changeOpenAirSilence}
         onStartRecording={handleStartRecording}
         onStopRecording={stopRecording}

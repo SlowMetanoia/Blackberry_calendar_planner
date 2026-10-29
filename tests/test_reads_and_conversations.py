@@ -1,9 +1,14 @@
+import io
 import json
+import uuid
+import wave
 from datetime import UTC, datetime
 
 import pytest
+from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
+from planner import main
 from planner.db import Base
 from planner.main import (
     _message_response,
@@ -14,6 +19,7 @@ from planner.main import (
 from planner.models import AgentMessage, Conversation, Event, MessageStatus, Task, User
 from planner.schemas import UserPreferencesUpdate
 from planner.services import EventService, TaskService
+from planner.voice import pcm16_wave_bytes
 
 
 @pytest.fixture
@@ -120,7 +126,7 @@ async def test_user_preferences_default_and_partial_update(session, user) -> Non
     assert current.upcoming_days == 7
     assert current.open_air_silence_ms == 1500
     assert current.open_air_active_timeout_seconds == 15
-    assert current.voice_output_enabled is False
+    assert current.voice_output_enabled is True
     assert current.tts_voice == "kseniya"
     assert current.tts_speed == 1.0
     assert current.open_air_default is False
@@ -141,6 +147,52 @@ async def test_user_preferences_default_and_partial_update(session, user) -> Non
     assert user.upcoming_days == 14
     assert user.open_air_silence_ms == 2000
     assert user.open_air_active_timeout_seconds == 30
+
+
+@pytest.mark.asyncio
+async def test_manual_speech_is_owner_scoped_and_ignores_auto_speech_setting(
+    session, user, monkeypatch
+):
+    user.voice_output_enabled = False
+    message = AgentMessage(
+        owner_id=user.id,
+        conversation_id=user.id,
+        sequence=1,
+        status=MessageStatus.completed,
+        speech_text="Готово. " * 40,
+    )
+    session.add(message)
+    await session.commit()
+    calls = []
+
+    async def synthesize(text, **kwargs):
+        calls.append((text, kwargs))
+        return pcm16_wave_bytes(b"\0\0" * 160)
+
+    monkeypatch.setattr(main, "_tts_audio", synthesize)
+    response = await main.message_speech(message.id, user=user, session=session)
+    with wave.open(io.BytesIO(response.body)) as wav:
+        assert wav.getnframes() == 160 * len(calls)
+    assert len(calls) > 1
+    assert " ".join(text for text, _ in calls) == message.speech_text.strip()
+    assert user.voice_output_enabled is False
+    stranger = User(id=uuid.uuid4(), email="stranger@example.test", password_hash="x")
+    with pytest.raises(HTTPException) as forbidden:
+        await main.message_speech(message.id, user=stranger, session=session)
+    assert forbidden.value.status_code == 404
+    message.speech_text = None
+    with pytest.raises(HTTPException) as unavailable:
+        await main.message_speech(message.id, user=user, session=session)
+    assert unavailable.value.status_code == 409
+    message.speech_text = "Готово."
+
+    async def offline(*args, **kwargs):
+        raise RuntimeError("offline")
+
+    monkeypatch.setattr(main, "_tts_audio", offline)
+    with pytest.raises(HTTPException) as failed:
+        await main.message_speech(message.id, user=user, session=session)
+    assert failed.value.status_code == 503
 
 
 @pytest.mark.asyncio

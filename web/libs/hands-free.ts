@@ -27,7 +27,9 @@ export function pcm16At16Khz(
   sourceRate: number,
 ): ArrayBuffer {
   const ratio = sourceRate / 16_000;
-  const output = new Int16Array(Math.max(1, Math.floor(samples.length / ratio)));
+  const output = new Int16Array(
+    Math.max(1, Math.floor(samples.length / ratio)),
+  );
   for (let index = 0; index < output.length; index++) {
     const start = Math.floor(index * ratio);
     const end = Math.min(samples.length, Math.floor((index + 1) * ratio));
@@ -53,7 +55,7 @@ export class HandsFreeCapture {
   constructor(
     private readonly options: {
       silenceMs: number;
-      onStart: () => void;
+      onStart: () => boolean | void;
       onPcm: (pcm: ArrayBuffer) => void;
       onEnd: () => void;
     },
@@ -78,6 +80,9 @@ export class HandsFreeCapture {
   }
 
   setPaused(paused: boolean) {
+    // Store notifications can synchronize input while onStart is running.
+    // Keep the current phrase intact when the enabled state has not changed.
+    if (this.enabled === !paused) return;
     this.enabled = !paused;
     this.segmenter.reset();
     this.preRoll = [];
@@ -95,7 +100,8 @@ export class HandsFreeCapture {
     this.source?.disconnect();
     this.sink?.disconnect();
     this.stream?.getTracks().forEach((track) => track.stop());
-    if (this.context && this.context.state !== "closed") void this.context.close();
+    if (this.context && this.context.state !== "closed")
+      void this.context.close();
     this.context = null;
     this.stream = null;
     this.source = null;
@@ -117,7 +123,10 @@ export class HandsFreeCapture {
       while (this.preRollBytes > 16_000 && this.preRoll.length > 1)
         this.preRollBytes -= this.preRoll.shift()!.byteLength;
       if (result === "started") {
-        this.options.onStart();
+        if (this.options.onStart() === false) {
+          this.setPaused(true);
+          return;
+        }
         this.preRoll.forEach(this.options.onPcm);
         this.preRoll = [];
         this.preRollBytes = 0;
@@ -192,6 +201,7 @@ export class HandsFreeSession {
     this.capture?.setPaused(true);
     this.socket?.send(JSON.stringify({ type: "stop" }));
   });
+  private inputBlocked = false;
   private paused = false;
   private stopped = false;
 
@@ -199,6 +209,9 @@ export class HandsFreeSession {
     private readonly options: {
       silenceMs: number;
       activeTimeoutSeconds: number;
+      getConversationId?: () => string | null;
+      beginTurn?: () => boolean;
+      playAudio?: (blob: Blob) => Promise<void>;
       onStatus: (status: OpenAirStatus) => void;
       onTranscript: (text: string) => void;
       onMessage: (message: AgentMessage) => void;
@@ -215,17 +228,30 @@ export class HandsFreeSession {
     this.socket = socket;
     await new Promise<void>((resolve, reject) => {
       socket.onopen = () => resolve();
-      socket.onerror = () => reject(new Error("Не удалось открыть голосовую сессию"));
+      socket.onerror = () =>
+        reject(new Error("Не удалось открыть голосовую сессию"));
     });
+    if (this.stopped) {
+      socket.close();
+      return;
+    }
     this.capture = new HandsFreeCapture({
       silenceMs: this.options.silenceMs,
       onStart: () => {
+        if (this.inputBlocked || this.options.beginTurn?.() === false)
+          return false;
         this.clearReadyTimeout();
         this.utterancePhase = this.status === "armed" ? "wake" : "command";
         this.setStatus(
           this.utterancePhase === "wake" ? "hearing_wake" : "hearing_command",
         );
-        socket.send(JSON.stringify({ type: "utterance_start", sample_rate: 16_000 }));
+        socket.send(
+          JSON.stringify({
+            type: "utterance_start",
+            sample_rate: 16_000,
+            conversation_id: this.options.getConversationId?.(),
+          }),
+        );
       },
       onPcm: (pcm) => socket.send(pcm),
       onEnd: () => {
@@ -245,7 +271,27 @@ export class HandsFreeSession {
       if (!this.stopped) this.options.onStatus("error");
       this.capture?.stop();
     };
-    await this.capture.start();
+    const capture = this.capture;
+    await capture.start();
+    if (this.stopped) capture.stop();
+    else this.syncCapture();
+  }
+
+  setInputBlocked(blocked: boolean) {
+    const changed = this.inputBlocked !== blocked;
+    this.inputBlocked = blocked;
+    if (blocked) this.clearReadyTimeout();
+    if (!this.utterancePhase) this.syncCapture();
+    if (changed && !blocked && this.status === "ready") this.armReadyTimeout();
+  }
+
+  private syncCapture() {
+    this.capture?.setPaused(
+      this.stopped ||
+        this.paused ||
+        this.inputBlocked ||
+        !["armed", "ready"].includes(this.status),
+    );
   }
 
   updateSilenceMs(value: number) {
@@ -259,6 +305,11 @@ export class HandsFreeSession {
 
   pause() {
     this.paused = true;
+    if (["hearing_wake", "hearing_command"].includes(this.status)) {
+      this.utterancePhase = null;
+      this.status = "armed";
+      this.socket?.send(JSON.stringify({ type: "stop" }));
+    }
     this.clearReadyTimeout();
     this.capture?.setPaused(true);
     this.options.onStatus("paused");
@@ -268,7 +319,7 @@ export class HandsFreeSession {
     this.paused = false;
     if (this.status === "ready") void this.enterReady();
     else {
-      this.capture?.setPaused(false);
+      this.syncCapture();
       this.options.onStatus(this.status);
     }
   }
@@ -281,7 +332,9 @@ export class HandsFreeSession {
 
   repeat(messageId: string) {
     this.capture?.setPaused(true);
-    this.socket?.send(JSON.stringify({ type: "repeat", message_id: messageId }));
+    this.socket?.send(
+      JSON.stringify({ type: "repeat", message_id: messageId }),
+    );
   }
 
   stop() {
@@ -300,7 +353,11 @@ export class HandsFreeSession {
     if (this.stopped) return;
     if (event.data instanceof Blob) {
       this.playback = this.playback
-        .then(() => this.playAudio(event.data))
+        .then(() =>
+          this.options.playAudio
+            ? this.options.playAudio(event.data)
+            : this.playAudio(event.data),
+        )
         .catch((error) => this.options.onError((error as Error).message));
       return;
     }
@@ -310,7 +367,7 @@ export class HandsFreeSession {
         this.utterancePhase = null;
         this.clearReadyTimeout();
         this.setStatus("armed");
-        if (!this.paused) this.capture?.setPaused(false);
+        if (!this.paused) this.syncCapture();
       } else if (message.state === "ready") {
         this.utterancePhase = null;
         await this.enterReady();
@@ -321,7 +378,9 @@ export class HandsFreeSession {
         );
       } else if (message.state === "processing") {
         this.capture?.setPaused(true);
-        this.setStatus(message.phase === "wake" ? "recognizing_wake" : "processing");
+        this.setStatus(
+          message.phase === "wake" ? "recognizing_wake" : "processing",
+        );
       } else if (message.state === "speaking") {
         this.capture?.setPaused(true);
         this.setStatus("speaking");
@@ -360,12 +419,13 @@ export class HandsFreeSession {
       // The state transition must work even when browser audio is blocked.
     }
     if (this.stopped || this.paused || this.status !== "ready") return;
-    this.capture?.setPaused(false);
+    this.syncCapture();
     this.armReadyTimeout();
   }
 
   private armReadyTimeout() {
     this.clearReadyTimeout();
+    if (this.stopped || this.paused || this.inputBlocked) return;
     this.readyTimeout.arm(this.options.activeTimeoutSeconds);
   }
 
@@ -381,7 +441,8 @@ export class HandsFreeSession {
       await audio.play();
       await new Promise<void>((resolve, reject) => {
         audio.onended = () => resolve();
-        audio.onerror = () => reject(new Error("Не удалось воспроизвести ответ"));
+        audio.onerror = () =>
+          reject(new Error("Не удалось воспроизвести ответ"));
       });
     } finally {
       this.activeAudio = null;

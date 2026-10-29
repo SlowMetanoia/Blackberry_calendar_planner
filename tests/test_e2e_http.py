@@ -96,6 +96,10 @@ def test_hands_free_stream_accepts_follow_up_without_second_wake_word():
             "/users/me/preferences", headers=owner, json={"voice_output_enabled": True}
         )
         preferences.raise_for_status()
+        initial = client.post("/agent/messages", headers=owner, json={"text": "создай задачу"})
+        initial.raise_for_status()
+        first = wait_message(client, owner, initial.json()["id"])
+        conversation_id = first["conversation_id"]
         ticket_response = client.post("/voice/session-tickets", headers=owner)
         ticket_response.raise_for_status()
         parts = urlsplit(BASE_URL)
@@ -107,7 +111,15 @@ def test_hands_free_stream_accepts_follow_up_without_second_wake_word():
             socket.send(json.dumps({"type": "start"}))
             assert json.loads(socket.recv())["state"] == "ready"
             for _ in range(2):
-                socket.send(json.dumps({"type": "utterance_start", "sample_rate": 16_000}))
+                socket.send(
+                    json.dumps(
+                        {
+                            "type": "utterance_start",
+                            "sample_rate": 16_000,
+                            "conversation_id": conversation_id,
+                        }
+                    )
+                )
                 assert json.loads(socket.recv()) == {
                     "type": "state",
                     "state": "capturing",
@@ -128,6 +140,7 @@ def test_hands_free_stream_accepts_follow_up_without_second_wake_word():
                 queued, terminal, audio = _receive_voice_turn(socket)
                 assert queued["input_text"] == "создай задачу Голосовая задача"
                 assert terminal["status"] == "completed", terminal
+                assert terminal["conversation_id"] == conversation_id
                 assert terminal["speech_text"].startswith("Создана задача")
                 assert audio and audio[0].startswith(b"RIFF")
                 socket.send(json.dumps({"type": "playback_complete"}))
@@ -135,7 +148,36 @@ def test_hands_free_stream_accepts_follow_up_without_second_wake_word():
             socket.send(json.dumps({"type": "stop"}))
             assert json.loads(socket.recv())["state"] == "armed"
 
-        assert client.get("/tasks", headers=owner).json()["total"] == 2
+        assert client.get("/tasks", headers=owner).json()["total"] == 3
+        history = client.get(
+            f"/agent/conversations/{conversation_id}/messages", headers=owner
+        ).json()
+        assert [item["sequence"] for item in history["items"]] == [1, 2, 3]
+        client.patch(
+            "/users/me/preferences", headers=owner, json={"voice_output_enabled": False}
+        ).raise_for_status()
+        replay = client.post(f"/agent/messages/{first['id']}/speech", headers=owner)
+        assert replay.status_code == 200, replay.text
+        assert replay.content.startswith(b"RIFF")
+        other = register(client, "replay-other@example.com")
+        assert (
+            client.post(f"/agent/messages/{first['id']}/speech", headers=other).status_code == 404
+        )
+        foreign_ticket = client.post("/voice/session-tickets", headers=other).json()["ticket"]
+        with connect(
+            f"ws://{parts.netloc}/voice/session?ticket={foreign_ticket}", open_timeout=10
+        ) as foreign:
+            assert json.loads(foreign.recv())["state"] == "armed"
+            foreign.send(
+                json.dumps(
+                    {
+                        "type": "utterance_start",
+                        "sample_rate": 16000,
+                        "conversation_id": conversation_id,
+                    }
+                )
+            )
+            assert json.loads(foreign.recv())["type"] == "error"
 
 
 def test_reminders_agent_notifier_search_and_linked_undo():
@@ -217,7 +259,8 @@ def test_text_voice_history_undo_and_owner_isolation():
             "upcoming_days": 7,
             "open_air_silence_ms": 1500,
             "open_air_active_timeout_seconds": 15,
-            "voice_output_enabled": False,
+            "voice_output_enabled": True,
+            "mascot_visible": True,
             "tts_voice": "kseniya",
             "tts_speed": 1.0,
             "open_air_default": False,
@@ -237,7 +280,8 @@ def test_text_voice_history_undo_and_owner_isolation():
             "upcoming_days": 14,
             "open_air_silence_ms": 2000,
             "open_air_active_timeout_seconds": 30,
-            "voice_output_enabled": False,
+            "voice_output_enabled": True,
+            "mascot_visible": True,
             "tts_voice": "kseniya",
             "tts_speed": 1.0,
             "open_air_default": False,

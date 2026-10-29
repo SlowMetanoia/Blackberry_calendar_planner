@@ -1,10 +1,12 @@
 import asyncio
 import hashlib
+import io
 import json
 import logging
 import secrets
 import tempfile
 import uuid
+import wave
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
@@ -31,7 +33,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.websockets import WebSocketDisconnected
 
-from .agent import TranscriptionError, transcribe
+from .agent import NoSpeechDetected, TranscriptionError, transcribe
 from .calendar import (
     CalendarCommandService,
     CalendarMutation,
@@ -1142,12 +1144,9 @@ async def _message_response(message: AgentMessage, session: AsyncSession) -> Age
         status=message.status,
         error=message.error,
         reply=payload.get("reply"),
-
         diagnostics=payload.get("diagnostics", {}),
-
         speech_text=message.speech_text,
         collision_notices=payload.get("collision_notices", []),
-
         display_items=unique_display_items,
         operations=payload.get("operations", []),
         requires_new_conversation=payload.get("requires_new_conversation", False),
@@ -1310,8 +1309,10 @@ async def _wait_for_terminal_message(message_id: uuid.UUID) -> AgentMessage:
     raise TimeoutError("voice turn timed out")
 
 
-async def _send_tts(websocket: WebSocket, user: User, message: AgentMessage) -> bool:
-    if not user.voice_output_enabled or not message.speech_text:
+async def _send_tts(
+    websocket: WebSocket, user: User, message: AgentMessage, *, force: bool = False
+) -> bool:
+    if (not force and not user.voice_output_enabled) or not message.speech_text:
         return False
     chunks = split_speech_text(message.speech_text)
     audio_sent = False
@@ -1331,9 +1332,13 @@ async def _send_tts(websocket: WebSocket, user: User, message: AgentMessage) -> 
     return audio_sent
 
 
-async def _finish_tts(websocket: WebSocket, user: User, message: AgentMessage) -> None:
+async def _finish_tts(
+    websocket: WebSocket, user: User, message: AgentMessage, *, force: bool = False
+) -> None:
     event_type = (
-        "playback_ready" if await _send_tts(websocket, user, message) else "playback_skipped"
+        "playback_ready"
+        if await _send_tts(websocket, user, message, force=force)
+        else "playback_skipped"
     )
     await websocket.send_json({"type": event_type})
 
@@ -1370,6 +1375,22 @@ async def voice_session(websocket: WebSocket, ticket: str) -> None:
                 state.activate()
                 await websocket.send_json({"type": "state", "state": "ready"})
             elif event_type == "utterance_start":
+                if "conversation_id" in event:
+                    raw_conversation = event["conversation_id"]
+                    try:
+                        selected = uuid.UUID(str(raw_conversation)) if raw_conversation else None
+                    except ValueError as exc:
+                        raise HandsFreeProtocolError("Invalid conversation ID") from exc
+                    if selected is not None:
+                        async with SessionLocal() as session:
+                            owned = await session.scalar(
+                                select(Conversation.id).where(
+                                    Conversation.id == selected, Conversation.owner_id == owner_id
+                                )
+                            )
+                        if owned is None:
+                            raise HandsFreeProtocolError("Conversation not found")
+                    conversation_id = selected
                 logger.info("Voice utterance started for owner %s", owner_id)
                 utterance_phase = "command" if state.active else "wake"
                 state.begin_utterance(sample_rate=int(event.get("sample_rate", 16_000)))
@@ -1384,7 +1405,19 @@ async def voice_session(websocket: WebSocket, ticket: str) -> None:
                 state.start_turn()
                 await websocket.send_json({"type": "state", "state": "processing", "phase": phase})
                 try:
-                    transcript = await _transcribe_pcm(state.finish_utterance())
+                    try:
+                        transcript = await _transcribe_pcm(state.finish_utterance())
+                    except NoSpeechDetected:
+                        transcript = ""
+                    except TranscriptionError as exc:
+                        logger.warning("Voice transcription failed for owner %s: %s", owner_id, exc)
+                        await websocket.send_json({"type": "error", "message": str(exc)})
+                        transcript = ""
+                    if not transcript:
+                        await websocket.send_json(
+                            {"type": "state", "state": "ready" if state.active else "armed"}
+                        )
+                        continue
                     logger.info("Voice utterance transcribed for owner %s", owner_id)
                     await websocket.send_json({"type": "transcript", "text": transcript})
                     command = state.accept_transcript(transcript)
@@ -1445,7 +1478,7 @@ async def voice_session(websocket: WebSocket, ticket: str) -> None:
                 if message is None or user is None or not message.speech_text:
                     await websocket.send_json({"type": "error", "message": "Ответ не найден"})
                 else:
-                    await _finish_tts(websocket, user, message)
+                    await _finish_tts(websocket, user, message, force=True)
             elif event_type == "stop":
                 state.active = False
                 utterance_phase = None
@@ -1455,6 +1488,46 @@ async def voice_session(websocket: WebSocket, ticket: str) -> None:
         await websocket.close(code=1009)
     except (WebSocketDisconnect, WebSocketDisconnected, json.JSONDecodeError):
         return
+
+
+@app.post("/agent/messages/{message_id}/speech")
+async def message_speech(
+    message_id: uuid.UUID,
+    user: User = Depends(current_user),
+    session: AsyncSession = Depends(get_session),
+) -> Response:
+    message = await session.scalar(
+        select(AgentMessage).where(AgentMessage.id == message_id, AgentMessage.owner_id == user.id)
+    )
+    if message is None:
+        raise HTTPException(404, "Message not found")
+    if not (message.speech_text or "").strip() or message.status not in {
+        MessageStatus.completed,
+        MessageStatus.needs_clarification,
+        MessageStatus.failed,
+    }:
+        raise HTTPException(409, "Ответ пока нельзя озвучить")
+    output = io.BytesIO()
+    try:
+        with wave.open(output, "wb") as target:
+            audio_format = None
+            for phrase in split_speech_text(message.speech_text):
+                data = await _tts_audio(phrase, voice=user.tts_voice, speed=user.tts_speed)
+                with wave.open(io.BytesIO(data), "rb") as source:
+                    current = (source.getnchannels(), source.getsampwidth(), source.getframerate())
+                    if audio_format is None:
+                        audio_format = current
+                        target.setnchannels(current[0])
+                        target.setsampwidth(current[1])
+                        target.setframerate(current[2])
+                    elif current != audio_format:
+                        raise ValueError("Inconsistent TTS audio format")
+                    target.writeframes(source.readframes(source.getnframes()))
+    except (httpx.HTTPError, RuntimeError, ValueError, wave.Error, EOFError) as exc:
+        raise HTTPException(503, "Голосовой вывод временно недоступен") from exc
+    return Response(
+        output.getvalue(), media_type="audio/wav", headers={"Cache-Control": "no-store"}
+    )
 
 
 @app.get("/agent/messages/{message_id}", response_model=AgentMessageResponse)

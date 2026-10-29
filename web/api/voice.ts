@@ -1,5 +1,5 @@
 import type { AgentMessage } from "../types";
-import { request } from "./client";
+import { request, requestResponse } from "./client";
 
 export type VoiceCapabilities = {
   stt: { configured: boolean; sample_rate: number };
@@ -35,3 +35,14 @@ export type VoiceServerEvent =
   | { type: "tts_phrase"; index: number; count: number; text: string }
   | { type: "playback_ready" | "playback_skipped" }
   | { type: "tts_unavailable" | "error"; message: string };
+
+export async function getMessageSpeech(
+  messageId: string,
+  signal?: AbortSignal,
+): Promise<Blob> {
+  const response = await requestResponse(
+    `/agent/messages/${encodeURIComponent(messageId)}/speech`,
+    { method: "POST", signal },
+  );
+  return response.blob();
+}

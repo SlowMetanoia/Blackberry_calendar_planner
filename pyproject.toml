@@ -26,6 +26,7 @@ dependencies = [
 
 [project.optional-dependencies]
 test = [
+  "num2words>=0.5.14,<0.6",
   "pytest>=8",
   "pytest-asyncio>=0.24",
   "aiosqlite>=0.20",

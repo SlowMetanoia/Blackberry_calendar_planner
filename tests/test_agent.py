@@ -18,9 +18,6 @@ from planner.config import Settings
 
 @pytest.mark.asyncio
 async def test_agent_reports_missing_llm_configuration(monkeypatch) -> None:
-
-    from planner.config import Settings
-
     monkeypatch.setattr(
         agent,
         "get_settings",
@@ -110,13 +107,16 @@ async def test_transcribe_maps_connection_failures_to_safe_message(
 
 
 @pytest.mark.asyncio
-async def test_transcribe_maps_invalid_response_to_safe_message(monkeypatch, tmp_path) -> None:
+@pytest.mark.parametrize("payload", [{"unexpected": "shape"}, {"text": None}, {"text": 42}])
+async def test_transcribe_maps_invalid_response_to_safe_message(
+    monkeypatch, tmp_path, payload
+) -> None:
     class FakeResponse:
         def raise_for_status(self) -> None:
             return None
 
         def json(self) -> dict:
-            return {"unexpected": "shape"}
+            return payload
 
     class FakeClient:
         async def __aenter__(self):
@@ -140,6 +140,32 @@ async def test_transcribe_maps_invalid_response_to_safe_message(monkeypatch, tmp
     monkeypatch.setattr(agent.httpx, "AsyncClient", lambda **_kwargs: FakeClient())
 
     with pytest.raises(TranscriptionError, match="некорректный ответ"):
+        await agent.transcribe(str(audio_path))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("text", ["", " \n\t "])
+async def test_transcribe_distinguishes_no_speech_from_invalid_response(
+    monkeypatch, tmp_path, text
+) -> None:
+    client_factory = httpx.AsyncClient
+    transport = httpx.MockTransport(lambda _request: httpx.Response(200, json={"text": text}))
+    monkeypatch.setattr(
+        agent.httpx,
+        "AsyncClient",
+        lambda **kwargs: client_factory(transport=transport, **kwargs),
+    )
+    monkeypatch.setattr(
+        agent,
+        "get_settings",
+        lambda: SimpleNamespace(
+            stt_base_url="http://stt.test/v1", stt_api_key="", stt_model="gigaam"
+        ),
+    )
+    audio_path = tmp_path / "silence.wav"
+    audio_path.write_bytes(b"audio")
+
+    with pytest.raises(agent.NoSpeechDetected, match="Речь не распознана"):
         await agent.transcribe(str(audio_path))
 
 

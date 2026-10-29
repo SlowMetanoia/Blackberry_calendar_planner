@@ -29,10 +29,10 @@ export function clearStoredToken(): void {
   sessionStorage.removeItem(TOKEN_KEY);
 }
 
-export async function request<T>(
+export async function requestResponse(
   path: string,
   options: RequestInit = {},
-): Promise<T> {
+): Promise<Response> {
   const token = getStoredToken();
   const headers = new Headers(options.headers);
   if (token && !authPaths.has(path))
@@ -55,5 +55,13 @@ export async function request<T>(
     }
     throw new Error(problem.detail || "Request failed");
   }
+  return response;
+}
+
+export async function request<T>(
+  path: string,
+  options: RequestInit = {},
+): Promise<T> {
+  const response = await requestResponse(path, options);
   return response.status === 204 ? (undefined as T) : response.json();
 }
