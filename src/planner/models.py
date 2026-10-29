@@ -58,9 +58,7 @@ class User(Base):
     upcoming_days: Mapped[int] = mapped_column(default=7, server_default="7")
     open_air_silence_ms: Mapped[int] = mapped_column(default=1500, server_default="1500")
     open_air_active_timeout_seconds: Mapped[int] = mapped_column(default=15, server_default="15")
-    voice_output_enabled: Mapped[bool] = mapped_column(
-        Boolean, default=False, server_default="false"
-    )
+    voice_output_enabled: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
     tts_voice: Mapped[str] = mapped_column(String(32), default="kseniya", server_default="kseniya")
     tts_speed: Mapped[float] = mapped_column(Float, default=1.0, server_default="1.0")
     open_air_default: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")

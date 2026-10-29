@@ -43,9 +43,7 @@ from .occurrences import OccurrenceService
 from .prompts_manager import get_prompts_manager
 from .safety import GuardDecision, classify, refusal_for
 from .search import SearchIndexUnavailable
-
 from .services import EventService, ReminderService, TaskService
-
 
 logger = logging.getLogger(__name__)
 INVALID_DECISION_RESULT = json.dumps(
@@ -109,6 +107,10 @@ class ContextWindowExceeded(RuntimeError):
 
 class TranscriptionError(RuntimeError):
     """A safe, user-facing speech recognition failure."""
+
+
+class NoSpeechDetected(TranscriptionError):
+    """STT succeeded without recognizing speech in the recording."""
 
 
 async def build_system_prompt(local_now: datetime, timezone_name: str) -> str:
@@ -770,7 +772,6 @@ async def _validate_terminal(state: AgentState) -> AgentState:
         parsed = FinishResponseArgs.model_validate(args)
         decision = await classify(parsed.reply, get_settings(), source="model_output")
         if decision.action != "allow":
-
             return {
                 "reply": refusal_for(decision),
                 "route": "finish",
@@ -782,7 +783,6 @@ async def _validate_terminal(state: AgentState) -> AgentState:
         parsed = RequestClarificationArgs.model_validate(args)
         decision = await classify(parsed.question, get_settings(), source="model_output")
         if decision.action != "allow":
-
             return {
                 "reply": refusal_for(decision),
                 "route": "clarify",
@@ -797,7 +797,6 @@ async def _validate_terminal(state: AgentState) -> AgentState:
     settings = get_settings()
     texts_to_check = [parsed.reply]
     for mutation in parsed.mutations:
-
         payload = mutation.payload
         for field_name in ("title", "description", "location"):
             value = getattr(payload, field_name, None)
@@ -1140,10 +1139,12 @@ async def transcribe(audio_path: str) -> str:
         raise TranscriptionError(
             "Сервис распознавания речи вернул некорректный ответ. Попробуйте ещё раз."
         ) from exc
-    if not isinstance(text, str) or not text.strip():
+    if not isinstance(text, str):
         raise TranscriptionError(
             "Сервис распознавания речи вернул некорректный ответ. Попробуйте ещё раз."
         )
+    if not text.strip():
+        raise NoSpeechDetected("Речь не распознана. Попробуйте записать сообщение ещё раз.")
     return text.strip()
 
 

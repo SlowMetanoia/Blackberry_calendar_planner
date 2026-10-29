@@ -3,7 +3,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from planner import main
+from planner import agent, main
 from planner.models import AgentMessage, User
 from planner.schemas import UserPreferencesUpdate
 from planner.voice import (
@@ -194,6 +194,83 @@ async def test_voice_ticket_is_owner_scoped_and_single_use(monkeypatch) -> None:
 
 async def _async_value(value):
     return value
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("active", [False, True])
+@pytest.mark.parametrize("no_speech", [False, True])
+async def test_voice_recovers_after_empty_transcript_or_stt_failure(
+    monkeypatch, active, no_speech
+) -> None:
+    failure = (
+        agent.NoSpeechDetected("Речь не распознана. Повторите сообщение.")
+        if no_speech
+        else agent.TranscriptionError("Распознавание временно недоступно. Повторите фразу.")
+    )
+    transcripts = iter(
+        [failure, "Вика", "закончи диалог"] if not active else [failure, "закончи диалог"]
+    )
+
+    async def transcribe(_path):
+        result = next(transcripts)
+        if isinstance(result, Exception):
+            raise result
+        return result
+
+    class FakeSocket:
+        def __init__(self):
+            self.events = []
+            self.incoming = []
+            if active:
+                self.incoming.append({"text": '{"type":"start"}'})
+            for _ in range(2 if active else 3):
+                self.incoming.extend(
+                    [
+                        {"text": '{"type":"utterance_start","sample_rate":16000}'},
+                        {"bytes": b"\0\0" * 1600},
+                        {"text": '{"type":"utterance_end"}'},
+                    ]
+                )
+            self.incoming.append({"type": "websocket.disconnect"})
+
+        async def accept(self):
+            pass
+
+        async def receive(self):
+            return self.incoming.pop(0)
+
+        async def send_json(self, event):
+            self.events.append(event)
+
+        async def close(self, **_kwargs):
+            raise AssertionError("STT failure must not close the voice session")
+
+    monkeypatch.setattr(main, "_consume_voice_ticket", lambda _ticket: _async_value(uuid.uuid4()))
+    monkeypatch.setattr(main, "transcribe", transcribe)
+    socket = FakeSocket()
+
+    await main.voice_session(socket, "ticket")
+
+    processing = socket.events.index(
+        {
+            "type": "state",
+            "state": "processing",
+            "phase": "command" if active else "wake",
+        }
+    )
+    recovered = socket.events[processing + 1]
+    if no_speech:
+        assert recovered == {"type": "state", "state": "ready" if active else "armed"}
+        assert not any(event["type"] == "error" for event in socket.events)
+    else:
+        assert recovered == {"type": "error", "message": str(failure)}
+        assert socket.events[processing + 2] == {
+            "type": "state",
+            "state": "ready" if active else "armed",
+        }
+    assert socket.events[-1] == {"type": "state", "state": "armed"}
+    assert {"type": "transcript", "text": "закончи диалог"} in socket.events
+    assert not any(event["type"] == "message" for event in socket.events)
 
 
 @pytest.mark.asyncio

@@ -56,6 +56,85 @@ describe("message queue", () => {
     vi.mocked(api.getCalendarHistory).mockResolvedValue(emptyPage);
   });
 
+  it("never mixes another conversation into the selected timeline", async () => {
+    const store = createSessionStore();
+    store
+      .getState()
+      .receiveMessage(agentMessage("m1", 1, "первое", "completed"));
+    store
+      .getState()
+      .receiveMessage(agentMessage("m2", 2, "второе", "completed"));
+    store
+      .getState()
+      .receiveMessage(agentMessage("m3", 1, "третье", "completed", "other"));
+    expect(store.getState().messages.map((m) => m.input_text)).toEqual([
+      "первое",
+      "второе",
+    ]);
+    expect(store.getState().conversation).toBe("c1");
+  });
+
+  it("reserves audio order before recording and ignores stale voice events", async () => {
+    const store = createSessionStore();
+    const reservation = store.getState().reserveAudio();
+    await store.getState().sendText("второе");
+    expect(api.sendMessage).not.toHaveBeenCalled();
+    vi.mocked(api.sendAudioMessage).mockResolvedValue(
+      agentMessage("m1", 1, "голос", "queued"),
+    );
+    vi.mocked(api.sendMessage).mockResolvedValue(
+      agentMessage("m2", 2, "второе", "queued"),
+    );
+    vi.mocked(api.getMessage).mockImplementation(async (id) =>
+      agentMessage(
+        id,
+        id === "m1" ? 1 : 2,
+        id === "m1" ? "голос" : "второе",
+        "completed",
+      ),
+    );
+    store.getState().finishAudio(reservation, new Blob(["audio"]));
+    await vi.waitFor(() => expect(store.getState().messages).toHaveLength(2));
+    expect(store.getState().messages.map((m) => m.input_text)).toEqual([
+      "голос",
+      "второе",
+    ]);
+    const version = store.getState().selectionVersion;
+    store.getState().startNewConversation();
+    store
+      .getState()
+      .receiveMessage(agentMessage("late", 3, "позднее", "completed"), version);
+    expect(store.getState().messages).toEqual([]);
+  });
+
+  it("holds text until a hands-free turn has finished playback", async () => {
+    const store = createSessionStore();
+    expect(store.getState().beginVoiceTurn()).toBe(true);
+    await store.getState().sendText("второе");
+    store
+      .getState()
+      .receiveMessage(agentMessage("m1", 1, "голос", "completed"));
+    expect(api.sendMessage).not.toHaveBeenCalled();
+    vi.mocked(api.sendMessage).mockResolvedValue(
+      agentMessage("m2", 2, "второе", "completed"),
+    );
+    vi.mocked(api.getMessage).mockResolvedValue(
+      agentMessage("m2", 2, "второе", "completed"),
+    );
+    store.getState().endVoiceTurn();
+    await vi.waitFor(() =>
+      expect(api.sendMessage).toHaveBeenCalledWith("второе", "c1"),
+    );
+  });
+
+  it("does not regress completed messages when polling delivers an older state", () => {
+    const store = createSessionStore();
+    store.getState().receiveMessage(agentMessage("m1", 1, "first", "completed"));
+    store.getState().receiveMessage(agentMessage("m2", 2, "second", "completed"));
+    store.getState().receiveMessage(agentMessage("m1", 1, "first", "queued"));
+    expect(store.getState().messages.map(m => [m.id, m.status])).toEqual([["m1", "completed"], ["m2", "completed"]]);
+  });
+
   it("shows a message immediately and sends the next one only after the agent answers", async () => {
     const store = createSessionStore();
     const firstStatus = deferred<AgentMessage>();
@@ -81,9 +160,7 @@ describe("message queue", () => {
     );
     expect(api.sendMessage).toHaveBeenCalledTimes(1);
     expect(api.sendMessage).toHaveBeenLastCalledWith("первое", null);
-    expect(store.getState().queue.map((item) => item.text)).toEqual([
-      "второе",
-    ]);
+    expect(store.getState().queue.map((item) => item.text)).toEqual(["второе"]);
 
     firstStatus.resolve(agentMessage("m1", 1, "первое", "completed"));
 
@@ -117,9 +194,10 @@ describe("message queue", () => {
     upload.resolve(agentMessage("m1", 1, null, "queued"));
 
     await vi.waitFor(() =>
-      expect(store.getState().messages.map((item) => item.input_text)).toEqual(
-        ["голос", "текст"],
-      ),
+      expect(store.getState().messages.map((item) => item.input_text)).toEqual([
+        "голос",
+        "текст",
+      ]),
     );
     expect(api.sendMessage).toHaveBeenCalledWith("текст", "c1");
   });

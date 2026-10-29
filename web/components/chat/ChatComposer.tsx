@@ -4,12 +4,7 @@ import {
   useRef,
   type PointerEvent as ReactPointerEvent,
 } from "react";
-import {
-  ArrowUpIcon,
-  AudioLinesIcon,
-  MicIcon,
-  SquareIcon,
-} from "lucide-react";
+import { ArrowUpIcon, AudioLinesIcon, MicIcon, SquareIcon } from "lucide-react";
 import type { OpenAirStatus } from "../../types";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
@@ -37,7 +32,6 @@ export function ChatComposer({
   openAirSilenceMs,
   onSendText,
   onToggleOpenAir,
-  onStopConversation,
   onChangeOpenAirSilence,
   onStartRecording,
   onStopRecording,
@@ -50,7 +44,6 @@ export function ChatComposer({
   openAirSilenceMs: number;
   onSendText: (text: string) => Promise<void> | void;
   onToggleOpenAir: () => Promise<void> | void;
-  onStopConversation: () => void;
   onChangeOpenAirSilence: (value: number) => Promise<void> | void;
   onStartRecording: (event: ReactPointerEvent<HTMLButtonElement>) => void;
   onStopRecording: () => void;
@@ -58,7 +51,9 @@ export function ChatComposer({
   onTextIdle: () => void;
 }) {
   const [text, setText] = useState("");
-  const textIdleTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const textIdleTimer = useRef<ReturnType<typeof setTimeout> | undefined>(
+    undefined,
+  );
 
   function notifyTextActivity(value: string) {
     if (textIdleTimer.current) clearTimeout(textIdleTimer.current);
@@ -109,18 +104,6 @@ export function ChatComposer({
         >
           <ArrowUpIcon aria-hidden="true" />
         </Button>
-        {openAirEnabled && openAirStatus !== "armed" && (
-          <Button
-            type="button"
-            variant="outline"
-            size="icon-lg"
-            className="size-11 shrink-0 sm:size-9"
-            aria-label="Завершить hands-free диалог"
-            onClick={onStopConversation}
-          >
-            <SquareIcon aria-hidden="true" />
-          </Button>
-        )}
         <VoiceSettingsDialog />
         <Button
           type="button"

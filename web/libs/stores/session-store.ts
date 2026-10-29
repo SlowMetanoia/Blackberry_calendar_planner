@@ -32,7 +32,12 @@ const terminal = new Set(["needs_clarification", "completed", "failed"]);
 const pollDelay = (ms: number) =>
   new Promise((resolve) => setTimeout(resolve, ms));
 
-export type QueuedMessageStatus = "waiting" | "sending" | "editing" | "failed";
+export type QueuedMessageStatus =
+  | "waiting"
+  | "sending"
+  | "editing"
+  | "failed"
+  | "capturing";
 
 export type QueuedMessage = {
   localId: string;
@@ -50,6 +55,13 @@ export type TaskNotice = {
 };
 
 export type SessionState = {
+  selectionVersion: number;
+  voiceTurnActive: boolean;
+  beginVoiceTurn: () => boolean;
+  endVoiceTurn: () => void;
+  reserveAudio: () => string;
+  finishAudio: (id: string, blob: Blob) => void;
+  cancelAudio: (id: string) => void;
   token: string | null;
   messages: AgentMessage[];
   queue: QueuedMessage[];
@@ -74,7 +86,7 @@ export type SessionState = {
   bootstrap: () => Promise<void>;
   handleCalendarChanged: () => Promise<void>;
   acceptMessage: (message: AgentMessage) => Promise<void>;
-  receiveMessage: (message: AgentMessage) => void;
+  receiveMessage: (message: AgentMessage, version?: number) => void;
   sendText: (text: string) => Promise<void>;
   sendAudio: (blob: Blob) => Promise<void>;
   removeQueued: (localId: string) => void;
@@ -101,13 +113,30 @@ export function createSessionStore(): SessionStore {
   let postingVersion: number | null = null;
 
   return createStore<SessionState>()((set, get) => {
-    const mergeMessage = (message: AgentMessage) =>
-      set((state) => ({
+    const mergeMessage = (message: AgentMessage) => {
+      const state = get();
+      if (state.conversation && state.conversation !== message.conversation_id)
+        return false;
+      const previous = state.messages.find((item) => item.id === message.id);
+      if (
+        previous &&
+        terminal.has(previous.status) &&
+        !terminal.has(message.status)
+      )
+        return false;
+      set({
+        conversation: message.conversation_id,
         messages: [
-          ...state.messages.filter((item) => item.id !== message.id),
+          ...state.messages.filter(
+            (item) =>
+              item.id !== message.id &&
+              item.conversation_id === message.conversation_id,
+          ),
           message,
         ].sort((left, right) => left.sequence - right.sequence),
-      }));
+      });
+      return true;
+    };
 
     const refreshSessions = async () => {
       set({
@@ -142,7 +171,7 @@ export function createSessionStore(): SessionStore {
       const version = selectionVersion;
       const next = get().queue[0];
       if (postingVersion === version || next?.status !== "waiting") return;
-      if (agentBusy()) return;
+      if (agentBusy() || get().voiceTurnActive) return;
       postingVersion = version;
       updateQueued(next.localId, { status: "sending" });
       void (async () => {
@@ -215,8 +244,7 @@ export function createSessionStore(): SessionStore {
       version: number,
     ) => {
       if (version !== selectionVersion) return;
-      mergeMessage(message);
-      set({ conversation: message.conversation_id });
+      if (!mergeMessage(message)) return;
       void refreshSessions().catch((error) =>
         set({ error: (error as Error).message }),
       );
@@ -231,6 +259,8 @@ export function createSessionStore(): SessionStore {
       clearStoredToken();
       selectionVersion++;
       set({
+        selectionVersion,
+        voiceTurnActive: false,
         token: null,
         messages: [],
         queue: [],
@@ -244,6 +274,56 @@ export function createSessionStore(): SessionStore {
     };
 
     return {
+      selectionVersion: 0,
+      voiceTurnActive: false,
+      beginVoiceTurn: () => {
+        if (
+          get().voiceTurnActive ||
+          agentBusy() ||
+          get().queue.length ||
+          postingVersion === selectionVersion
+        )
+          return false;
+        set({ voiceTurnActive: true });
+        return true;
+      },
+      endVoiceTurn: () => {
+        set({ voiceTurnActive: false });
+        dispatchQueue();
+      },
+      reserveAudio: () => {
+        const localId = `local-${++queueCounter}`;
+        set((state) => ({
+          queue: [
+            ...state.queue,
+            {
+              localId,
+              kind: "audio",
+              text: "",
+              createdAt: new Date().toISOString(),
+              status: "capturing",
+            },
+          ],
+        }));
+        return localId;
+      },
+      finishAudio: (id, blob) => {
+        if (!blob.size) return get().cancelAudio(id);
+        if (
+          !get().queue.some(
+            (item) => item.localId === id && item.status === "capturing",
+          )
+        )
+          return;
+        updateQueued(id, { audio: blob, status: "waiting" });
+        dispatchQueue();
+      },
+      cancelAudio: (id) => {
+        set((state) => ({
+          queue: state.queue.filter((item) => item.localId !== id),
+        }));
+        dispatchQueue();
+      },
       token: getStoredToken(),
       messages: [],
       queue: [],
@@ -296,14 +376,12 @@ export function createSessionStore(): SessionStore {
         try {
           await Promise.all([refreshSessions(), refreshHistory()]);
         } catch (error) {
-          if (get().token === token)
-            set({ error: (error as Error).message });
+          if (get().token === token) set({ error: (error as Error).message });
         }
         try {
           await syncTimeZone(browserTimeZone());
         } catch (error) {
-          if (get().token === token)
-            set({ error: (error as Error).message });
+          if (get().token === token) set({ error: (error as Error).message });
         }
       },
 
@@ -313,9 +391,8 @@ export function createSessionStore(): SessionStore {
       },
 
       acceptMessage,
-      receiveMessage: (message) => {
-        mergeMessage(message);
-        set({ conversation: message.conversation_id });
+      receiveMessage: (message, version = selectionVersion) => {
+        if (version !== selectionVersion || !mergeMessage(message)) return;
         if (terminal.has(message.status)) {
           dispatchQueue();
           void refreshHistory().catch((error) =>
@@ -380,13 +457,24 @@ export function createSessionStore(): SessionStore {
 
       openConversation: async (id) => {
         const version = ++selectionVersion;
-        set({ conversation: id, messages: [], queue: [], error: "" });
+        set({
+          selectionVersion: version,
+          voiceTurnActive: false,
+          conversation: id,
+          messages: [],
+          queue: [],
+          error: "",
+        });
         try {
           const all = await collectPages((offset) =>
             getConversationHistory(id, 100, offset),
           );
           if (version !== selectionVersion) return;
-          set({ messages: all });
+          set({
+            messages: all
+              .filter((m) => m.conversation_id === id)
+              .sort((a, b) => a.sequence - b.sequence),
+          });
           all
             .filter((message) => !terminal.has(message.status))
             .forEach((message) => void pollMessage(message.id, version));
@@ -399,7 +487,14 @@ export function createSessionStore(): SessionStore {
 
       startNewConversation: () => {
         selectionVersion++;
-        set({ conversation: null, messages: [], queue: [], error: "" });
+        set({
+          selectionVersion,
+          voiceTurnActive: false,
+          conversation: null,
+          messages: [],
+          queue: [],
+          error: "",
+        });
       },
 
       undo: async (id) => {

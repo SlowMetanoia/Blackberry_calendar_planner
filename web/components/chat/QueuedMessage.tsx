@@ -16,6 +16,7 @@ import { Card, CardContent } from "../ui/card";
 import { Textarea } from "../ui/textarea";
 
 const statusLabels: Record<QueuedMessageItem["status"], string> = {
+  capturing: "Записываю…",
   waiting: "В очереди",
   sending: "Отправляю…",
   editing: "Редактирование",
@@ -24,7 +25,9 @@ const statusLabels: Record<QueuedMessageItem["status"], string> = {
 
 function StatusIcon({ status }: { status: QueuedMessageItem["status"] }) {
   if (status === "sending")
-    return <LoaderCircleIcon aria-hidden="true" className="size-3 animate-spin" />;
+    return (
+      <LoaderCircleIcon aria-hidden="true" className="size-3 animate-spin" />
+    );
   if (status === "failed")
     return <TriangleAlertIcon aria-hidden="true" className="size-3" />;
   return <ClockIcon aria-hidden="true" className="size-3" />;
